@@ -1,0 +1,493 @@
+using System.Buffers.Binary;
+using System.Numerics;
+
+namespace Lokad.Sift.LowLevel;
+
+public static class PostingsCodec
+{
+    public const int CheckpointInterval = 256;
+    public const int CheckpointThreshold = 4096;
+
+    private const byte PlainEncoding = 0;
+    private const byte CheckpointedEncoding = 1;
+    private const int TinyIntersectionThreshold = 256;
+    private const int SimdBlockIntersectionThreshold = 2048;
+    private const int ScalarBlockSize = 4;
+
+    public static byte[] Encode(ReadOnlySpan<uint> ordinals)
+    {
+        if (ordinals.Length == 0)
+        {
+            return [PlainEncoding];
+        }
+
+        return ordinals.Length >= CheckpointThreshold
+            ? EncodeCheckpointed(ordinals)
+            : EncodePlain(ordinals);
+    }
+
+    public static PostingsView Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length == 0)
+        {
+            return new PostingsView(IsCheckpointed: false, [], []);
+        }
+
+        return payload[0] switch
+        {
+            PlainEncoding => new PostingsView(IsCheckpointed: false, payload[1..], []),
+            CheckpointedEncoding => ParseCheckpointed(payload),
+            _ => throw new InvalidDataException($"Unsupported postings encoding '{payload[0]}'.")
+        };
+    }
+
+    public static uint[] Decode(ReadOnlySpan<byte> payload)
+    {
+        var view = Parse(payload);
+        var values = new List<uint>(16);
+        uint current = 0;
+        var offset = 0;
+        while (offset < view.Data.Length)
+        {
+            current += VarInt.ReadUInt32(view.Data, ref offset);
+            values.Add(current);
+        }
+
+        return values.ToArray();
+    }
+
+    internal static void DecodeIntoBitSet(ReadOnlySpan<byte> payload, PooledBitSet bitSet)
+    {
+        var view = Parse(payload);
+        uint current = 0;
+        var offset = 0;
+        while (offset < view.Data.Length)
+        {
+            current += VarInt.ReadUInt32(view.Data, ref offset);
+            bitSet.Set((int)current);
+        }
+    }
+
+    public static uint[] IntersectSorted(ReadOnlySpan<uint> left, ReadOnlySpan<byte> payload, int docFreq)
+    {
+        if (left.Length == 0 || payload.Length == 0 || docFreq == 0)
+        {
+            return [];
+        }
+
+        var view = Parse(payload);
+        var smaller = Math.Min(left.Length, docFreq);
+        if (smaller >= SimdBlockIntersectionThreshold)
+        {
+            return IntersectSortedAdaptive(left, view, docFreq, useSimd: true);
+        }
+
+        return view.IsCheckpointed
+            ? IntersectSortedWithCheckpointed(left, view)
+            : IntersectSortedSequential(left, view.Data, docFreq);
+    }
+
+    private static byte[] EncodePlain(ReadOnlySpan<uint> ordinals)
+    {
+        var totalBytes = 1;
+        uint previous = 0;
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            totalBytes += VarInt.GetUInt32Length(ordinals[i] - previous);
+            previous = ordinals[i];
+        }
+
+        var payload = GC.AllocateUninitializedArray<byte>(totalBytes);
+        payload[0] = PlainEncoding;
+        var cursor = 1;
+        previous = 0;
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            cursor += VarInt.WriteUInt32(payload.AsSpan(cursor), ordinals[i] - previous);
+            previous = ordinals[i];
+        }
+
+        return payload;
+    }
+
+    private static byte[] EncodeCheckpointed(ReadOnlySpan<uint> ordinals)
+    {
+        var checkpointCount = (ordinals.Length + CheckpointInterval - 1) / CheckpointInterval;
+        var checkpointHeaderBytes = 1 + 4 + checkpointCount * 8;
+        var totalBytes = checkpointHeaderBytes;
+        uint previous = 0;
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            totalBytes += VarInt.GetUInt32Length(ordinals[i] - previous);
+            previous = ordinals[i];
+        }
+
+        var payload = GC.AllocateUninitializedArray<byte>(totalBytes);
+        payload[0] = CheckpointedEncoding;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(1, 4), checkpointCount);
+
+        var checkpointCursor = 5;
+        var dataCursor = checkpointHeaderBytes;
+        previous = 0;
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            var ordinal = ordinals[i];
+            dataCursor += VarInt.WriteUInt32(payload.AsSpan(dataCursor), ordinal - previous);
+            if (i % CheckpointInterval == 0)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(checkpointCursor, 4), ordinal);
+                BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(checkpointCursor + 4, 4), dataCursor - checkpointHeaderBytes);
+                checkpointCursor += 8;
+            }
+
+            previous = ordinal;
+        }
+
+        return payload;
+    }
+
+    private static PostingsView ParseCheckpointed(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 5)
+        {
+            throw new InvalidDataException("Invalid checkpointed postings header.");
+        }
+
+        var checkpointCount = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(1, 4));
+        if (checkpointCount <= 0)
+        {
+            throw new InvalidDataException("Invalid checkpoint count.");
+        }
+
+        var checkpointBytes = checkpointCount * 8;
+        var dataOffset = 5 + checkpointBytes;
+        if (dataOffset > payload.Length)
+        {
+            throw new InvalidDataException("Checkpoint table exceeds postings payload.");
+        }
+
+        return new PostingsView(IsCheckpointed: true, payload[dataOffset..], payload.Slice(5, checkpointBytes));
+    }
+
+    private static uint[] IntersectSortedSequential(ReadOnlySpan<uint> left, ReadOnlySpan<byte> data, int docFreq)
+    {
+        var result = new uint[Math.Min(left.Length, docFreq)];
+        var count = 0;
+        var leftIndex = 0;
+        uint current = 0;
+        var offset = 0;
+
+        while (leftIndex < left.Length && offset < data.Length)
+        {
+            current += VarInt.ReadUInt32(data, ref offset);
+            while (leftIndex < left.Length && left[leftIndex] < current)
+            {
+                leftIndex++;
+            }
+
+            if (leftIndex >= left.Length)
+            {
+                break;
+            }
+
+            if (left[leftIndex] == current)
+            {
+                result[count++] = current;
+                leftIndex++;
+            }
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static uint[] IntersectSortedAdaptive(ReadOnlySpan<uint> left, PostingsView view, int docFreq, bool useSimd)
+    {
+        if (TryGetApproximateRange(view, out var rightFirst, out var rightLast) &&
+            (left[0] > rightLast || left[^1] < rightFirst))
+        {
+            return [];
+        }
+
+        var right = DecodeOrdinals(view, docFreq);
+        if (right.Length == 0)
+        {
+            return [];
+        }
+
+        if (left[0] > right[^1] || right[0] > left[^1])
+        {
+            return [];
+        }
+
+        var smaller = Math.Min(left.Length, right.Length);
+        if (smaller <= TinyIntersectionThreshold)
+        {
+            return IntersectSortedScalar(left, right);
+        }
+
+        return useSimd
+            ? IntersectSortedBlockMergeSimd(left, right)
+            : IntersectSortedBlockMerge(left, right);
+    }
+
+    private static uint[] IntersectSortedWithCheckpointed(ReadOnlySpan<uint> left, PostingsView view)
+    {
+        var result = new uint[left.Length];
+        var count = 0;
+        var leftIndex = 0;
+        var dataOffset = 0;
+        uint current = 0;
+        var checkpointIndex = -1;
+        var initialized = false;
+
+        while (leftIndex < left.Length)
+        {
+            var target = left[leftIndex];
+            if (!initialized || current < target)
+            {
+                var candidateCheckpoint = FindCheckpoint(view.Checkpoints, target);
+                if (candidateCheckpoint > checkpointIndex)
+                {
+                    checkpointIndex = candidateCheckpoint;
+                    current = BinaryPrimitives.ReadUInt32LittleEndian(view.Checkpoints.Slice(checkpointIndex * 8, 4));
+                    dataOffset = BinaryPrimitives.ReadInt32LittleEndian(view.Checkpoints.Slice(checkpointIndex * 8 + 4, 4));
+                    initialized = true;
+                }
+
+                while (initialized && current < target && dataOffset < view.Data.Length)
+                {
+                    current += VarInt.ReadUInt32(view.Data, ref dataOffset);
+                }
+            }
+
+            if (!initialized || current < target)
+            {
+                break;
+            }
+
+            if (current == target)
+            {
+                result[count++] = current;
+            }
+
+            leftIndex++;
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static uint[] DecodeOrdinals(PostingsView view, int docFreq)
+    {
+        var values = GC.AllocateUninitializedArray<uint>(docFreq);
+        var count = 0;
+        uint current = 0;
+        var offset = 0;
+        while (offset < view.Data.Length && count < values.Length)
+        {
+            current += VarInt.ReadUInt32(view.Data, ref offset);
+            values[count++] = current;
+        }
+
+        if (count != values.Length)
+        {
+            Array.Resize(ref values, count);
+        }
+
+        return values;
+    }
+
+    private static bool TryGetApproximateRange(PostingsView view, out uint first, out uint last)
+    {
+        if (!view.IsCheckpointed || view.Checkpoints.Length < 8)
+        {
+            first = 0;
+            last = 0;
+            return false;
+        }
+
+        first = BinaryPrimitives.ReadUInt32LittleEndian(view.Checkpoints);
+        var lastCheckpointOffset = view.Checkpoints.Length - 8;
+        last = BinaryPrimitives.ReadUInt32LittleEndian(view.Checkpoints.Slice(lastCheckpointOffset, 4));
+        var dataOffset = BinaryPrimitives.ReadInt32LittleEndian(view.Checkpoints.Slice(lastCheckpointOffset + 4, 4));
+        while (dataOffset < view.Data.Length)
+        {
+            last += VarInt.ReadUInt32(view.Data, ref dataOffset);
+        }
+
+        return true;
+    }
+
+    private static uint[] IntersectSortedScalar(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    {
+        var result = new uint[Math.Min(left.Length, right.Length)];
+        var count = 0;
+        var i = 0;
+        var j = 0;
+        while (i < left.Length && j < right.Length)
+        {
+            var leftValue = left[i];
+            var rightValue = right[j];
+            if (leftValue == rightValue)
+            {
+                result[count++] = leftValue;
+                i++;
+                j++;
+            }
+            else if (leftValue < rightValue)
+            {
+                i++;
+            }
+            else
+            {
+                j++;
+            }
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static uint[] IntersectSortedBlockMerge(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    {
+        var result = new uint[Math.Min(left.Length, right.Length)];
+        var count = 0;
+        var ai = 0;
+        var bi = 0;
+        while (ai < left.Length && bi < right.Length)
+        {
+            var aCount = Math.Min(ScalarBlockSize, left.Length - ai);
+            var bCount = Math.Min(ScalarBlockSize, right.Length - bi);
+
+            for (var i = 0; i < aCount; i++)
+            {
+                var value = left[ai + i];
+                for (var j = 0; j < bCount; j++)
+                {
+                    if (value == right[bi + j])
+                    {
+                        result[count++] = value;
+                        break;
+                    }
+                }
+            }
+
+            var aLast = left[ai + aCount - 1];
+            var bLast = right[bi + bCount - 1];
+            if (aLast <= bLast)
+            {
+                ai += aCount;
+            }
+
+            if (bLast <= aLast)
+            {
+                bi += bCount;
+            }
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static uint[] IntersectSortedBlockMergeSimd(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    {
+        if (!Vector.IsHardwareAccelerated || Vector<uint>.Count < 4)
+        {
+            return IntersectSortedBlockMerge(left, right);
+        }
+
+        var blockSize = Vector<uint>.Count;
+        var result = new uint[Math.Min(left.Length, right.Length)];
+        var count = 0;
+        var ai = 0;
+        var bi = 0;
+        var zero = Vector<uint>.Zero;
+        while (ai < left.Length && bi < right.Length)
+        {
+            var aCount = Math.Min(blockSize, left.Length - ai);
+            var bCount = Math.Min(blockSize, right.Length - bi);
+
+            if (aCount == blockSize && bCount == blockSize)
+            {
+                var blockB = new Vector<uint>(right.Slice(bi, blockSize));
+                for (var i = 0; i < blockSize; i++)
+                {
+                    var value = left[ai + i];
+                    var eq = Vector.Equals(new Vector<uint>(value), blockB);
+                    if (!Vector.EqualsAll(eq, zero))
+                    {
+                        result[count++] = value;
+                    }
+                }
+            }
+            else
+            {
+                for (var i = 0; i < aCount; i++)
+                {
+                    var value = left[ai + i];
+                    for (var j = 0; j < bCount; j++)
+                    {
+                        if (value == right[bi + j])
+                        {
+                            result[count++] = value;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            var aLast = left[ai + aCount - 1];
+            var bLast = right[bi + bCount - 1];
+            if (aLast <= bLast)
+            {
+                ai += aCount;
+            }
+
+            if (bLast <= aLast)
+            {
+                bi += bCount;
+            }
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static int FindCheckpoint(ReadOnlySpan<byte> checkpoints, uint target)
+    {
+        var low = 0;
+        var high = checkpoints.Length / 8 - 1;
+        var best = 0;
+        while (low <= high)
+        {
+            var mid = low + ((high - low) >> 1);
+            var value = BinaryPrimitives.ReadUInt32LittleEndian(checkpoints.Slice(mid * 8, 4));
+            if (value <= target)
+            {
+                best = mid;
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return best;
+    }
+}
+
+public readonly ref struct PostingsView
+{
+    public PostingsView(bool IsCheckpointed, ReadOnlySpan<byte> Data, ReadOnlySpan<byte> Checkpoints)
+    {
+        this.IsCheckpointed = IsCheckpointed;
+        this.Data = Data;
+        this.Checkpoints = Checkpoints;
+    }
+
+    public bool IsCheckpointed { get; }
+    public ReadOnlySpan<byte> Data { get; }
+    public ReadOnlySpan<byte> Checkpoints { get; }
+}

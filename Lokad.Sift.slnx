@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lokad.Sift/Lokad.Sift.csproj" />
+    <Project Path="src/Lokad.Sift.Cli/Lokad.Sift.Cli.csproj" />
+    <Project Path="src/Lokad.Sift.Benchmarks/Lokad.Sift.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lokad.Sift.Tests/Lokad.Sift.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,450 @@
+using Lokad.Sift;
+using Lokad.Sift.Storage;
+
+namespace Lokad.Sift.Tests;
+
+public sealed class MutationIntegrationTests
+{
+    [Fact]
+    public async Task UpdateAppliesUpsertsAndDeletions()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        var updateSource = new InMemoryDocumentSource([
+            ("src/a.txt", "omega\n"),
+            ("src/c.txt", "beta\n")
+        ]);
+
+        var stats = await index.Update(updateSource, [new DocumentKey("src/b.txt")]);
+        Assert.Equal(2, stats.SubmittedUpserts);
+        Assert.Equal(2, stats.UpsertedDocuments);
+        Assert.Equal(1, stats.DeletedDocuments);
+        Assert.Equal("omega\nbeta\n".Length, stats.ContentBytes);
+        Assert.Equal(stats.SubmittedBytes, stats.ContentBytes);
+
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), collector);
+        var paths = collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).ToArray();
+        Assert.Equal(["src/c.txt"], paths);
+    }
+
+    [Fact]
+    public async Task InMemoryModeSupportsBuildSearchUpdateAndDelete()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        var build = await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n")
+        ]));
+
+        Assert.Equal(2, build.IndexedDocuments);
+
+        using (var snapshot = index.OpenSnapshot())
+        {
+            var collector = new HitBuffer();
+            snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), collector);
+            Assert.Single(collector.Hits);
+        }
+
+        var update = await index.Update(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "omega\n"),
+                ("src/c.txt", "beta\n")
+            ]),
+            [new DocumentKey("src/b.txt")]);
+
+        Assert.Equal(2, update.UpsertedDocuments);
+        Assert.Equal(1, update.DeletedDocuments);
+
+        using var updatedSnapshot = index.OpenSnapshot();
+        var omegaCollector = new HitBuffer();
+        updatedSnapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), omegaCollector);
+        Assert.Single(omegaCollector.Hits);
+
+        var betaCollector = new HitBuffer();
+        updatedSnapshot.Search(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), betaCollector);
+        var paths = betaCollector.Hits.Select(hit => updatedSnapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path).ToArray();
+        Assert.Equal(new[] { "src/c.txt" }, paths);
+    }
+
+    [Fact]
+    public async Task OverlaySnapshotShadowsBaseWithoutMutatingIt()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var overlay = index.OpenOverlaySnapshot();
+        var apply = await overlay.Apply(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "omega\n"),
+                ("src/c.txt", "gamma\n")
+            ]),
+            [new DocumentKey("src/b.txt")]);
+
+        Assert.Equal(2, apply.UpsertedDocuments);
+        Assert.Equal(1, apply.DeletedDocuments);
+
+        var overlayCollector = new HitBuffer();
+        var overlayStats = overlay.Search(new SearchQuery("omega|gamma|beta", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), overlayCollector);
+        Assert.Equal(2, overlayStats.HitsReturned);
+        var overlayPaths = overlayCollector.Hits.Select(hit => overlay.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+        Assert.Equal(["src/a.txt", "src/c.txt"], overlayPaths);
+
+        using var baseSnapshot = index.OpenSnapshot();
+        var baseCollector = new HitBuffer();
+        var baseStats = baseSnapshot.Search(new SearchQuery("alpha|beta", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), baseCollector);
+        Assert.Equal(2, baseStats.HitsReturned);
+        var basePaths = baseCollector.Hits.Select(hit => baseSnapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+        Assert.Equal(["src/a.txt", "src/b.txt"], basePaths);
+    }
+
+    [Fact]
+    public async Task OverlaySnapshotMaterializesOverlayHitsAndCanFoldBack()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/lib/math.cs", "static class MathEx { int Add(int a, int b) => a + b; }\n"),
+            ("src/app/program.cs", "Console.WriteLine(\"hello\");\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Apply(
+            new InMemoryDocumentSource([
+                ("src/lib/math.cs", "static class MathEx { int Add(int a, int b) => checked(a + b); int Mul(int a, int b) => a * b; }\n")
+            ]),
+            []);
+
+        var overlayCollector = new HitBuffer();
+        overlay.Search(new SearchQuery("Mul", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), overlayCollector);
+        var overlayHit = overlay.Materialize(overlayCollector.Hits[0], 0, 0);
+        Assert.Equal("src/lib/math.cs", overlayHit.Path);
+        Assert.Contains("Mul", overlayHit.MatchText, StringComparison.Ordinal);
+
+        var foldBack = await overlay.ApplyTo(index);
+        Assert.Equal(1, foldBack.UpsertedDocuments);
+
+        using var snapshot = index.OpenSnapshot();
+        var foldedCollector = new HitBuffer();
+        var foldedStats = snapshot.Search(new SearchQuery("Mul", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), foldedCollector);
+        Assert.Equal(1, foldedStats.HitsReturned);
+        Assert.Equal("src/lib/math.cs", snapshot.Materialize(foldedCollector.Hits[0], 0, 0).Path);
+    }
+
+    [Fact]
+    public async Task UpdateRejectsConflictingBatch()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await index.Update(
+            new InMemoryDocumentSource([("src/a.txt", "beta\n")]),
+            [new DocumentKey("src/a.txt")]));
+    }
+
+    [Fact]
+    public async Task UpdateRejectsDuplicateUpsertPathsAfterCanonicalization()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await index.Update(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "beta\n"),
+                ("src\\a.txt", "gamma\n")
+            ]),
+            []));
+    }
+
+    [Fact]
+    public async Task UpdateRejectsDuplicateDeletionPathsAfterCanonicalization()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await index.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/a.txt"), new DocumentKey("src\\a.txt")]));
+    }
+
+    [Fact]
+    public async Task CompactDropsDeadDocuments()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), [new DocumentKey("src/b.txt")]);
+
+        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        Assert.True(compact.OutputSegments >= 1);
+        Assert.Equal("omega\n".Length, compact.ContentBytes);
+
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), collector);
+        Assert.Single(collector.Hits);
+
+        var missing = new HitBuffer();
+        snapshot.Search(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), missing);
+        Assert.Empty(missing.Hits);
+    }
+
+    [Fact]
+    public async Task MaintenanceStatsExposeDeadDocumentsAndFragmentationSignals()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1000
+        });
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), [new DocumentKey("src/b.txt")]);
+
+        var stats = index.GetMaintenanceStats();
+
+        Assert.Equal(2, stats.SegmentCount);
+        Assert.Equal(3, stats.TotalDocuments);
+        Assert.Equal(2, stats.DeadDocuments);
+        Assert.Equal(1, stats.LiveDocuments);
+        Assert.Equal(2, stats.DeadOrdinalEntries);
+        Assert.Equal(1, stats.SegmentsWithDeletions);
+        Assert.Equal(1, stats.SmallSegmentCount);
+        Assert.True(stats.DeadDocumentFraction > 0d);
+        Assert.True(stats.EstimatedReclaimableContentBytes > 0);
+        Assert.Equal(stats.ContentBytes - stats.EstimatedReclaimableContentBytes, stats.EstimatedLiveContentBytes);
+    }
+
+    [Fact]
+    public async Task SnapshotOpenedBeforeUpdateRemainsUsableAfterPublication()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var oldSnapshot = index.OpenSnapshot();
+        var oldCollectorBefore = new HitBuffer();
+        oldSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), oldCollectorBefore);
+        Assert.Single(oldCollectorBefore.Hits);
+
+        await index.Update(new InMemoryDocumentSource([
+            ("src/a.txt", "omega\n"),
+            ("src/c.txt", "alpha\n")
+        ]), []);
+
+        var oldCollectorAfter = new HitBuffer();
+        oldSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), oldCollectorAfter);
+        var oldPaths = oldCollectorAfter.Hits.Select(hit => oldSnapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+        Assert.Equal(["src/a.txt"], oldPaths);
+
+        using var newSnapshot = index.OpenSnapshot();
+        var newCollector = new HitBuffer();
+        newSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), newCollector);
+        var newPaths = newCollector.Hits.Select(hit => newSnapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray();
+        Assert.Equal(["src/c.txt"], newPaths);
+    }
+
+    [Fact]
+    public async Task SnapshotOpenedBeforeCompactionRemainsUsableAfterPublication()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), [new DocumentKey("src/b.txt")]);
+
+        using var oldSnapshot = index.OpenSnapshot();
+        var beforeCollector = new HitBuffer();
+        oldSnapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), beforeCollector);
+        Assert.Single(beforeCollector.Hits);
+
+        await index.Compact(new CompactOptions());
+
+        var oldCollectorAfter = new HitBuffer();
+        oldSnapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), oldCollectorAfter);
+        Assert.Single(oldCollectorAfter.Hits);
+        Assert.Equal("src/a.txt", oldSnapshot.Materialize(oldCollectorAfter.Hits[0], 0, 0).Path);
+
+        using var newSnapshot = index.OpenSnapshot();
+        var newCollector = new HitBuffer();
+        newSnapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), newCollector);
+        Assert.Single(newCollector.Hits);
+        Assert.Equal("src/a.txt", newSnapshot.Materialize(newCollector.Hits[0], 0, 0).Path);
+    }
+
+    [Fact]
+    public async Task CompactionSelectsBoundedSubsetOfSegments()
+    {
+        var documents = Enumerable.Range(0, 150_003)
+            .Select(static i => ($"src/{i:D6}.txt", "alpha\n"))
+            .ToArray();
+
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/000000.txt", "omega\n")]), []);
+
+        var compact = await index.Compact(new CompactOptions(MaxMergedSegments: 1, SegmentCountTrigger: 1));
+
+        Assert.Equal(1, compact.InputSegments);
+
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        var manifest = storage.ReadManifest();
+        Assert.True(manifest.Segments.Count >= 3);
+
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), collector);
+        Assert.Single(collector.Hits);
+    }
+
+    [Fact]
+    public async Task CompactionPreservesSearchAcrossMultipleSegmentsAndGenerations()
+    {
+        var documents = Enumerable.Range(0, 100_002)
+            .Select(static i => ($"src/{i:D6}.txt", "alpha\n"))
+            .ToArray();
+
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([
+            ("src/000000.txt", "omega\n"),
+            ("src/050000.txt", "theta\n")
+        ]), [new DocumentKey("src/099999.txt")]);
+
+        await index.Compact(new CompactOptions(MaxMergedSegments: 2));
+
+        using var snapshot = index.OpenSnapshot();
+        var omega = new HitBuffer();
+        snapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), omega);
+        Assert.Single(omega.Hits);
+
+        var theta = new HitBuffer();
+        snapshot.Search(new SearchQuery("theta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), theta);
+        Assert.Single(theta.Hits);
+
+        var removed = new HitBuffer();
+        snapshot.Search(new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive), new PathFilter(PathPrefix: "src/099999"), removed);
+        Assert.Empty(removed.Hits);
+    }
+
+    [Fact]
+    public async Task CompactionSkipsLowDeadFractionWithoutTriggerHeuristics()
+    {
+        var documents = Enumerable.Range(0, 100)
+            .Select(static i => ($"src/{i:D3}.txt", "alpha\n"))
+            .ToArray();
+
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1000
+        });
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/000.txt", "omega\n")]), []);
+
+        var compact = await index.Compact(new CompactOptions());
+
+        Assert.Equal(2, compact.InputSegments);
+        Assert.Equal(2, compact.OutputSegments);
+        Assert.Equal(0, compact.MergedDocuments);
+    }
+
+    [Fact]
+    public async Task CompactionFailureBeforeSegmentPublicationPreservesCurrentManifest()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), []);
+
+        var storage = TestHelpers.GetStorage(index);
+        var before = storage.ReadManifest();
+        storage.FaultInjector = new PublicationFaultInjector
+        {
+            ThrowOnStage = PublicationStage.AfterSegmentFlushBeforePublish
+        };
+
+        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions(SegmentCountTrigger: 1)));
+
+        storage.FaultInjector = null;
+        storage.EnsureLayout();
+        var after = storage.ReadManifest();
+        Assert.Equal(before.Generation, after.Generation);
+        Assert.Equal(before.Segments.Select(static segment => segment.SegmentId), after.Segments.Select(static segment => segment.SegmentId));
+
+        using var snapshot = index.OpenSnapshot();
+        var omega = new HitBuffer();
+        snapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), omega);
+        Assert.Single(omega.Hits);
+
+        var beta = new HitBuffer();
+        snapshot.Search(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), beta);
+        Assert.Single(beta.Hits);
+    }
+
+    [Fact]
+    public async Task CompactionFailureAfterManifestFlushPreservesCurrentManifest()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), []);
+
+        var storage = TestHelpers.GetStorage(index);
+        var before = storage.ReadManifest();
+        storage.FaultInjector = new PublicationFaultInjector
+        {
+            ThrowOnStage = PublicationStage.AfterManifestFlushBeforeSwap
+        };
+
+        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions(SegmentCountTrigger: 1)));
+
+        storage.FaultInjector = null;
+        storage.EnsureLayout();
+        var after = storage.ReadManifest();
+        Assert.Equal(before.Generation, after.Generation);
+        Assert.Equal(before.Segments.Select(static segment => segment.SegmentId), after.Segments.Select(static segment => segment.SegmentId));
+
+        using var snapshot = index.OpenSnapshot();
+        var omega = new HitBuffer();
+        snapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), omega);
+        Assert.Single(omega.Hits);
+
+        var beta = new HitBuffer();
+        snapshot.Search(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), beta);
+        Assert.Single(beta.Hits);
+    }
+}
+
+
+
+

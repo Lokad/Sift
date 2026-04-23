@@ -1,0 +1,107 @@
+{
+  "id": "real-default",
+  "queries": [
+    {
+      "id": "literal-todo",
+      "pattern": "TODO",
+      "patternMode": "Literal",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "intent": "literal_short"
+    },
+    {
+      "id": "literal-tryparse",
+      "pattern": "TryParse",
+      "patternMode": "Literal",
+      "caseMode": "Sensitive",
+      "wholeWord": true,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "intent": "literal_identifier"
+    },
+    {
+      "id": "literal-path-scoped-src",
+      "pattern": "Build",
+      "patternMode": "Literal",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "pathPrefix": "src/",
+      "intent": "literal_path_scoped"
+    },
+    {
+      "id": "literal-cs-glob-httpclient",
+      "pattern": "HttpClient",
+      "patternMode": "Literal",
+      "caseMode": "Sensitive",
+      "wholeWord": true,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "includeGlobs": [ "**/*.cs" ],
+      "intent": "literal_path_scoped"
+    },
+    {
+      "id": "regex-byte-async-task",
+      "pattern": "async\\s+Task<",
+      "patternMode": "Regex",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "intent": "regex_byte_fast"
+    },
+    {
+      "id": "regex-byte-word-httpclient",
+      "pattern": "\\bHttpClient\\b",
+      "patternMode": "Regex",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "intent": "regex_byte_fast"
+    },
+    {
+      "id": "regex-fallback-lookahead",
+      "pattern": "foo(?=bar)",
+      "patternMode": "Regex",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "intent": "regex_fallback"
+    },
+    {
+      "id": "regex-multiline-namespace",
+      "pattern": "namespace\\s+System\\.",
+      "patternMode": "Regex",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": true,
+      "dotAll": false,
+      "intent": "regex_multiline"
+    },
+    {
+      "id": "path-only-csharp",
+      "pattern": "",
+      "patternMode": "Literal",
+      "caseMode": "Sensitive",
+      "wholeWord": false,
+      "wholeLine": false,
+      "multiline": false,
+      "dotAll": false,
+      "includeGlobs": [ "**/*.cs" ],
+      "intent": "path_only"
+    }
+  ]
+}

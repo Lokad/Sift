@@ -1,0 +1,287 @@
+using Lokad.Sift.LowLevel;
+using Lokad.Sift.Storage;
+
+namespace Lokad.Sift.Search;
+
+internal static class CandidateGenerator
+{
+    public static CandidateResult Generate(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, in LiteralPlan plan)
+    {
+        if (!plan.UsesIndex)
+        {
+            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+        }
+
+        if (plan.IsMissingGram)
+        {
+            return new CandidateResult([], 0);
+        }
+
+        var grams = new int[plan.SelectedGrams.Length];
+        for (var i = 0; i < plan.SelectedGrams.Length; i++)
+        {
+            grams[i] = plan.SelectedGrams[i].Gram;
+        }
+
+        return plan.UnionCandidates
+            ? plan.UnionGroupLengths is not null && plan.UnionGroupLengths.Length > 0
+                ? GenerateUnionOfIntersections(segment, scopeOrdinals, plan.IndexPair, grams, plan.UnionGroupLengths)
+                : GenerateUnion(segment, scopeOrdinals, plan.IndexPair, grams)
+            : Generate(segment, scopeOrdinals, plan.IndexPair, grams);
+    }
+
+    public static CandidateResult Generate(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
+    {
+        var postingsBytesRead = 0L;
+        if (grams.Length == 0)
+        {
+            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+        }
+
+        if (scopeOrdinals.Length * 4 >= segment.DocumentCount)
+        {
+            using var candidateBits = new PooledBitSet(segment.DocumentCount);
+            for (var i = 0; i < scopeOrdinals.Length; i++)
+            {
+                candidateBits.Set((int)scopeOrdinals[i]);
+            }
+
+            for (var i = 0; i < grams.Length; i++)
+            {
+                if (!segment.TryGetPostings(pair, grams[i], out var postings, out _))
+                {
+                    return new CandidateResult([], postingsBytesRead);
+                }
+
+                postingsBytesRead += postings.Length;
+                using var postingsBits = new PooledBitSet(segment.DocumentCount);
+                DecodeIntoBitSet(postings, postingsBits);
+                candidateBits.And(postingsBits);
+            }
+
+            return new CandidateResult(candidateBits.ToOrdinals(), postingsBytesRead);
+        }
+
+        var current = scopeOrdinals.ToArray();
+        for (var i = 0; i < grams.Length; i++)
+        {
+            if (!segment.TryGetPostings(pair, grams[i], out var postings, out var docFreq))
+            {
+                return new CandidateResult([], postingsBytesRead);
+            }
+
+            postingsBytesRead += postings.Length;
+            current = IntersectSortedWithPostings(current, postings, docFreq);
+            if (current.Length == 0)
+            {
+                return new CandidateResult([], postingsBytesRead);
+            }
+
+            if (i + 1 < grams.Length && current.Length * 4 >= segment.DocumentCount)
+            {
+                using var candidateBits = new PooledBitSet(segment.DocumentCount);
+                for (var currentIndex = 0; currentIndex < current.Length; currentIndex++)
+                {
+                    candidateBits.Set((int)current[currentIndex]);
+                }
+
+                for (var remainingIndex = i + 1; remainingIndex < grams.Length; remainingIndex++)
+                {
+                    if (!segment.TryGetPostings(pair, grams[remainingIndex], out var remainingPostings, out _))
+                    {
+                        return new CandidateResult([], postingsBytesRead);
+                    }
+
+                    postingsBytesRead += remainingPostings.Length;
+                    using var postingsBits = new PooledBitSet(segment.DocumentCount);
+                    DecodeIntoBitSet(remainingPostings, postingsBits);
+                    candidateBits.And(postingsBits);
+                }
+
+                return new CandidateResult(candidateBits.ToOrdinals(), postingsBytesRead);
+            }
+        }
+
+        return new CandidateResult(current, postingsBytesRead);
+    }
+
+    private static CandidateResult GenerateUnion(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
+    {
+        var postingsBytesRead = 0L;
+        if (grams.Length == 0)
+        {
+            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+        }
+
+        using var candidates = new PooledBitSet(segment.DocumentCount);
+        for (var i = 0; i < grams.Length; i++)
+        {
+            if (!segment.TryGetPostings(pair, grams[i], out var postings, out _))
+            {
+                continue;
+            }
+
+            postingsBytesRead += postings.Length;
+            DecodeIntoBitSet(postings, candidates);
+        }
+
+        if (scopeOrdinals.Length < segment.DocumentCount)
+        {
+            using var scope = new PooledBitSet(segment.DocumentCount);
+            for (var i = 0; i < scopeOrdinals.Length; i++)
+            {
+                scope.Set((int)scopeOrdinals[i]);
+            }
+
+            candidates.And(scope);
+        }
+
+        return new CandidateResult(candidates.ToOrdinals(), postingsBytesRead);
+    }
+
+    private static CandidateResult GenerateUnionOfIntersections(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams, ReadOnlySpan<int> groupLengths)
+    {
+        if (grams.Length == 0 || groupLengths.Length == 0)
+        {
+            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+        }
+
+        using var candidates = new PooledBitSet(segment.DocumentCount);
+        var postingsBytesRead = 0L;
+        var offset = 0;
+        for (var i = 0; i < groupLengths.Length && offset < grams.Length; i++)
+        {
+            var length = groupLengths[i];
+            if (length <= 0 || offset + length > grams.Length)
+            {
+                break;
+            }
+
+            var branch = Generate(segment, scopeOrdinals, pair, grams.Slice(offset, length));
+            postingsBytesRead += branch.PostingsBytesRead;
+            for (var j = 0; j < branch.Ordinals.Length; j++)
+            {
+                candidates.Set((int)branch.Ordinals[j]);
+            }
+
+            offset += length;
+        }
+
+        return new CandidateResult(candidates.ToOrdinals(), postingsBytesRead);
+    }
+
+    private static void DecodeIntoBitSet(ReadOnlySpan<byte> postings, PooledBitSet bitSet)
+    {
+        PostingsCodec.DecodeIntoBitSet(postings, bitSet);
+    }
+
+    private static uint[] IntersectSortedWithPostings(ReadOnlySpan<uint> left, ReadOnlySpan<byte> postings, int docFreq)
+    {
+        return PostingsCodec.IntersectSorted(left, postings, docFreq);
+    }
+
+    public static uint[] Decode(ReadOnlySpan<byte> postings)
+    {
+        return PostingsCodec.Decode(postings);
+    }
+
+    internal static uint[] IntersectSorted(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    {
+        if (left.Length == 0 || right.Length == 0)
+        {
+            return [];
+        }
+
+        if (left.Length > right.Length)
+        {
+            return IntersectSorted(right, left);
+        }
+
+        return right.Length >= left.Length * 8
+            ? GallopingIntersect(left, right)
+            : MergeIntersect(left, right);
+    }
+
+    private static uint[] MergeIntersect(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    {
+        var result = new uint[Math.Min(left.Length, right.Length)];
+        var count = 0;
+        var i = 0;
+        var j = 0;
+        while (i < left.Length && j < right.Length)
+        {
+            var leftValue = left[i];
+            var rightValue = right[j];
+            if (leftValue == rightValue)
+            {
+                result[count++] = leftValue;
+                i++;
+                j++;
+            }
+            else if (leftValue < rightValue)
+            {
+                i++;
+            }
+            else
+            {
+                j++;
+            }
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static uint[] GallopingIntersect(ReadOnlySpan<uint> small, ReadOnlySpan<uint> large)
+    {
+        var result = new uint[small.Length];
+        var count = 0;
+        var largeStart = 0;
+        for (var i = 0; i < small.Length && largeStart < large.Length; i++)
+        {
+            var target = small[i];
+            var index = LowerBound(large, largeStart, target);
+            if (index >= large.Length)
+            {
+                break;
+            }
+
+            if (large[index] == target)
+            {
+                result[count++] = target;
+                largeStart = index + 1;
+            }
+            else
+            {
+                largeStart = index;
+            }
+        }
+
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    private static int LowerBound(ReadOnlySpan<uint> values, int start, uint target)
+    {
+        var low = start;
+        var high = values.Length;
+        while (low < high)
+        {
+            var mid = low + ((high - low) >> 1);
+            if (values[mid] < target)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid;
+            }
+        }
+
+        return low;
+    }
+}
+
+internal readonly record struct CandidateResult(
+    uint[] Ordinals,
+    long PostingsBytesRead);

@@ -1,0 +1,19 @@
+{
+  "documentCount": 5000,
+  "warmupIterations": 1,
+  "measurementIterations": 3,
+  "medianThresholds": {
+    "literal-indexed": 40.0,
+    "ascii-insensitive-literal": 40.0,
+    "regex": 80.0,
+    "regex-fragment-precheck": 60.0,
+    "mandatory-fragment-precheck": 60.0,
+    "regex-verifier-path": 80.0,
+    "whole-word": 40.0,
+    "path-prefix": 40.0,
+    "parallel-literal": 40.0,
+    "materialize": 20.0,
+    "sorted-intersection": 10.0,
+    "bitset-and": 10.0
+  }
+}

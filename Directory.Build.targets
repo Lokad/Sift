@@ -1,0 +1,19 @@
+<Project>
+  <ItemGroup>
+    <AllowedPackageReference Include="Lokad.Utf8Regex" />
+    <AllowedPackageReference Include="BenchmarkDotNet" />
+    <AllowedPackageReference Include="Microsoft.SourceLink.GitHub" />
+    <AllowedPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <AllowedPackageReference Include="xunit" />
+    <AllowedPackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <Target Name="EnforcePackageAllowlist" BeforeTargets="CollectPackageReferences">
+    <ItemGroup>
+      <DisallowedPackageReference Include="@(PackageReference)" Exclude="@(AllowedPackageReference)" />
+    </ItemGroup>
+    <Error
+      Condition="'@(DisallowedPackageReference)' != ''"
+      Text="PackageReference(s) not in Sift allowlist: @(DisallowedPackageReference). Update DEPENDENCIES.md and Directory.Packages.props." />
+  </Target>
+</Project>
