@@ -4,6 +4,10 @@ Lokad.Sift is a local indexed grep/code-search engine for UTF-8 text, written in
 
 It stores immutable index segments on disk or in memory, serves snapshot-based searches, and supports incremental updates through document upserts and deletions. Its candidate stage uses document-level content bigram/trigram postings plus path trigram postings; match ordering is enforced later by exact verification rather than an ordered-trigram index.
 
+```powershell
+dotnet add package Lokad.Sift
+```
+
 ## C# example
 
 ```csharp
