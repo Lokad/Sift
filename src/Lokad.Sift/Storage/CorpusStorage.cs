@@ -1,5 +1,8 @@
 using System.Globalization;
 using System.Collections.Concurrent;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
 
@@ -7,6 +10,8 @@ namespace Lokad.Sift.Storage;
 
 public sealed class CorpusStorage : ISiftStorage
 {
+    private const int LinuxOpenDirectory = 0x10000;
+    private const int LinuxOpenCloseOnExec = 0x80000;
     private const ulong GenerationLeaseMagic = 0x455341454C544653UL;
     private const int GenerationLeaseVersion = 1;
     private const int GenerationLeaseHeaderSize = 40;
@@ -1371,13 +1376,25 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         // File data must precede the durable rename that makes a pack or manifest discoverable.
-        using var handle = File.OpenHandle(
+        var descriptor = Open(
             path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
+            LinuxOpenDirectory | LinuxOpenCloseOnExec);
+        if (descriptor < 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            throw new IOException(
+                $"Unable to open Sift directory '{path}' for durable publication.",
+                new Win32Exception(error));
+        }
+
+        using var handle = new SafeFileHandle(descriptor, ownsHandle: true);
         RandomAccess.FlushToDisk(handle);
     }
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int Open(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags);
 
     private List<PhysicalSegment> EnumeratePhysicalSegments(
         CancellationToken cancellationToken = default)
