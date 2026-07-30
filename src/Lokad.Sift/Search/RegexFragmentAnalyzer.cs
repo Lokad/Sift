@@ -264,7 +264,7 @@ internal static class RegexFragmentAnalyzer
 
                 if (kind is '=' or '!')
                 {
-                    return ParseLookaroundGroup();
+                    return ParseLookaroundGroup(isPositive: kind == '=');
                 }
 
                 if (kind == '#')
@@ -300,8 +300,8 @@ internal static class RegexFragmentAnalyzer
 
                 if (kind == '<' && _index < _pattern.Length && (_pattern[_index] == '=' || _pattern[_index] == '!'))
                 {
-                    _index++;
-                    return ParseLookaroundGroup();
+                    var isPositive = _pattern[_index++] == '=';
+                    return ParseLookaroundGroup(isPositive);
                 }
 
                 if (kind == '<' && TryConsumeNamedGroupHeader('>'))
@@ -329,7 +329,7 @@ internal static class RegexFragmentAnalyzer
             return result;
         }
 
-        private NodeResult ParseLookaroundGroup()
+        private NodeResult ParseLookaroundGroup(bool isPositive)
         {
             var inner = ParseExpression();
             if (_index >= _pattern.Length || _pattern[_index] != ')')
@@ -339,7 +339,9 @@ internal static class RegexFragmentAnalyzer
             }
 
             _index++;
-            return NodeResult.Lookaround(inner.Fragments, inner.ExactLiteral);
+            return isPositive
+                ? NodeResult.Lookaround(inner.Fragments, inner.ExactLiteral)
+                : NodeResult.ZeroWidth;
         }
 
         private NodeResult ParseTransparentGroupBody()
@@ -661,7 +663,7 @@ internal static class RegexFragmentAnalyzer
             {
                 _index++;
                 ConsumeLazy();
-                return current.MakeRequired();
+                return current.MakeRepeated();
             }
         }
 
@@ -675,13 +677,19 @@ internal static class RegexFragmentAnalyzer
                 min = checked(min * 10 + (_pattern[_index++] - '0'));
             }
 
+            var max = min;
             if (_index < _pattern.Length && _pattern[_index] == ',')
             {
                 _index++;
+                max = 0;
+                var hasMaximum = false;
                 while (_index < _pattern.Length && char.IsDigit(_pattern[_index]))
                 {
-                    _index++;
+                    hasMaximum = true;
+                    max = checked(max * 10 + (_pattern[_index++] - '0'));
                 }
+
+                max = hasMaximum ? max : int.MaxValue;
             }
 
             if (_index >= _pattern.Length || _pattern[_index] != '}')
@@ -692,7 +700,12 @@ internal static class RegexFragmentAnalyzer
 
             _index++;
             ConsumeLazy();
-            return min >= 1 ? atom.MakeRequired() : NodeResult.Optional;
+            return min switch
+            {
+                0 => NodeResult.Optional,
+                1 when max == 1 => atom,
+                _ => atom.MakeRepeated()
+            };
         }
 
         private void ConsumeLazy()
@@ -802,7 +815,11 @@ internal static class RegexFragmentAnalyzer
             return new(fragments, fragments, false, string.Empty, string.Empty, null);
         }
 
-        public NodeResult MakeRequired() => this with { CanBeEmpty = false };
+        public NodeResult MakeRepeated() => this with
+        {
+            CanBeEmpty = false,
+            ExactLiteral = null
+        };
 
         public static NodeResult Concat(NodeResult left, NodeResult right, int limit)
         {

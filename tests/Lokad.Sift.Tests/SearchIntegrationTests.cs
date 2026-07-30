@@ -279,7 +279,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task ExplainUsesPathIndexForMultipleIncludeGlobsWithLiterals()
+    public async Task AlternativeIncludeGlobsDoNotIntersectTheirPathLiterals()
     {
         var documents = Enumerable.Range(0, 9000)
             .Select(static i => (i % 2 == 0 ? $"src/special/{i:D5}.txt" : $"docs/config/{i:D5}.txt", "beta\n"))
@@ -293,9 +293,15 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter(IncludeGlobs: ["src/special/*.txt", "docs/config/*.txt"]));
+        var collector = new HitBuffer();
+        var stats = snapshot.Search(
+            new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(IncludeGlobs: ["src/special/*.txt", "docs/config/*.txt"]),
+            collector);
 
         Assert.True(plan.UsesIncludeGlobs);
-        Assert.True(plan.UsesPathIndex);
+        Assert.False(plan.UsesPathIndex);
+        Assert.Equal(documents.Length, stats.HitsReturned);
     }
 
     [Fact]
@@ -1868,6 +1874,49 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(1, stats.HitsReturned);
         Assert.Equal(["src/a.txt"], collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).ToArray());
+    }
+
+    [Fact]
+    public async Task RegexAccelerationDoesNotDiscardValidEdgeCaseMatches()
+    {
+        var documents = Enumerable.Range(0, 4000)
+            .Select(static i => ($"src/{i:D5}.txt", i switch
+            {
+                100 => "foobaz\n",
+                200 => "a\n",
+                201 => "aa\n",
+                300 => "bar\n",
+                400 => "fooX\nbar\n",
+                _ => $"noise-{i:D5}\n"
+            }))
+            .ToArray();
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0,
+            DirectScanCandidateDensityThreshold = 1.1
+        });
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        AssertSearchContains("foo(?!bar)", "src/00100.txt");
+        AssertSearchContains("a{2}", "src/00201.txt");
+        AssertSearchContains("foo|^bar", "src/00300.txt");
+        AssertSearchContains("foo[^\\r\\n]\\sbar", "src/00400.txt");
+
+        void AssertSearchContains(string pattern, string expectedPath)
+        {
+            var collector = new HitBuffer();
+            snapshot.Search(
+                new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive),
+                new PathFilter(),
+                collector);
+            var paths = collector.Hits
+                .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
+                .ToArray();
+            Assert.Contains(expectedPath, paths);
+        }
     }
 
     [Fact]

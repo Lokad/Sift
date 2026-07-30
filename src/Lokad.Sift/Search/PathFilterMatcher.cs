@@ -227,13 +227,28 @@ internal sealed class PathFilterMatcher
 
         if (filter.IncludeGlobs is { Length: > 0 })
         {
+            string? onlyIncludeGlob = null;
             for (var i = 0; i < filter.IncludeGlobs.Length; i++)
             {
-                var fragment = ExtractGlobLiteral(filter.IncludeGlobs[i]);
-                if (fragment.Length >= 3)
+                if (string.IsNullOrWhiteSpace(filter.IncludeGlobs[i]))
                 {
-                    fragments.Add(fragment);
+                    continue;
                 }
+
+                if (onlyIncludeGlob is not null)
+                {
+                    // Include globs are alternatives, so neither literal is required.
+                    onlyIncludeGlob = null;
+                    break;
+                }
+
+                onlyIncludeGlob = filter.IncludeGlobs[i];
+            }
+
+            var fragment = ExtractGlobLiteral(onlyIncludeGlob ?? string.Empty);
+            if (fragment.Length >= 3)
+            {
+                fragments.Add(fragment);
             }
         }
 

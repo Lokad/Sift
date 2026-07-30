@@ -91,6 +91,28 @@ public sealed class RegexAnalyzerTests
     }
 
     [Fact]
+    public async Task ExactLiteralExtractionDoesNotCollapseRepeatedRegex()
+    {
+        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("a+", out _));
+        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("a{2}", out _));
+        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("a{1,2}", out _));
+        Assert.True(RegexFragmentAnalyzer.TryExtractExactLiteral("a{1}", out var literal));
+        Assert.Equal("a", literal);
+    }
+
+    [Fact]
+    public async Task NegativeLookaroundsDoNotContributeMandatoryFragments()
+    {
+        var lookahead = RegexFragmentAnalyzer.ExtractMandatoryFragments("foo(?!bar)");
+        var lookbehind = RegexFragmentAnalyzer.ExtractMandatoryFragments("(?<!readonly\\s)struct");
+
+        Assert.Contains("foo", lookahead);
+        Assert.DoesNotContain("bar", lookahead);
+        Assert.Contains("struct", lookbehind);
+        Assert.DoesNotContain("readonly", lookbehind);
+    }
+
+    [Fact]
     public async Task AnalyzerFragmentsRemainSoundAcrossGeneratedSequencesAndAlternations()
     {
         foreach (var pattern in GenerateSupportedPatterns())

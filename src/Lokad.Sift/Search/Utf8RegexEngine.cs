@@ -168,7 +168,6 @@ internal static class Utf8RegexEngine
         public bool TryParse(out Utf8RegexNode root, out bool multiline, out bool dotAll, out bool ignoreCase)
         {
             root = default!;
-            _ = Consume('^');
             if (!TryParseExpression(out root))
             {
                 multiline = default;
@@ -177,7 +176,6 @@ internal static class Utf8RegexEngine
                 return false;
             }
 
-            _ = Consume('$');
             if (_index != _pattern.Length)
             {
                 multiline = default;
@@ -222,8 +220,7 @@ internal static class Utf8RegexEngine
             var children = new List<Utf8RegexNode>();
             while (_index < _pattern.Length &&
                    _pattern[_index] != ')' &&
-                   _pattern[_index] != '|' &&
-                   !(_pattern[_index] == '$' && _index == _pattern.Length - 1))
+                   _pattern[_index] != '|')
             {
                 if (!TryParseQuantified(out var child))
                 {
@@ -297,6 +294,12 @@ internal static class Utf8RegexEngine
                     return true;
                 case '(':
                     return TryParseGroup(out node);
+                case '^':
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.StartAnchor, 0, null, false);
+                    return true;
+                case '$':
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.EndAnchor, 0, null, false);
+                    return true;
                 case ')':
                 case '|':
                     return false;
@@ -809,7 +812,7 @@ internal static class Utf8RegexEngine
                         [ignoreCase ? FoldAscii(atom.Literal) : atom.Literal]
                     ];
                     return true;
-                case Utf8RegexAtom atom when atom.Kind is Utf8RegexAtomKind.WordBoundary or Utf8RegexAtomKind.NonWordBoundary:
+                case Utf8RegexAtom atom when IsZeroWidth(atom):
                     set = [[]];
                     return true;
                 default:
@@ -936,7 +939,7 @@ internal static class Utf8RegexEngine
                 Utf8RegexSequence => true,
                 Utf8RegexAlternation => true,
                 Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal } => true,
-                Utf8RegexAtom atom when atom.Kind is Utf8RegexAtomKind.WordBoundary or Utf8RegexAtomKind.NonWordBoundary => true,
+                Utf8RegexAtom atom when IsZeroWidth(atom) => true,
                 _ => false
             };
         }
@@ -979,7 +982,7 @@ internal static class Utf8RegexEngine
                         ]
                     ];
                     return true;
-                case Utf8RegexAtom atom when atom.Kind is Utf8RegexAtomKind.WordBoundary or Utf8RegexAtomKind.NonWordBoundary:
+                case Utf8RegexAtom atom when IsZeroWidth(atom):
                     groups =
                     [
                         []
@@ -1313,7 +1316,7 @@ internal static class Utf8RegexEngine
                 left.MaxGapBytes is null || right.MaxGapBytes is null
                     ? null
                     : left.MaxGapBytes.Value + right.MaxGapBytes.Value,
-                left.SameLineOnly || right.SameLineOnly);
+                left.SameLineOnly && right.SameLineOnly);
         }
 
         private static bool ContainsLiteral(List<byte[]> set, byte[] candidate)
@@ -1332,7 +1335,10 @@ internal static class Utf8RegexEngine
         private static bool IsZeroWidth(Utf8RegexNode node)
         {
             return node is Utf8RegexAtom atom &&
-                   atom.Kind is Utf8RegexAtomKind.WordBoundary or Utf8RegexAtomKind.NonWordBoundary;
+                   atom.Kind is Utf8RegexAtomKind.WordBoundary or
+                       Utf8RegexAtomKind.NonWordBoundary or
+                       Utf8RegexAtomKind.StartAnchor or
+                       Utf8RegexAtomKind.EndAnchor;
         }
 
     }
@@ -1378,5 +1384,7 @@ internal enum Utf8RegexAtomKind
     Dot,
     CharClass,
     WordBoundary,
-    NonWordBoundary
+    NonWordBoundary,
+    StartAnchor,
+    EndAnchor
 }
