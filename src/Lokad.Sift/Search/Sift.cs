@@ -418,15 +418,23 @@ public sealed class Sift : ISift
         }
 
         _storage.EnsureReplacementAllowedUnderWriterLock();
-        var selectedSegmentBytes = selectedSegmentIds.Aggregate(
-            0L,
-            (total, segmentId) => checked(total + _storage.GetSegmentBytes(segmentId)));
-        if (_storage.GetAvailableBytes() is long availableBytes)
+        // Fully dead packs publish no replacement, so they must remain reclaimable at zero headroom.
+        var replacementSegmentBytes = manifest.Segments
+            .Where(entry =>
+                entry.LiveDocumentCount > 0 &&
+                selectedSegmentIds.Contains(entry.SegmentId))
+            .Aggregate(
+                0L,
+                (total, entry) => checked(
+                    total +
+                    _storage.GetSegmentBytes(entry.SegmentId)));
+        if (replacementSegmentBytes > 0 &&
+            _storage.GetAvailableBytes() is long availableBytes)
         {
-            var requiredBytes = selectedSegmentBytes >
+            var requiredBytes = replacementSegmentBytes >
                 long.MaxValue - options.MinimumFreeBytesAfterCompaction
                 ? long.MaxValue
-                : selectedSegmentBytes + options.MinimumFreeBytesAfterCompaction;
+                : replacementSegmentBytes + options.MinimumFreeBytesAfterCompaction;
             if (availableBytes < requiredBytes)
             {
                 throw new IOException(

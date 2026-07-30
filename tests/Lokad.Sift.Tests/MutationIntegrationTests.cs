@@ -572,6 +572,26 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task CompactionReclaimsFullyDeadPacksWithoutReplacementHeadroom()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/a.txt")]);
+
+        var compact = await index.Compact(new CompactOptions(
+            MinimumFreeBytesAfterCompaction: long.MaxValue));
+
+        Assert.Equal(1, compact.InputSegments);
+        Assert.Equal(0, compact.OutputSegments);
+        Assert.Equal(0, compact.MergedDocuments);
+        Assert.Empty(index.Storage.ReadManifest().Segments);
+        Assert.Equal(0, index.GetStorageStats().PhysicalSegmentCount);
+    }
+
+    [Fact]
     public async Task CompactionFailureBeforeSegmentPublicationPreservesCurrentManifest()
     {
         using var fixture = new CorpusFixture(
