@@ -12,7 +12,7 @@ public sealed class BenchmarkSmokeTests
     {
         var repoRoot = GetRepositoryRoot();
         var benchmarkAssembly = GetBenchmarkAssemblyPath(repoRoot);
-        var profilePath = Path.Combine(repoRoot, "src", "Lokad.Sift.Benchmarks", "Assets", "ci-gate.json");
+        var profilePath = Path.Combine(repoRoot, "sift", "src", "Lokad.Sift.Benchmarks", "Assets", "ci-gate.json");
         var startInfo = new ProcessStartInfo(
             "dotnet",
             $"\"{benchmarkAssembly}\" --profile-json=\"{profilePath}\" --documents=1000 --warmup=1 --iterations=1")
@@ -46,7 +46,7 @@ public sealed class BenchmarkSmokeTests
     {
         var repoRoot = GetRepositoryRoot();
         var benchmarkAssembly = GetBenchmarkAssemblyPath(repoRoot);
-        var queryPackPath = Path.Combine(repoRoot, "src", "Lokad.Sift.Benchmarks", "Assets", "real-default.json");
+        var queryPackPath = Path.Combine(repoRoot, "sift", "src", "Lokad.Sift.Benchmarks", "Assets", "real-default.json");
         var emptyCorpusRoot = Path.Combine(Path.GetTempPath(), "sift-empty-corpora", Guid.NewGuid().ToString("N"));
         var jsonOutput = Path.Combine(Path.GetTempPath(), "sift-real-bench", Guid.NewGuid().ToString("N"), "result.json");
         Directory.CreateDirectory(emptyCorpusRoot);
@@ -100,6 +100,7 @@ public sealed class BenchmarkSmokeTests
         var configuration = GetBuildConfiguration();
         var benchmarkAssembly = Path.Combine(
             repoRoot,
+            "sift",
             "src",
             "Lokad.Sift.Benchmarks",
             "bin",
