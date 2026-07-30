@@ -729,6 +729,16 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task AnchorOnlyAlternationDisablesLiteralPrechecks()
+    {
+        var query = new SearchQuery("foo|^$", PatternMode.Regex, CaseMode.Sensitive);
+
+        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+        Assert.Null(program.LeadingLiteralSet);
+        Assert.Null(program.OrderedAnchorGroups);
+    }
+
+    [Fact]
     public async Task AsyncApiFamilyRegexEnumeratesBranchUnionPlan()
     {
         var documents = Enumerable.Range(0, 4000)

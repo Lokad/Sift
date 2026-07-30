@@ -864,10 +864,17 @@ internal static class Utf8RegexEngine
                     return false;
                 }
 
+                var optionHasLiteral = false;
                 for (var j = 0; j < optionSet.Count; j++)
                 {
                     var literal = optionSet[j];
-                    if (literal.Length == 0 || ContainsLiteral(set, literal))
+                    if (literal.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    optionHasLiteral = true;
+                    if (ContainsLiteral(set, literal))
                     {
                         continue;
                     }
@@ -879,6 +886,12 @@ internal static class Utf8RegexEngine
                     }
 
                     set.Add(literal);
+                }
+
+                if (!optionHasLiteral)
+                {
+                    set = [];
+                    return false;
                 }
             }
 
@@ -1058,6 +1071,7 @@ internal static class Utf8RegexEngine
                     return false;
                 }
 
+                var optionHasAnchor = false;
                 for (var j = 0; j < optionGroups.Count; j++)
                 {
                     if (optionGroups[j].Count == 0)
@@ -1065,6 +1079,7 @@ internal static class Utf8RegexEngine
                         continue;
                     }
 
+                    optionHasAnchor = true;
                     if (groups.Count >= MaxOrderedAnchorGroups)
                     {
                         groups = [];
@@ -1072,6 +1087,12 @@ internal static class Utf8RegexEngine
                     }
 
                     groups.Add(CloneAnchorGroup(optionGroups[j]));
+                }
+
+                if (!optionHasAnchor)
+                {
+                    groups = [];
+                    return false;
                 }
             }
 
