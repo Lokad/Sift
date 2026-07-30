@@ -78,6 +78,11 @@ public sealed class InMemorySiftStorage : ISiftStorage
             : throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
     }
 
+    public long? GetAvailableBytes()
+    {
+        return null;
+    }
+
     bool ISiftStorage.IsReclamationPending
     {
         get

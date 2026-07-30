@@ -442,6 +442,23 @@ public sealed class Sift : ISift
         }
 
         _storage.EnsureReplacementAllowedUnderWriterLock();
+        var selectedSegmentBytes = selectedSegmentIds.Aggregate(
+            0L,
+            (total, segmentId) => checked(total + _storage.GetSegmentBytes(segmentId)));
+        if (_storage.GetAvailableBytes() is long availableBytes)
+        {
+            var requiredBytes = selectedSegmentBytes >
+                long.MaxValue - options.MinimumFreeBytesAfterCompaction
+                ? long.MaxValue
+                : selectedSegmentBytes + options.MinimumFreeBytesAfterCompaction;
+            if (availableBytes < requiredBytes)
+            {
+                throw new IOException(
+                    $"Sift compaction requires {requiredBytes} available bytes for replacement headroom " +
+                    $"and reserve, but the filesystem reports {availableBytes} bytes.");
+            }
+        }
+
         var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var attemptedSegmentIds = new List<ulong>();
         var newSegments = new List<SegmentManifestEntry>();
@@ -622,6 +639,13 @@ public sealed class Sift : ISift
         if (options.MaxInputSegmentBytes <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "MaxInputSegmentBytes must be positive.");
+        }
+
+        if (options.MinimumFreeBytesAfterCompaction < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "MinimumFreeBytesAfterCompaction cannot be negative.");
         }
     }
 

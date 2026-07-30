@@ -207,7 +207,9 @@ the old snapshot and retry. A compaction pass selects at most
 larger debt-bearing segment remains eligible. Count-driven maintenance only merges
 clean segments when at least two fit into one target segment. Compaction still needs
 temporary disk headroom for the selected segments' new packs before the replaced
-packs can be deleted.
+packs can be deleted, so it requires space for a same-size replacement plus
+`CompactOptions.MinimumFreeBytesAfterCompaction` (512 MiB by default) when the
+filesystem exposes available-space information.
 
 ## What Sift is for
 

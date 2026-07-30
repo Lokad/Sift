@@ -515,6 +515,34 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task CompactionRefusesInsufficientReplacementHeadroom()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 100,
+            TargetSegmentContentBytes = 100
+        });
+        await index.Build(new InMemoryDocumentSource([]));
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "alpha")]), []);
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        var before = index.Storage.ReadManifest();
+
+        var exception = await Assert.ThrowsAsync<IOException>(() =>
+            index.Compact(new CompactOptions(
+                SegmentCountTrigger: 1,
+                MinimumFreeBytesAfterCompaction: long.MaxValue)));
+
+        Assert.Contains("replacement headroom", exception.Message, StringComparison.Ordinal);
+        var after = index.Storage.ReadManifest();
+        Assert.Equal(before.Generation, after.Generation);
+        Assert.Equal(
+            before.Segments.Select(static segment => segment.SegmentId),
+            after.Segments.Select(static segment => segment.SegmentId));
+        Assert.Equal(0, index.GetStorageStats().RetiredSegmentCount);
+    }
+
+    [Fact]
     public async Task CompactionFailureBeforeSegmentPublicationPreservesCurrentManifest()
     {
         using var fixture = new CorpusFixture(

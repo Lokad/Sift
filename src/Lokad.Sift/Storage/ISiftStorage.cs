@@ -10,6 +10,7 @@ public interface ISiftStorage
     CorpusManifest ReadManifest();
     MappedSegment OpenSegment(ulong segmentId);
     long GetSegmentBytes(ulong segmentId);
+    long? GetAvailableBytes();
     void EnsureSnapshotMetadata();
     StorageReadSnapshot OpenReadSnapshot();
     StorageStats GetStorageStats();

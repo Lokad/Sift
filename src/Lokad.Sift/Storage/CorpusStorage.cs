@@ -315,6 +315,23 @@ public sealed class CorpusStorage : ISiftStorage
         return new FileInfo(path).Length;
     }
 
+    public long? GetAvailableBytes()
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(_rootPath);
+            var pathRoot = Path.GetPathRoot(fullPath);
+            return string.IsNullOrEmpty(pathRoot)
+                ? null
+                : new DriveInfo(pathRoot).AvailableFreeSpace;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
     bool ISiftStorage.IsReclamationPending
     {
         get
