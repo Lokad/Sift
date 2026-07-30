@@ -26,6 +26,9 @@ internal sealed class IndexBuilder
 
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
+        // Refuse before materializing the source; PublishFullBuild repeats this for direct callers.
+        _storage.EnsureReplacementAllowedUnderWriterLock();
+
         var load = LoadDocuments(source, cancellationToken, _options);
         var documents = load.Documents;
 

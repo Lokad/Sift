@@ -160,6 +160,9 @@ Corpus root:
       segment.pack
   temp/
   lock/
+    generations/
+      <generation-id>.lease
+    reclamation.state
 ```
 
 ### 5.1 Manifest
@@ -431,9 +434,15 @@ Publication must be crash-safe:
 2. flush segment file
 3. validate checksum
 4. move into `segments/<segment-id>/`
-5. write new manifest to temp file
-6. flush manifest
-7. atomic manifest swap
+5. write and flush the immutable, checksummed generation lease
+6. write new manifest to temp file
+7. flush manifest
+8. atomic manifest swap
+9. delete packs unreachable from both the new manifest and live generation leases
+
+Startup performs the same unreachable-pack sweep so a crash after segment
+publication but before manifest publication cannot leak a complete orphan pack.
+If the manifest or an active lease cannot be validated, reclamation fails closed.
 
 ### 7.7 Incremental update
 
@@ -469,6 +478,12 @@ Trigger compaction when any is true:
 * manifest dead-ordinal metadata becomes materially large
 
 Compaction must not block queries.
+Compaction owns reclamation of the segments it replaces. A replaced pack is
+deleted automatically after the last generation lease that names it is released;
+callers do not run a separate cleanup phase.
+To bound physical growth, another replacement build or compaction is refused
+while a previously retired generation remains leased. Compaction requires
+temporary headroom for its output before reclamation can occur.
 
 ---
 
@@ -791,6 +806,7 @@ public interface ISift : IDisposable
 {
     IIndexSnapshot OpenSnapshot(SearchOptions options = default);
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default);
+    StorageStats GetStorageStats();
     BuildStats Build(IDocumentSource documents, CancellationToken cancellationToken = default);
     UpdateStats Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default);
     CompactStats Compact(CompactOptions options, CancellationToken cancellationToken = default);
@@ -899,6 +915,9 @@ The CLI is an adapter over the core library; it may source documents from the fi
 * many concurrent readers
 * no reader locks in hot path
 * snapshot lifetime keeps required segment maps alive
+* writers create one immutable, checksummed lease per manifest generation
+* snapshots open that generation lease read-only without taking the writer lock
+  or writing reader-lifecycle files
 * readers never observe dead entries resurrecting or partial compaction
 
 ### 12.2 Writer model
@@ -907,6 +926,8 @@ The CLI is an adapter over the core library; it may source documents from the fi
 * updates are batched
 * publication is manifest-swap only
 * old segments remain readable until last snapshot releases them
+* unreachable segment packs are reclaimed automatically on publication,
+  snapshot release, and corpus startup
 
 ### 12.3 Query parallelism
 
@@ -1042,6 +1063,10 @@ Required tests:
 * corrupted segment header
 * corrupted region checksum
 * stale temp directory recovery
+* stale generation-lease and unreachable-pack recovery
+* deferred deletion while an old snapshot is live
+* cross-process lease release after a reader crash
+* reader snapshot opening while the writer lock is held
 
 ### 15.4 Performance regression suite
 

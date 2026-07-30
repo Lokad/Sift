@@ -18,19 +18,39 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly List<SegmentCache> _segments;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
+    private readonly StorageReadSnapshot _storageSnapshot;
+    private Action? _onDisposed;
+    private int _disposed;
 
-    public SearchSnapshot(ISiftStorage storage, SiftOptions options, SearchOptions searchOptions)
+    public SearchSnapshot(
+        ISiftStorage storage,
+        SiftOptions options,
+        SearchOptions searchOptions,
+        Action? onDisposed = null)
     {
         _options = options;
         _searchOptions = searchOptions;
-        _manifest = storage.HasManifest
-            ? storage.ReadManifest()
-            : new CorpusManifest(Guid.Empty, 0, Array.Empty<SegmentManifestEntry>());
+        _onDisposed = onDisposed;
+        _storageSnapshot = storage.OpenReadSnapshot();
+        _manifest = _storageSnapshot.Manifest;
 
         _segments = new List<SegmentCache>(_manifest.Segments.Count);
-        foreach (var entry in _manifest.Segments)
+        try
         {
-            _segments.Add(new SegmentCache(storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals));
+            foreach (var entry in _manifest.Segments)
+            {
+                _segments.Add(new SegmentCache(storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals));
+            }
+        }
+        catch
+        {
+            foreach (var cache in _segments)
+            {
+                cache.Segment.Dispose();
+            }
+
+            _storageSnapshot.Dispose();
+            throw;
         }
     }
 
@@ -508,9 +528,22 @@ Done:
 
     public void Dispose()
     {
-        foreach (var cache in _segments)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
-            cache.Segment.Dispose();
+            return;
+        }
+
+        try
+        {
+            foreach (var cache in _segments)
+            {
+                cache.Segment.Dispose();
+            }
+        }
+        finally
+        {
+            _storageSnapshot.Dispose();
+            Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
         }
     }
 

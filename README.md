@@ -126,6 +126,16 @@ Console.WriteLine($"Updated search returned {updatedStats.HitsReturned} hit(s)."
 // 5. Optional: compact delta segments back into fewer immutable segments.
 var compact = await index.Compact(new CompactOptions());
 Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents in {compact.ElapsedMilliseconds} ms.");
+
+var storage = index.GetStorageStats();
+Console.WriteLine(
+    $"manifestBytes={storage.ManifestSegmentBytes} " +
+    $"physicalBytes={storage.PhysicalSegmentBytes} " +
+    $"retiredBytes={storage.RetiredSegmentBytes} " +
+    $"deferredBytes={storage.SnapshotDeferredSegmentBytes} " +
+    $"pendingDeletionBytes={storage.PendingDeletionSegmentBytes} " +
+    $"blockedBytes={storage.BlockedReclamationSegmentBytes} " +
+    $"reclamationBlocked={storage.IsReclamationBlocked}");
 }
 ```
 
@@ -174,6 +184,20 @@ if (maintenance.SegmentCount > 16 || maintenance.DeadDocumentFraction >= 0.20)
 }
 ```
 
+`Build(...)` and `Compact(...)` publish replacement segments and reclaim the packs
+that the new manifest no longer references. A pack remains in `RetiredSegmentBytes`
+only while an older live snapshot still needs it, or when the operating system
+refuses deletion. Dispose snapshots promptly; release retries reclamation
+automatically. Corpus startup also sweeps packs left by a crash between segment
+publication and manifest publication. No separate cleanup call is required.
+Snapshots acquire an immutable generation lease read-only; opening or disposing a
+snapshot does not create files or take the writer lock.
+
+To keep disk growth bounded, `Build(...)` and a compaction that would replace
+segments are refused while an earlier retired generation is still leased. Dispose
+the old snapshot and retry. Compaction still needs temporary disk headroom for its
+new packs before the replaced packs can be deleted.
+
 ## What Sift is for
 
 - local code and text search over large corpora
@@ -207,8 +231,9 @@ For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a fi
 - Paths must be relative and canonicalizable to `/`-separated logical paths.
 - Input content is `ReadOnlyMemory<byte>` and must be UTF-8.
 - Searches operate on snapshots. Open a new snapshot after updates if you want to observe the new generation.
+- Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
-- `Compact(...)` is optional but useful after many updates.
+- `Compact(...)` is optional but useful after many updates, and owns cleanup of the segments it replaces.
 
 ## Related docs
 

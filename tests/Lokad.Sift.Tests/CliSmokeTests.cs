@@ -43,7 +43,8 @@ public sealed class CliSmokeTests
         var stats = RunCli($"stats \"{fixture.CorpusPath}\"");
         Assert.Equal(0, stats.ExitCode);
         Assert.Contains("liveContentBytes=", stats.StandardOutput);
-        Assert.Contains("segmentBytes=", stats.StandardOutput);
+        Assert.Contains("physicalSegmentBytes=", stats.StandardOutput);
+        Assert.Contains("retiredSegmentBytes=", stats.StandardOutput);
         Assert.Contains("regexCacheHitRate=", stats.StandardOutput);
     }
 

@@ -47,7 +47,8 @@ switch (command)
     case "compact":
         {
             var compact = await index.Compact(new CompactOptions());
-            Console.WriteLine($"inputSegments={compact.InputSegments} outputSegments={compact.OutputSegments} mergedDocuments={compact.MergedDocuments} bytes={compact.ContentBytes} ms={compact.ElapsedMilliseconds}");
+            var storage = index.GetStorageStats();
+            Console.WriteLine($"inputSegments={compact.InputSegments} outputSegments={compact.OutputSegments} mergedDocuments={compact.MergedDocuments} bytes={compact.ContentBytes} physicalSegmentBytes={storage.PhysicalSegmentBytes} retiredSegmentBytes={storage.RetiredSegmentBytes} ms={compact.ElapsedMilliseconds}");
             return 0;
         }
     case "stats":
@@ -55,14 +56,9 @@ switch (command)
             var maintenance = index.GetMaintenanceStats();
             var storage = new CorpusStorage(corpusPath);
             var manifest = storage.ReadManifest();
-            long totalSegmentBytes = 0;
-            foreach (var entry in manifest.Segments)
-            {
-                using var segment = storage.OpenSegment(entry.SegmentId);
-                totalSegmentBytes += new FileInfo(Path.Combine(corpusPath, "segments", entry.SegmentId.ToString("X16"), "segment.pack")).Length;
-            }
+            var physical = index.GetStorageStats();
 
-            Console.WriteLine($"generation={maintenance.Generation} corpusId={manifest.CorpusId} segments={maintenance.SegmentCount} totalDocuments={maintenance.TotalDocuments} liveDocuments={maintenance.LiveDocuments} deadDocuments={maintenance.DeadDocuments} deadFraction={maintenance.DeadDocumentFraction:F3} contentBytes={maintenance.ContentBytes} liveContentBytes={maintenance.EstimatedLiveContentBytes} reclaimableContentBytes={maintenance.EstimatedReclaimableContentBytes} deadOrdinalEntries={maintenance.DeadOrdinalEntries} segmentsWithDeletions={maintenance.SegmentsWithDeletions} smallSegments={maintenance.SmallSegmentCount} segmentBytes={totalSegmentBytes} mappedBytes={MappedSegment.CurrentMappedBytes} openSegments={MappedSegment.CurrentOpenSegments} regexCacheEntries={SearchProcessMetrics.RegexCacheEntries} regexCacheHits={SearchProcessMetrics.RegexCacheHits} regexCacheMisses={SearchProcessMetrics.RegexCacheMisses} regexCacheHitRate={SearchProcessMetrics.RegexCacheHitRate:F3}");
+            Console.WriteLine($"generation={maintenance.Generation} corpusId={manifest.CorpusId} segments={maintenance.SegmentCount} totalDocuments={maintenance.TotalDocuments} liveDocuments={maintenance.LiveDocuments} deadDocuments={maintenance.DeadDocuments} deadFraction={maintenance.DeadDocumentFraction:F3} contentBytes={maintenance.ContentBytes} liveContentBytes={maintenance.EstimatedLiveContentBytes} reclaimableContentBytes={maintenance.EstimatedReclaimableContentBytes} deadOrdinalEntries={maintenance.DeadOrdinalEntries} segmentsWithDeletions={maintenance.SegmentsWithDeletions} smallSegments={maintenance.SmallSegmentCount} manifestSegmentBytes={physical.ManifestSegmentBytes} physicalSegmentBytes={physical.PhysicalSegmentBytes} retiredSegmentBytes={physical.RetiredSegmentBytes} retiredSegments={physical.RetiredSegmentCount} deferredSegmentBytes={physical.SnapshotDeferredSegmentBytes} pendingDeletionBytes={physical.PendingDeletionSegmentBytes} blockedReclamationBytes={physical.BlockedReclamationSegmentBytes} tempBytes={physical.TemporaryBytes} leasedGenerations={physical.LeasedGenerationCount} oldestLeasedGeneration={physical.OldestLeasedGeneration} reclamationBlocked={physical.IsReclamationBlocked} mappedBytes={MappedSegment.CurrentMappedBytes} openSegments={MappedSegment.CurrentOpenSegments} regexCacheEntries={SearchProcessMetrics.RegexCacheEntries} regexCacheHits={SearchProcessMetrics.RegexCacheHits} regexCacheMisses={SearchProcessMetrics.RegexCacheMisses} regexCacheHitRate={SearchProcessMetrics.RegexCacheHitRate:F3}");
             return 0;
         }
     case "verify":

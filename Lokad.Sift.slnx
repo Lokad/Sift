@@ -5,6 +5,7 @@
     <Project Path="src/Lokad.Sift.Benchmarks/Lokad.Sift.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Lokad.Sift.TestHost/Lokad.Sift.TestHost.csproj" />
     <Project Path="tests/Lokad.Sift.Tests/Lokad.Sift.Tests.csproj" />
   </Folder>
 </Solution>

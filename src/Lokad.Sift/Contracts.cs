@@ -167,11 +167,34 @@ public readonly record struct UpdateStats(
     long RejectedBytes,
     long ElapsedMilliseconds);
 
-public readonly record struct CompactOptions(
-    int MaxMergedSegments = 16,
-    double DeadFractionThreshold = 0.20,
-    int SegmentCountTrigger = 16,
-    int MetadataBloatDeadOrdinalsThreshold = 1024);
+public sealed record CompactOptions
+{
+    public CompactOptions()
+        : this(
+            MaxMergedSegments: 16,
+            DeadFractionThreshold: 0.20,
+            SegmentCountTrigger: 16,
+            MetadataBloatDeadOrdinalsThreshold: 1024)
+    {
+    }
+
+    public CompactOptions(
+        int MaxMergedSegments = 16,
+        double DeadFractionThreshold = 0.20,
+        int SegmentCountTrigger = 16,
+        int MetadataBloatDeadOrdinalsThreshold = 1024)
+    {
+        this.MaxMergedSegments = MaxMergedSegments;
+        this.DeadFractionThreshold = DeadFractionThreshold;
+        this.SegmentCountTrigger = SegmentCountTrigger;
+        this.MetadataBloatDeadOrdinalsThreshold = MetadataBloatDeadOrdinalsThreshold;
+    }
+
+    public int MaxMergedSegments { get; init; }
+    public double DeadFractionThreshold { get; init; }
+    public int SegmentCountTrigger { get; init; }
+    public int MetadataBloatDeadOrdinalsThreshold { get; init; }
+}
 
 public readonly record struct CompactStats(
     int InputSegments,
@@ -206,6 +229,40 @@ public readonly record struct MaintenanceStats(
     long DeadOrdinalEntries,
     int SegmentsWithDeletions,
     int SmallSegmentCount);
+
+public readonly record struct StorageStats(
+    // Currently reachable packs that are also present on disk.
+    int ManifestSegmentCount,
+    // On-disk lengths of those packs; this excludes manifest metadata.
+    long ManifestSegmentBytes,
+    // All well-named directories containing a pack, including unreachable packs.
+    int PhysicalSegmentCount,
+    // Segment-pack footprint only; temporary and lifecycle files are excluded.
+    long PhysicalSegmentBytes,
+    // Packs unreachable from the current manifest, regardless of why they remain.
+    int RetiredSegmentCount,
+    // On-disk lengths of the unreachable packs.
+    long RetiredSegmentBytes,
+    // Incomplete publication files, not retired packs awaiting reclamation.
+    long TemporaryBytes,
+    // Non-current generations held open by at least one reader.
+    int LeasedGenerationCount,
+    // Lowest held generation, or null when no superseded snapshot remains.
+    ulong? OldestLeasedGeneration,
+    // Retired packs retained solely because a live snapshot can still read them.
+    int SnapshotDeferredSegmentCount,
+    // On-disk lengths of the snapshot-protected packs.
+    long SnapshotDeferredSegmentBytes,
+    // Retired packs proven unreachable but not removed by the latest sweep.
+    int PendingDeletionSegmentCount,
+    // On-disk lengths still eligible for deletion.
+    long PendingDeletionSegmentBytes,
+    // Retired packs whose reachability cannot be proven from lifecycle metadata.
+    int BlockedReclamationSegmentCount,
+    // On-disk lengths withheld from deletion because reachability is uncertain.
+    long BlockedReclamationSegmentBytes,
+    // True when metadata uncertainty prevents destructive reclamation.
+    bool IsReclamationBlocked);
 
 public readonly record struct MaterializedHit(
     string Path,
@@ -247,6 +304,7 @@ public interface ISift : IDisposable
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default);
     ActivityStats GetActivityStats();
     MaintenanceStats GetMaintenanceStats();
+    StorageStats GetStorageStats();
     Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken = default);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default);
     Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken = default);

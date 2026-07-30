@@ -1,10 +1,15 @@
+using Lokad.Sift;
+
 namespace Lokad.Sift.Storage;
 
 public sealed class InMemorySiftStorage : ISiftStorage
 {
     private readonly object _writerLock = new();
     private readonly Dictionary<ulong, byte[]> _segments = new();
+    private readonly Dictionary<ulong, int> _snapshotSegmentReferences = new();
+    private readonly Dictionary<ulong, int> _snapshotGenerationReferences = new();
     private CorpusManifest? _manifest;
+    private bool _reclamationPending;
 
     public bool HasManifest => _manifest is not null;
 
@@ -22,6 +27,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public BuildPublication PublishFullBuild(IReadOnlyList<IReadOnlyList<StoredDocument>> segments, CancellationToken cancellationToken)
     {
+        EnsureReplacementAllowedUnderWriterLock();
         var existing = _manifest;
         var corpusId = existing?.CorpusId ?? Guid.NewGuid();
         var generation = (existing?.Generation ?? 0UL) + 1UL;
@@ -39,11 +45,13 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
 
         _manifest = CloneManifest(new CorpusManifest(corpusId, generation, entries));
+        _ = ReclaimUnreferencedSegmentsUnderWriterLock();
         return new BuildPublication(totalDocuments, entries.Count, totalBytes);
     }
 
     public SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken)
     {
+        _reclamationPending = true;
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);
         using var _ = new MappedSegment(bytes, validateChecksums: true);
         _segments[segmentId] = bytes;
@@ -53,6 +61,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
     public void PublishManifest(CorpusManifest manifest)
     {
         _manifest = CloneManifest(manifest);
+        _ = ReclaimUnreferencedSegmentsUnderWriterLock();
     }
 
     public CorpusManifest ReadManifest()
@@ -70,6 +79,165 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
 
         return new MappedSegment(bytes, validateChecksums);
+    }
+
+    bool ISiftStorage.IsReclamationPending
+    {
+        get
+        {
+            lock (_writerLock)
+            {
+                return _reclamationPending;
+            }
+        }
+    }
+
+    void ISiftStorage.EnsureSnapshotMetadata()
+    {
+    }
+
+    StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
+    {
+        lock (_writerLock)
+        {
+            var manifest = _manifest is not null
+                ? CloneManifest(_manifest)
+                : new CorpusManifest(Guid.Empty, 0, []);
+            if (manifest.Segments.Count == 0)
+            {
+                return new StorageReadSnapshot(manifest, EmptyDisposable.Instance);
+            }
+
+            var segmentIds = manifest.Segments.Select(static segment => segment.SegmentId).ToArray();
+            for (var i = 0; i < segmentIds.Length; i++)
+            {
+                _snapshotSegmentReferences.TryGetValue(segmentIds[i], out var references);
+                _snapshotSegmentReferences[segmentIds[i]] = references + 1;
+            }
+
+            _snapshotGenerationReferences.TryGetValue(manifest.Generation, out var generationReferences);
+            _snapshotGenerationReferences[manifest.Generation] = generationReferences + 1;
+            return new StorageReadSnapshot(
+                manifest,
+                new SnapshotLease(this, manifest.Generation, segmentIds));
+        }
+    }
+
+    StorageStats ISiftStorage.GetStorageStats()
+    {
+        lock (_writerLock)
+        {
+            var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+            return GetStorageStatsUnderWriterLock(reclamation);
+        }
+    }
+
+    void ISiftStorage.ReclaimUnreferencedSegments(CancellationToken cancellationToken)
+    {
+        using var writerLock = AcquireWriterLock(cancellationToken);
+        _ = ReclaimUnreferencedSegmentsUnderWriterLock();
+    }
+
+    void ISiftStorage.EnsureReplacementAllowedUnderWriterLock()
+    {
+        EnsureReplacementAllowedUnderWriterLock();
+    }
+
+    private StorageStats GetStorageStatsUnderWriterLock(SegmentReclamationStats reclamation)
+    {
+        var manifestSegmentIds = _manifest?.Segments.Select(static segment => segment.SegmentId).ToHashSet() ?? [];
+        var physicalSegmentBytes = _segments.Values.Sum(static bytes => (long)bytes.Length);
+        long manifestSegmentBytes = 0;
+        var manifestSegmentCount = 0;
+        foreach (var segmentId in manifestSegmentIds)
+        {
+            if (_segments.TryGetValue(segmentId, out var bytes))
+            {
+                manifestSegmentCount++;
+                manifestSegmentBytes += bytes.Length;
+            }
+        }
+
+        return new StorageStats(
+            ManifestSegmentCount: manifestSegmentCount,
+            ManifestSegmentBytes: manifestSegmentBytes,
+            PhysicalSegmentCount: _segments.Count,
+            PhysicalSegmentBytes: physicalSegmentBytes,
+            RetiredSegmentCount: _segments.Count - manifestSegmentCount,
+            RetiredSegmentBytes: physicalSegmentBytes - manifestSegmentBytes,
+            TemporaryBytes: 0,
+            LeasedGenerationCount: reclamation.LeasedGenerationCount,
+            OldestLeasedGeneration: reclamation.OldestLeasedGeneration,
+            SnapshotDeferredSegmentCount: reclamation.DeferredSegmentCount,
+            SnapshotDeferredSegmentBytes: reclamation.DeferredSegmentBytes,
+            PendingDeletionSegmentCount: reclamation.FailedSegmentCount,
+            PendingDeletionSegmentBytes: reclamation.FailedSegmentBytes,
+            BlockedReclamationSegmentCount: reclamation.BlockedSegmentCount,
+            BlockedReclamationSegmentBytes: reclamation.BlockedSegmentBytes,
+            IsReclamationBlocked: reclamation.IsBlocked);
+    }
+
+    private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock()
+    {
+        if (_manifest is null)
+        {
+            return default;
+        }
+
+        var manifestSegmentIds = _manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
+        var reclaimedSegmentCount = 0;
+        long reclaimedSegmentBytes = 0;
+        var deferredSegmentCount = 0;
+        long deferredSegmentBytes = 0;
+        foreach (var segment in _segments.ToArray())
+        {
+            if (manifestSegmentIds.Contains(segment.Key))
+            {
+                continue;
+            }
+
+            if (_snapshotSegmentReferences.ContainsKey(segment.Key))
+            {
+                deferredSegmentCount++;
+                deferredSegmentBytes += segment.Value.Length;
+                continue;
+            }
+
+            _segments.Remove(segment.Key);
+            reclaimedSegmentCount++;
+            reclaimedSegmentBytes += segment.Value.Length;
+        }
+
+        var reclamation = new SegmentReclamationStats(
+            reclaimedSegmentCount,
+            reclaimedSegmentBytes,
+            deferredSegmentCount,
+            deferredSegmentBytes,
+            FailedSegmentCount: 0,
+            FailedSegmentBytes: 0,
+            BlockedSegmentCount: 0,
+            BlockedSegmentBytes: 0,
+            IsBlocked: false,
+            LeasedGenerationCount: _snapshotGenerationReferences.Keys.Count(generation => generation != _manifest.Generation),
+            OldestLeasedGeneration: _snapshotGenerationReferences.Keys
+                .Where(generation => generation != _manifest.Generation)
+                .Select(static generation => (ulong?)generation)
+                .Min());
+        _reclamationPending =
+            reclamation.DeferredSegmentCount > 0 ||
+            reclamation.LeasedGenerationCount > 0;
+        return reclamation;
+    }
+
+    private void EnsureReplacementAllowedUnderWriterLock()
+    {
+        var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+        if (reclamation.DeferredSegmentCount > 0)
+        {
+            throw new InvalidOperationException(
+                $"Cannot replace Sift segments while {reclamation.DeferredSegmentCount} retired segment(s) " +
+                $"({reclamation.DeferredSegmentBytes} bytes) remain leased by older snapshots.");
+        }
     }
 
     private static CorpusManifest CloneManifest(CorpusManifest manifest)
@@ -95,6 +263,55 @@ public sealed class InMemorySiftStorage : ISiftStorage
             {
                 System.Threading.Monitor.Exit(syncRoot);
             }
+        }
+    }
+
+    private sealed class SnapshotLease(InMemorySiftStorage owner, ulong generation, ulong[] segmentIds) : IDisposable
+    {
+        private InMemorySiftStorage? _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            if (owner is null)
+            {
+                return;
+            }
+
+            lock (owner._writerLock)
+            {
+                for (var i = 0; i < segmentIds.Length; i++)
+                {
+                    var references = owner._snapshotSegmentReferences[segmentIds[i]] - 1;
+                    if (references == 0)
+                    {
+                        owner._snapshotSegmentReferences.Remove(segmentIds[i]);
+                    }
+                    else
+                    {
+                        owner._snapshotSegmentReferences[segmentIds[i]] = references;
+                    }
+                }
+
+                var generationReferences = owner._snapshotGenerationReferences[generation] - 1;
+                if (generationReferences == 0)
+                {
+                    owner._snapshotGenerationReferences.Remove(generation);
+                }
+                else
+                {
+                    owner._snapshotGenerationReferences[generation] = generationReferences;
+                }
+            }
+        }
+    }
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        public static EmptyDisposable Instance { get; } = new();
+
+        public void Dispose()
+        {
         }
     }
 }

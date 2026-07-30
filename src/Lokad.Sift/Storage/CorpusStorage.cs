@@ -1,9 +1,15 @@
+using System.Globalization;
+using Lokad.Sift;
 using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
 
 public sealed class CorpusStorage : ISiftStorage
 {
+    private const ulong GenerationLeaseMagic = 0x455341454C544653UL;
+    private const int GenerationLeaseVersion = 1;
+    private const int GenerationLeaseHeaderSize = 40;
+    private const int GenerationLeaseChecksumSize = 8;
     private readonly string _rootPath;
     private readonly object _layoutLock = new();
     private bool _segmentDirectoriesRecovered;
@@ -17,6 +23,8 @@ public sealed class CorpusStorage : ISiftStorage
     public string SegmentsPath => Path.Combine(_rootPath, "segments");
     public string TempPath => Path.Combine(_rootPath, "temp");
     public string LockPath => Path.Combine(_rootPath, "lock");
+    internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
+    private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
     internal PublicationFaultInjector? FaultInjector { get; set; }
     public bool HasManifest => File.Exists(ManifestPath);
 
@@ -26,8 +34,15 @@ public sealed class CorpusStorage : ISiftStorage
         Directory.CreateDirectory(SegmentsPath);
         Directory.CreateDirectory(TempPath);
         Directory.CreateDirectory(LockPath);
+        Directory.CreateDirectory(GenerationLeasesPath);
+        if (!File.Exists(ReclamationStatePath))
+        {
+            File.WriteAllBytes(ReclamationStatePath, [0]);
+        }
+
         RecoverStaleTempEntries();
         RecoverManifestTempFile();
+        RecoverGenerationLeaseTempFiles();
 
         if (_segmentDirectoriesRecovered)
         {
@@ -50,18 +65,30 @@ public sealed class CorpusStorage : ISiftStorage
     {
         Directory.CreateDirectory(_rootPath);
         Directory.CreateDirectory(LockPath);
-        EnsureLayout();
         var lockPath = Path.Combine(LockPath, "writer.lock");
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            FileStream stream;
             try
             {
-                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException)
             {
                 Thread.Sleep(50);
+                continue;
+            }
+
+            try
+            {
+                EnsureLayout();
+                return stream;
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
             }
         }
     }
@@ -71,6 +98,7 @@ public sealed class CorpusStorage : ISiftStorage
     public BuildPublication PublishFullBuild(IReadOnlyList<IReadOnlyList<StoredDocument>> segments, CancellationToken cancellationToken)
     {
         EnsureLayout();
+        EnsureReplacementAllowedUnderWriterLock();
 
         var existing = File.Exists(ManifestPath) ? ReadManifest() : null;
         var corpusId = existing?.CorpusId ?? Guid.NewGuid();
@@ -95,6 +123,8 @@ public sealed class CorpusStorage : ISiftStorage
     public SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken)
     {
         EnsureLayout();
+        // A crash can leave this pack published but absent from the manifest; startup must sweep it.
+        SetReclamationPending(isPending: true);
         var tempSegmentDirectory = Path.Combine(TempPath, segmentId.ToString("X16"));
         Directory.CreateDirectory(tempSegmentDirectory);
         var tempSegmentPath = Path.Combine(tempSegmentDirectory, "segment.pack");
@@ -214,8 +244,163 @@ public sealed class CorpusStorage : ISiftStorage
         return new MappedSegment(Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack"), validateChecksums);
     }
 
+    bool ISiftStorage.IsReclamationPending
+    {
+        get
+        {
+            if (!File.Exists(ReclamationStatePath))
+            {
+                // A pre-marker corpus may contain legacy orphans, so absence is conservatively pending.
+                return HasManifest;
+            }
+
+            using var stream = new FileStream(ReclamationStatePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return stream.ReadByte() != 0;
+        }
+    }
+
+    void ISiftStorage.EnsureSnapshotMetadata()
+    {
+        if (!HasManifest)
+        {
+            if (!File.Exists(ManifestPath + ".tmp"))
+            {
+                return;
+            }
+
+            using var recoveryLock = AcquireWriterLock();
+            EnsureCurrentGenerationLeaseUnderWriterLock();
+            SetReclamationPending(isPending: true);
+            return;
+        }
+
+        var manifest = ReadManifest();
+        var leasePath = GetGenerationLeasePath(manifest.Generation);
+        if (File.Exists(leasePath))
+        {
+            // Normal startup stays read-only and does not contend with writers.
+            using var stream = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            ValidateGenerationLease(stream, manifest);
+            return;
+        }
+
+        // Pre-lease corpora need a one-time writer-serialized migration and orphan sweep.
+        using var migrationLock = AcquireWriterLock();
+        EnsureCurrentGenerationLeaseUnderWriterLock();
+        SetReclamationPending(isPending: true);
+    }
+
+    StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
+    {
+        // Publication can advance the manifest between the read and lease open; retry only that race.
+        while (true)
+        {
+            if (!HasManifest)
+            {
+                return new StorageReadSnapshot(
+                    new CorpusManifest(Guid.Empty, 0, []),
+                    EmptyDisposable.Instance);
+            }
+
+            var manifest = ReadManifest();
+            var leasePath = GetGenerationLeasePath(manifest.Generation);
+            FileStream lease;
+            try
+            {
+                // FileShare.Read lets other readers join but prevents reclamation's exclusive delete.
+                lease = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            }
+            catch (FileNotFoundException)
+            {
+                if (HasManifest && ReadManifest().Generation != manifest.Generation)
+                {
+                    continue;
+                }
+
+                throw new InvalidDataException(
+                    $"Missing Sift generation lease for manifest generation {manifest.Generation}.");
+            }
+            catch (DirectoryNotFoundException)
+            {
+                if (HasManifest && ReadManifest().Generation != manifest.Generation)
+                {
+                    continue;
+                }
+
+                throw new InvalidDataException(
+                    $"Missing Sift generation lease directory for manifest generation {manifest.Generation}.");
+            }
+            catch (IOException)
+            {
+                if (HasManifest && ReadManifest().Generation != manifest.Generation)
+                {
+                    continue;
+                }
+
+                throw;
+            }
+
+            try
+            {
+                ValidateGenerationLease(lease, manifest);
+                return new StorageReadSnapshot(manifest, lease);
+            }
+            catch
+            {
+                lease.Dispose();
+                throw;
+            }
+        }
+    }
+
+    StorageStats ISiftStorage.GetStorageStats()
+    {
+        using var writerLock = AcquireWriterLock();
+        var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+        return GetStorageStatsUnderWriterLock(reclamation);
+    }
+
+    void ISiftStorage.ReclaimUnreferencedSegments(CancellationToken cancellationToken)
+    {
+        using var writerLock = AcquireWriterLock(cancellationToken);
+        _ = ReclaimUnreferencedSegmentsUnderWriterLock(cancellationToken);
+    }
+
+    void ISiftStorage.EnsureReplacementAllowedUnderWriterLock()
+    {
+        EnsureReplacementAllowedUnderWriterLock();
+    }
+
+    private void EnsureReplacementAllowedUnderWriterLock()
+    {
+        // One unreclaimed replacement generation is the disk-growth bound.
+        var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+        if (reclamation.IsBlocked)
+        {
+            throw new InvalidDataException(
+                "Cannot replace Sift segments because generation-lease metadata is missing or invalid.");
+        }
+
+        if (reclamation.FailedSegmentCount > 0)
+        {
+            throw new IOException(
+                $"Cannot replace Sift segments because {reclamation.FailedSegmentCount} retired segment pack(s) " +
+                $"({reclamation.FailedSegmentBytes} bytes) could not be deleted.");
+        }
+
+        if (reclamation.DeferredSegmentCount > 0)
+        {
+            throw new InvalidOperationException(
+                $"Cannot replace Sift segments while {reclamation.DeferredSegmentCount} retired segment pack(s) " +
+                $"({reclamation.DeferredSegmentBytes} bytes) remain leased by older snapshots.");
+        }
+    }
+
     private void WriteManifest(CorpusManifest manifest)
     {
+        // Set the retry marker and publish the reader lease before making the generation discoverable.
+        SetReclamationPending(isPending: true);
+        EnsureGenerationLease(manifest);
         var tempPath = ManifestPath + ".tmp";
         var segmentTableLength = 0;
         foreach (var segment in manifest.Segments)
@@ -276,6 +461,8 @@ public sealed class CorpusStorage : ISiftStorage
         {
             File.Move(tempPath, ManifestPath, overwrite: true);
         }
+
+        TryReclaimAfterPublication();
     }
 
     private static void ValidateSegmentPack(string path)
@@ -318,6 +505,19 @@ public sealed class CorpusStorage : ISiftStorage
         File.Move(tempPath, ManifestPath, overwrite: true);
     }
 
+    private void RecoverGenerationLeaseTempFiles()
+    {
+        if (!Directory.Exists(GenerationLeasesPath))
+        {
+            return;
+        }
+
+        foreach (var filePath in Directory.EnumerateFiles(GenerationLeasesPath, "*.tmp"))
+        {
+            File.Delete(filePath);
+        }
+    }
+
     private void RecoverIncompleteSegmentDirectories()
     {
         if (!Directory.Exists(SegmentsPath))
@@ -345,6 +545,499 @@ public sealed class CorpusStorage : ISiftStorage
         }
     }
 
+    private void EnsureCurrentGenerationLeaseUnderWriterLock()
+    {
+        if (HasManifest)
+        {
+            EnsureGenerationLease(ReadManifest());
+        }
+    }
+
+    private void EnsureGenerationLease(CorpusManifest manifest)
+    {
+        // Readers pin a generation's segment set by holding this immutable file open.
+        Directory.CreateDirectory(GenerationLeasesPath);
+        var leasePath = GetGenerationLeasePath(manifest.Generation);
+        if (File.Exists(leasePath))
+        {
+            // A generation number may never be reused for different contents.
+            using var existing = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            ValidateGenerationLease(existing, manifest);
+            return;
+        }
+
+        var checksumOffset = checked(GenerationLeaseHeaderSize + manifest.Segments.Count * sizeof(ulong));
+        var bytes = GC.AllocateUninitializedArray<byte>(checked(checksumOffset + GenerationLeaseChecksumSize));
+        var span = bytes.AsSpan();
+        LittleEndianCodec.WriteUInt64(span, GenerationLeaseMagic);
+        LittleEndianCodec.WriteInt32(span[8..], GenerationLeaseVersion);
+        manifest.CorpusId.TryWriteBytes(span[12..28]);
+        LittleEndianCodec.WriteUInt64(span[28..], manifest.Generation);
+        LittleEndianCodec.WriteInt32(span[36..], manifest.Segments.Count);
+        for (var i = 0; i < manifest.Segments.Count; i++)
+        {
+            LittleEndianCodec.WriteUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..], manifest.Segments[i].SegmentId);
+        }
+
+        LittleEndianCodec.WriteUInt64(
+            span[checksumOffset..],
+            Hashing.Fnv1A64(span[..checksumOffset]));
+
+        var tempPath = leasePath + "." + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture) + ".tmp";
+        try
+        {
+            // Flush then rename so a reader can never acquire a partial lease.
+            using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.SetLength(bytes.Length);
+                RandomAccess.Write(stream.SafeFileHandle, bytes, 0);
+                RandomAccess.FlushToDisk(stream.SafeFileHandle);
+            }
+
+            File.Move(tempPath, leasePath);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private string GetGenerationLeasePath(ulong generation)
+    {
+        return Path.Combine(GenerationLeasesPath, generation.ToString("X16", CultureInfo.InvariantCulture) + ".lease");
+    }
+
+    private static GenerationLeaseData ReadGenerationLease(FileStream stream)
+    {
+        if (stream.Length < GenerationLeaseHeaderSize + GenerationLeaseChecksumSize ||
+            stream.Length > int.MaxValue)
+        {
+            throw new InvalidDataException("Invalid Sift generation lease length.");
+        }
+
+        stream.Position = 0;
+        var bytes = GC.AllocateUninitializedArray<byte>((int)stream.Length);
+        stream.ReadExactly(bytes);
+        var span = bytes.AsSpan();
+        if (LittleEndianCodec.ReadUInt64(span) != GenerationLeaseMagic)
+        {
+            throw new InvalidDataException("Invalid Sift generation lease magic.");
+        }
+
+        var version = LittleEndianCodec.ReadInt32(span[8..]);
+        if (version != GenerationLeaseVersion)
+        {
+            throw new InvalidDataException($"Unsupported Sift generation lease version: {version}.");
+        }
+
+        var count = LittleEndianCodec.ReadInt32(span[36..]);
+        if (count < 0)
+        {
+            throw new InvalidDataException("Invalid Sift generation lease segment count.");
+        }
+
+        var payloadLength = bytes.Length - GenerationLeaseHeaderSize - GenerationLeaseChecksumSize;
+        if (count > payloadLength / sizeof(ulong))
+        {
+            throw new InvalidDataException("Invalid Sift generation lease segment count.");
+        }
+
+        var checksumOffset = GenerationLeaseHeaderSize + count * sizeof(ulong);
+        if (bytes.Length != checksumOffset + GenerationLeaseChecksumSize)
+        {
+            throw new InvalidDataException("Invalid Sift generation lease payload length.");
+        }
+
+        var expectedChecksum = LittleEndianCodec.ReadUInt64(span[checksumOffset..]);
+        if (expectedChecksum != Hashing.Fnv1A64(span[..checksumOffset]))
+        {
+            throw new InvalidDataException("Invalid Sift generation lease checksum.");
+        }
+
+        var segmentIds = new ulong[count];
+        for (var i = 0; i < count; i++)
+        {
+            segmentIds[i] = LittleEndianCodec.ReadUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..]);
+        }
+
+        return new GenerationLeaseData(
+            new Guid(span[12..28]),
+            LittleEndianCodec.ReadUInt64(span[28..]),
+            segmentIds);
+    }
+
+    private static void ValidateGenerationLease(FileStream stream, CorpusManifest manifest)
+    {
+        var lease = ReadGenerationLease(stream);
+        if (lease.CorpusId != manifest.CorpusId ||
+            lease.Generation != manifest.Generation ||
+            lease.SegmentIds.Length != manifest.Segments.Count)
+        {
+            throw new InvalidDataException("Sift generation lease does not match its manifest.");
+        }
+
+        for (var i = 0; i < lease.SegmentIds.Length; i++)
+        {
+            if (lease.SegmentIds[i] != manifest.Segments[i].SegmentId)
+            {
+                throw new InvalidDataException("Sift generation lease segment table does not match its manifest.");
+            }
+        }
+    }
+
+    private LeaseProtection InspectGenerationLeases(
+        CorpusManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var protectedSegmentIds = manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
+        var currentLeasePath = GetGenerationLeasePath(manifest.Generation);
+        try
+        {
+            // Without trusted current metadata, reachability cannot be established safely.
+            using var currentLease = new FileStream(currentLeasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            ValidateGenerationLease(currentLease, manifest);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new LeaseProtection(protectedSegmentIds, 0, null, IsBlocked: true);
+        }
+
+        var leasedGenerationCount = 0;
+        ulong? oldestLeasedGeneration = null;
+        var isBlocked = false;
+        foreach (var leasePath in Directory.EnumerateFiles(GenerationLeasesPath, "*.lease"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.Equals(leasePath, currentLeasePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                // DeleteOnClose closes the race between proving no reader exists and removing the lease.
+                using (new FileStream(
+                    leasePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None,
+                    bufferSize: 1,
+                    FileOptions.DeleteOnClose))
+                {
+                }
+
+                continue;
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+                isBlocked = true;
+                continue;
+            }
+
+            try
+            {
+                // Exclusive open failed: treat a valid shared handle as a live cross-process reader.
+                using var activeLease = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var lease = ReadGenerationLease(activeLease);
+                var fileName = Path.GetFileNameWithoutExtension(leasePath);
+                if (lease.CorpusId != manifest.CorpusId ||
+                    fileName.Length != 16 ||
+                    !ulong.TryParse(fileName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var fileGeneration) ||
+                    fileGeneration != lease.Generation)
+                {
+                    isBlocked = true;
+                    continue;
+                }
+
+                for (var i = 0; i < lease.SegmentIds.Length; i++)
+                {
+                    protectedSegmentIds.Add(lease.SegmentIds[i]);
+                }
+
+                leasedGenerationCount++;
+                oldestLeasedGeneration = oldestLeasedGeneration is null
+                    ? lease.Generation
+                    : Math.Min(oldestLeasedGeneration.Value, lease.Generation);
+            }
+            catch (FileNotFoundException)
+            {
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                isBlocked = true;
+            }
+        }
+
+        return new LeaseProtection(
+            protectedSegmentIds,
+            leasedGenerationCount,
+            oldestLeasedGeneration,
+            isBlocked);
+    }
+
+    private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock(
+        CancellationToken cancellationToken = default)
+    {
+        EnsureLayout();
+        var physicalSegments = EnumeratePhysicalSegments(cancellationToken);
+        if (!HasManifest)
+        {
+            // No manifest means no authoritative reachability set: preserve every complete pack.
+            var physicalBytes = physicalSegments.Sum(static segment => segment.Bytes);
+            return CompleteReclamation(new SegmentReclamationStats(
+                ReclaimedSegmentCount: 0,
+                ReclaimedSegmentBytes: 0,
+                DeferredSegmentCount: 0,
+                DeferredSegmentBytes: 0,
+                FailedSegmentCount: 0,
+                FailedSegmentBytes: 0,
+                BlockedSegmentCount: physicalSegments.Count,
+                BlockedSegmentBytes: physicalBytes,
+                IsBlocked: physicalSegments.Count > 0,
+                LeasedGenerationCount: 0,
+                OldestLeasedGeneration: null));
+        }
+
+        var manifest = ReadManifest();
+        var manifestSegmentIds = manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
+        var protection = InspectGenerationLeases(manifest, cancellationToken);
+        if (protection.IsBlocked)
+        {
+            // A malformed or inaccessible lease could name any retired pack, so delete none.
+            var retired = physicalSegments.Where(segment => !manifestSegmentIds.Contains(segment.SegmentId)).ToArray();
+            return CompleteReclamation(new SegmentReclamationStats(
+                ReclaimedSegmentCount: 0,
+                ReclaimedSegmentBytes: 0,
+                DeferredSegmentCount: 0,
+                DeferredSegmentBytes: 0,
+                FailedSegmentCount: 0,
+                FailedSegmentBytes: 0,
+                BlockedSegmentCount: retired.Length,
+                BlockedSegmentBytes: retired.Sum(static segment => segment.Bytes),
+                IsBlocked: true,
+                protection.LeasedGenerationCount,
+                protection.OldestLeasedGeneration));
+        }
+
+        var reclaimedSegmentCount = 0;
+        long reclaimedSegmentBytes = 0;
+        var deferredSegmentCount = 0;
+        long deferredSegmentBytes = 0;
+        var failedSegmentCount = 0;
+        long failedSegmentBytes = 0;
+        foreach (var segment in physicalSegments)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (manifestSegmentIds.Contains(segment.SegmentId))
+            {
+                continue;
+            }
+
+            if (protection.ProtectedSegmentIds.Contains(segment.SegmentId))
+            {
+                deferredSegmentCount++;
+                deferredSegmentBytes += segment.Bytes;
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(segment.DirectoryPath, recursive: true);
+                reclaimedSegmentCount++;
+                reclaimedSegmentBytes += segment.Bytes;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                reclaimedSegmentCount++;
+                reclaimedSegmentBytes += segment.Bytes;
+            }
+            catch (IOException)
+            {
+                failedSegmentCount++;
+                failedSegmentBytes += segment.Bytes;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failedSegmentCount++;
+                failedSegmentBytes += segment.Bytes;
+            }
+        }
+
+        return CompleteReclamation(new SegmentReclamationStats(
+            reclaimedSegmentCount,
+            reclaimedSegmentBytes,
+            deferredSegmentCount,
+            deferredSegmentBytes,
+            failedSegmentCount,
+            failedSegmentBytes,
+            BlockedSegmentCount: 0,
+            BlockedSegmentBytes: 0,
+            IsBlocked: false,
+            protection.LeasedGenerationCount,
+            protection.OldestLeasedGeneration));
+    }
+
+    private StorageStats GetStorageStatsUnderWriterLock(SegmentReclamationStats reclamation)
+    {
+        var manifestSegmentIds = HasManifest
+            ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
+            : [];
+        var physicalSegments = EnumeratePhysicalSegments();
+        long manifestSegmentBytes = 0;
+        var manifestSegmentCount = 0;
+        long retiredSegmentBytes = 0;
+        var retiredSegmentCount = 0;
+        long physicalSegmentBytes = 0;
+        foreach (var segment in physicalSegments)
+        {
+            physicalSegmentBytes += segment.Bytes;
+            if (manifestSegmentIds.Contains(segment.SegmentId))
+            {
+                manifestSegmentCount++;
+                manifestSegmentBytes += segment.Bytes;
+            }
+            else
+            {
+                retiredSegmentCount++;
+                retiredSegmentBytes += segment.Bytes;
+            }
+        }
+
+        var deferredSegmentCount = Math.Min(retiredSegmentCount, reclamation.DeferredSegmentCount);
+        var deferredSegmentBytes = Math.Min(retiredSegmentBytes, reclamation.DeferredSegmentBytes);
+        var blockedSegmentCount = Math.Min(
+            retiredSegmentCount - deferredSegmentCount,
+            reclamation.BlockedSegmentCount);
+        var blockedSegmentBytes = Math.Min(
+            retiredSegmentBytes - deferredSegmentBytes,
+            reclamation.BlockedSegmentBytes);
+        return new StorageStats(
+            ManifestSegmentCount: manifestSegmentCount,
+            ManifestSegmentBytes: manifestSegmentBytes,
+            PhysicalSegmentCount: physicalSegments.Count,
+            PhysicalSegmentBytes: physicalSegmentBytes,
+            RetiredSegmentCount: retiredSegmentCount,
+            RetiredSegmentBytes: retiredSegmentBytes,
+            TemporaryBytes: GetTemporaryBytes(),
+            LeasedGenerationCount: reclamation.LeasedGenerationCount,
+            OldestLeasedGeneration: reclamation.OldestLeasedGeneration,
+            SnapshotDeferredSegmentCount: deferredSegmentCount,
+            SnapshotDeferredSegmentBytes: deferredSegmentBytes,
+            PendingDeletionSegmentCount: retiredSegmentCount - deferredSegmentCount - blockedSegmentCount,
+            PendingDeletionSegmentBytes: retiredSegmentBytes - deferredSegmentBytes - blockedSegmentBytes,
+            BlockedReclamationSegmentCount: blockedSegmentCount,
+            BlockedReclamationSegmentBytes: blockedSegmentBytes,
+            IsReclamationBlocked: reclamation.IsBlocked);
+    }
+
+    private void TryReclaimAfterPublication()
+    {
+        try
+        {
+            _ = ReclaimUnreferencedSegmentsUnderWriterLock();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // The manifest is already committed; the persistent marker makes cleanup retryable.
+        }
+    }
+
+    private SegmentReclamationStats CompleteReclamation(SegmentReclamationStats reclamation)
+    {
+        SetReclamationPending(
+            reclamation.IsBlocked ||
+            reclamation.DeferredSegmentCount > 0 ||
+            reclamation.FailedSegmentCount > 0 ||
+            reclamation.LeasedGenerationCount > 0);
+        return reclamation;
+    }
+
+    private void SetReclamationPending(bool isPending)
+    {
+        try
+        {
+            // This advisory byte avoids directory scans on every snapshot disposal.
+            using var stream = new FileStream(
+                ReclamationStatePath,
+                FileMode.OpenOrCreate,
+                FileAccess.Write,
+                FileShare.ReadWrite);
+            stream.SetLength(1);
+            stream.WriteByte(isPending ? (byte)1 : (byte)0);
+            stream.Flush(flushToDisk: false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private List<PhysicalSegment> EnumeratePhysicalSegments(
+        CancellationToken cancellationToken = default)
+    {
+        var segments = new List<PhysicalSegment>();
+        if (!Directory.Exists(SegmentsPath))
+        {
+            return segments;
+        }
+
+        foreach (var directoryPath in Directory.EnumerateDirectories(SegmentsPath))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directoryName = Path.GetFileName(directoryPath);
+            if (directoryName.Length != 16 ||
+                !ulong.TryParse(directoryName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var segmentId))
+            {
+                continue;
+            }
+
+            var packPath = Path.Combine(directoryPath, "segment.pack");
+            if (File.Exists(packPath))
+            {
+                segments.Add(new PhysicalSegment(segmentId, directoryPath, new FileInfo(packPath).Length));
+            }
+        }
+
+        return segments;
+    }
+
+    private long GetTemporaryBytes()
+    {
+        long bytes = 0;
+        if (Directory.Exists(TempPath))
+        {
+            foreach (var filePath in Directory.EnumerateFiles(TempPath, "*", SearchOption.AllDirectories))
+            {
+                bytes += new FileInfo(filePath).Length;
+            }
+        }
+
+        var manifestTempPath = ManifestPath + ".tmp";
+        if (File.Exists(manifestTempPath))
+        {
+            bytes += new FileInfo(manifestTempPath).Length;
+        }
+
+        if (Directory.Exists(GenerationLeasesPath))
+        {
+            foreach (var filePath in Directory.EnumerateFiles(GenerationLeasesPath, "*.tmp"))
+            {
+                bytes += new FileInfo(filePath).Length;
+            }
+        }
+
+        return bytes;
+    }
+
     private static int GetDeadOrdinalPayloadLength(ReadOnlySpan<uint> deadOrdinals)
     {
         var length = 0;
@@ -363,6 +1056,31 @@ public sealed class CorpusStorage : ISiftStorage
         if (offset < 0 || length < 0 || offset > fileLength || length > fileLength - offset)
         {
             throw new InvalidDataException($"Invalid Sift manifest {name} bounds.");
+        }
+    }
+
+    private readonly record struct PhysicalSegment(
+        ulong SegmentId,
+        string DirectoryPath,
+        long Bytes);
+
+    private readonly record struct GenerationLeaseData(
+        Guid CorpusId,
+        ulong Generation,
+        ulong[] SegmentIds);
+
+    private readonly record struct LeaseProtection(
+        HashSet<ulong> ProtectedSegmentIds,
+        int LeasedGenerationCount,
+        ulong? OldestLeasedGeneration,
+        bool IsBlocked);
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        public static EmptyDisposable Instance { get; } = new();
+
+        public void Dispose()
+        {
         }
     }
 }

@@ -12,8 +12,15 @@ public sealed class Sift : ISift
     private readonly ISiftStorage _storage;
     private readonly IndexBuilder _builder;
     private readonly SiftOptions _options;
+    private readonly CancellationTokenSource _reclamationCancellation = new();
+    private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
+    // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
+    private readonly object _reclamationSync = new();
     private int _activeWriters;
     private int _currentActivity;
+    private int _reclamationRequests;
+    private int _reclamationWorkerActive;
+    private int _disposed;
     internal ISiftStorage Storage => _storage;
 
     public Sift(string rootPath, SiftOptions? options = null)
@@ -26,6 +33,8 @@ public sealed class Sift : ISift
         _options = options ?? new SiftOptions();
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _builder = new IndexBuilder(_storage, _options);
+        _storage.EnsureSnapshotMetadata();
+        ScheduleReclamationIfPending();
     }
 
     public static Sift CreateInMemory(SiftOptions? options = null)
@@ -35,12 +44,15 @@ public sealed class Sift : ISift
 
     public IIndexSnapshot OpenSnapshot(SearchOptions options = default)
     {
-        return new SearchSnapshot(_storage, _options, options);
+        return new SearchSnapshot(_storage, _options, options, ScheduleReclamationIfPending);
     }
 
     public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default)
     {
-        return new OverlaySnapshot(new SearchSnapshot(_storage, _options, options), _options, options);
+        return new OverlaySnapshot(
+            new SearchSnapshot(_storage, _options, options, ScheduleReclamationIfPending),
+            _options,
+            options);
     }
 
     public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken = default)
@@ -123,6 +135,11 @@ public sealed class Sift : ISift
             DeadOrdinalEntries: deadDocuments,
             SegmentsWithDeletions: segmentsWithDeletions,
             SmallSegmentCount: smallSegmentCount);
+    }
+
+    public StorageStats GetStorageStats()
+    {
+        return _storage.GetStorageStats();
     }
 
     public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default)
@@ -239,6 +256,7 @@ public sealed class Sift : ISift
 
     public Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken = default)
     {
+        ValidateCompactOptions(options);
         var activity = BeginActivity(SiftActivity.Compact);
         return Task.Run(async () =>
         {
@@ -288,6 +306,7 @@ public sealed class Sift : ISift
                 PeakManagedBytes: 0);
         }
 
+        _storage.EnsureReplacementAllowedUnderWriterLock();
         var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var publication = PublishCompactedSegments(manifest, selectedSegmentIds, segmentSeed, options, cancellationToken);
         var newSegments = publication.Segments;
@@ -317,6 +336,136 @@ public sealed class Sift : ISift
 
     public void Dispose()
     {
+        lock (_reclamationSync)
+        {
+            if (_disposed != 0)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _disposed, 1);
+            _reclamationCancellation.Cancel();
+        }
+
+        _reclamationIdle.Wait();
+        _reclamationCancellation.Dispose();
+        _reclamationIdle.Dispose();
+    }
+
+    private void ScheduleReclamationIfPending()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_storage.IsReclamationPending)
+            {
+                return;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        lock (_reclamationSync)
+        {
+            if (_disposed != 0)
+            {
+                return;
+            }
+
+            _reclamationRequests = 1;
+            if (_reclamationWorkerActive != 0)
+            {
+                return;
+            }
+
+            _reclamationWorkerActive = 1;
+            _reclamationIdle.Reset();
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static owner => owner.RunScheduledReclamation(),
+                this,
+                preferLocal: false);
+        }
+    }
+
+    private void RunScheduledReclamation()
+    {
+        try
+        {
+            while (true)
+            {
+                lock (_reclamationSync)
+                {
+                    _reclamationRequests = 0;
+                }
+
+                try
+                {
+                    _storage.ReclaimUnreferencedSegments(_reclamationCancellation.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                }
+
+                lock (_reclamationSync)
+                {
+                    if (_disposed == 0 && _reclamationRequests != 0)
+                    {
+                        continue;
+                    }
+
+                    _reclamationWorkerActive = 0;
+                    _reclamationIdle.Set();
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            lock (_reclamationSync)
+            {
+                if (_reclamationWorkerActive != 0)
+                {
+                    _reclamationWorkerActive = 0;
+                    _reclamationIdle.Set();
+                }
+            }
+        }
+    }
+
+    private static void ValidateCompactOptions(CompactOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.MaxMergedSegments <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxMergedSegments must be positive.");
+        }
+
+        if (!double.IsFinite(options.DeadFractionThreshold) ||
+            options.DeadFractionThreshold < 0d ||
+            options.DeadFractionThreshold > 1d)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "DeadFractionThreshold must be between zero and one.");
+        }
+
+        if (options.SegmentCountTrigger < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "SegmentCountTrigger must be positive.");
+        }
+
+        if (options.MetadataBloatDeadOrdinalsThreshold < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MetadataBloatDeadOrdinalsThreshold must be positive.");
+        }
     }
 
     private IDisposable BeginActivity(SiftActivity activity)
