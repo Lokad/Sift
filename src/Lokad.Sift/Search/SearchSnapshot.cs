@@ -14,11 +14,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private const int OrderedAnchorPrecheckCandidateLimit = 3000;
     private const int ConstrainedOrderedAnchorPrecheckCandidateLimit = 50000;
     private const int MaxConstrainedGapSearchBytes = 512;
-    private readonly CorpusManifest _manifest;
-    private readonly List<SegmentCache> _segments;
+    private readonly IReadOnlyList<SegmentManifestEntry> _segments;
+    private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
     private readonly StorageReadSnapshot _storageSnapshot;
+    // Keep the generation lease alive until every operation that may open one
+    // of its segment packs has completed.
+    private readonly ReaderWriterLockSlim _lifetimeLock = new();
     private Action? _onDisposed;
     private int _disposed;
 
@@ -28,35 +31,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         SearchOptions searchOptions,
         Action? onDisposed = null)
     {
+        _storage = storage;
         _options = options;
         _searchOptions = searchOptions;
         _onDisposed = onDisposed;
         _storageSnapshot = storage.OpenReadSnapshot();
-        _manifest = _storageSnapshot.Manifest;
-
-        _segments = new List<SegmentCache>(_manifest.Segments.Count);
-        try
-        {
-            foreach (var entry in _manifest.Segments)
-            {
-                _segments.Add(new SegmentCache(storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals));
-            }
-        }
-        catch
-        {
-            foreach (var cache in _segments)
-            {
-                cache.Segment.Dispose();
-            }
-
-            _storageSnapshot.Dispose();
-            throw;
-        }
+        // A snapshot pins the manifest generation, not every segment mapping.
+        // Search operations open only the segment packs they are actively using.
+        _segments = _storageSnapshot.Manifest.Segments;
     }
 
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         var resolvedCaseMode = ResolveCaseMode(query);
         var matcher = new PathFilterMatcher(pathFilter);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
@@ -72,8 +59,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var explainedPathCost = 0d;
         var alternativeSums = new Dictionary<(SearchPlanFamily PlanFamily, SearchCandidateKind CandidateKind, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
 
-        foreach (var cache in _segments)
+        foreach (var entry in _segments)
         {
+            using var cache = OpenSegment(entry);
             var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
             scopeDocuments += segmentPlan.Scope.Ordinals.Length;
             scopeBytes += segmentPlan.Scope.Bytes;
@@ -165,7 +153,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     internal SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, IPathVisibility? pathVisibility, CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         return CanUseSegmentParallelSearch(query)
             ? SearchParallel(query, pathFilter, collector, pathVisibility, cancellationToken)
             : SearchSequential(query, pathFilter, collector, pathVisibility, cancellationToken);
@@ -204,9 +192,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var hitDocuments = 0;
         var stopReason = SearchStopReason.None;
 
-        foreach (var cache in _segments)
+        foreach (var entry in _segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            using var cache = OpenSegment(entry);
             var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
             scopeDocuments += segmentPlan.Scope.Ordinals.Length;
             scopeBytes += segmentPlan.Scope.Bytes;
@@ -349,7 +338,8 @@ Done:
 
         Parallel.For(0, _segments.Count, options, index =>
         {
-            results[index] = SearchSegmentFully(_segments[index], queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, cancellationToken);
+            using var cache = OpenSegment(_segments[index]);
+            results[index] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, cancellationToken);
         });
 
         var scopeDocuments = 0;
@@ -466,8 +456,8 @@ Done:
 
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
     {
-        ThrowIfDisposed();
-        var cache = GetSegment(hit.SegmentId);
+        using var operation = BeginOperation();
+        using var cache = OpenSegment(hit.SegmentId);
 
         var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
         var path = cache.Segment.GetPath(document);
@@ -493,18 +483,21 @@ Done:
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
 
-        foreach (var cache in _segments)
+        foreach (var entry in _segments)
         {
+            using var cache = OpenSegment(entry);
             if (!cache.Segment.TryFindDocumentOrdinal(normalizedPath, out var ordinal) || IsDeadOrdinal(cache.DeadOrdinals, ordinal))
             {
                 continue;
             }
 
             var document = cache.Segment.GetDocument(ordinal);
-            content = cache.Segment.GetContentMemory(document);
+            // The segment mapping is operation-scoped, so the returned memory
+            // must own its bytes independently of the mapping.
+            content = cache.Segment.GetContentBytes(document).ToArray();
             return true;
         }
 
@@ -514,17 +507,19 @@ Done:
 
     internal string GetPath(in RawHit hit)
     {
-        var cache = GetSegment(hit.SegmentId);
+        using var operation = BeginOperation();
+        using var cache = OpenSegment(hit.SegmentId);
         var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
         return cache.Segment.GetPath(document);
     }
 
     internal ulong[] GetSegmentIds()
     {
+        using var operation = BeginOperation();
         var ids = GC.AllocateUninitializedArray<ulong>(_segments.Count);
         for (var i = 0; i < _segments.Count; i++)
         {
-            ids[i] = _segments[i].Segment.SegmentId;
+            ids[i] = _segments[i].SegmentId;
         }
 
         return ids;
@@ -532,36 +527,54 @@ Done:
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
         {
             return;
         }
 
+        _lifetimeLock.EnterWriteLock();
         try
-        {
-            foreach (var cache in _segments)
-            {
-                cache.Segment.Dispose();
-            }
-        }
-        finally
         {
             _storageSnapshot.Dispose();
             Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
         }
+        finally
+        {
+            _lifetimeLock.ExitWriteLock();
+        }
     }
 
-    private SegmentCache GetSegment(ulong segmentId)
+    private SegmentCache OpenSegment(ulong segmentId)
     {
         foreach (var candidate in _segments)
         {
-            if (candidate.Segment.SegmentId == segmentId)
+            if (candidate.SegmentId == segmentId)
             {
-                return candidate;
+                return OpenSegment(candidate);
             }
         }
 
         throw new InvalidOperationException($"Unknown segment id {segmentId}.");
+    }
+
+    private SegmentCache OpenSegment(SegmentManifestEntry entry)
+    {
+        return new SegmentCache(_storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals);
+    }
+
+    private SnapshotOperation BeginOperation()
+    {
+        _lifetimeLock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            return new SnapshotOperation(_lifetimeLock);
+        }
+        catch
+        {
+            _lifetimeLock.ExitReadLock();
+            throw;
+        }
     }
 
     private void ThrowIfDisposed()
@@ -1443,9 +1456,37 @@ internal interface IPathVisibility
     bool IsVisible(ReadOnlySpan<byte> normalizedPathUtf8);
 }
 
-internal sealed record SegmentCache(
-    MappedSegment Segment,
-    uint[] DeadOrdinals);
+internal sealed class SegmentCache : IDisposable
+{
+    public SegmentCache(MappedSegment segment, uint[] deadOrdinals)
+    {
+        Segment = segment;
+        DeadOrdinals = deadOrdinals;
+    }
+
+    public MappedSegment Segment { get; }
+    public uint[] DeadOrdinals { get; }
+
+    public void Dispose()
+    {
+        Segment.Dispose();
+    }
+}
+
+internal readonly struct SnapshotOperation : IDisposable
+{
+    private readonly ReaderWriterLockSlim _lifetimeLock;
+
+    public SnapshotOperation(ReaderWriterLockSlim lifetimeLock)
+    {
+        _lifetimeLock = lifetimeLock;
+    }
+
+    public void Dispose()
+    {
+        _lifetimeLock.ExitReadLock();
+    }
+}
 
 internal sealed class PreparedLiteralQuery
 {

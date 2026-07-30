@@ -369,7 +369,7 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
-    public async Task ReopenedCorpusValidatesEachImmutableSegmentOnce()
+    public async Task ReopenedCorpusValidatesEachImmutableSegmentOnFirstUseOnly()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha\n"),
@@ -387,9 +387,20 @@ public sealed class StorageIntegrityTests
         {
         }
 
-        Assert.Equal(1, storage.ValidatedSegmentCount);
-        using (reopened.OpenSnapshot())
+        Assert.Equal(0, storage.ValidatedSegmentCount);
+        using (var snapshot = reopened.OpenSnapshot())
         {
+            snapshot.Explain(
+                new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter());
+        }
+
+        Assert.Equal(1, storage.ValidatedSegmentCount);
+        using (var snapshot = reopened.OpenSnapshot())
+        {
+            snapshot.Explain(
+                new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter());
         }
 
         Assert.Equal(1, storage.ValidatedSegmentCount);
