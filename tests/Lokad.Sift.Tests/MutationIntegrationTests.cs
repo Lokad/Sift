@@ -469,6 +469,35 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task CompactionSelectsLowCountHighByteDeletionDebt()
+    {
+        var documents = Enumerable.Range(0, 100)
+            .Select(static i => (
+                $"src/{i:D3}.txt",
+                i == 0 ? new string('x', 1_000_000) : "alpha\n"))
+            .ToArray();
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1000
+        });
+        await index.Build(new InMemoryDocumentSource(documents));
+        await index.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/000.txt")]);
+
+        var before = index.GetMaintenanceStats();
+        var compact = await index.Compact(new CompactOptions());
+        var after = index.GetMaintenanceStats();
+
+        Assert.Equal(0.01d, before.DeadDocumentFraction, precision: 2);
+        Assert.True(before.DeadContentFraction > 0.99d);
+        Assert.Equal(1, compact.InputSegments);
+        Assert.Equal(1, compact.OutputSegments);
+        Assert.Equal(99, compact.MergedDocuments);
+        Assert.Equal(0d, after.DeadContentFraction);
+    }
+
+    [Fact]
     public async Task CompactionDoesNotRewriteContentFullSegments()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions

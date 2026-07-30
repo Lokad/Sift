@@ -179,6 +179,7 @@ public sealed record CompactOptions
         : this(
             MaxMergedSegments: 16,
             DeadFractionThreshold: 0.20,
+            DeadContentFractionThreshold: 0.20,
             SegmentCountTrigger: 16,
             MetadataBloatDeadOrdinalsThreshold: 1024,
             MaxInputSegmentBytes: 1L * 1024 * 1024 * 1024,
@@ -189,6 +190,7 @@ public sealed record CompactOptions
     public CompactOptions(
         int MaxMergedSegments = 16,
         double DeadFractionThreshold = 0.20,
+        double DeadContentFractionThreshold = 0.20,
         int SegmentCountTrigger = 16,
         int MetadataBloatDeadOrdinalsThreshold = 1024,
         long MaxInputSegmentBytes = 1L * 1024 * 1024 * 1024,
@@ -196,6 +198,7 @@ public sealed record CompactOptions
     {
         this.MaxMergedSegments = MaxMergedSegments;
         this.DeadFractionThreshold = DeadFractionThreshold;
+        this.DeadContentFractionThreshold = DeadContentFractionThreshold;
         this.SegmentCountTrigger = SegmentCountTrigger;
         this.MetadataBloatDeadOrdinalsThreshold = MetadataBloatDeadOrdinalsThreshold;
         this.MaxInputSegmentBytes = MaxInputSegmentBytes;
@@ -203,7 +206,10 @@ public sealed record CompactOptions
     }
 
     public int MaxMergedSegments { get; init; }
+    // Selects segments with enough dead document rows to justify rewriting.
     public double DeadFractionThreshold { get; init; }
+    // Selects segments whose deleted bodies account for this share of content bytes.
+    public double DeadContentFractionThreshold { get; init; }
     public int SegmentCountTrigger { get; init; }
     public int MetadataBloatDeadOrdinalsThreshold { get; init; }
     // Applies to physical packs; one larger debt-bearing segment remains reclaimable.
@@ -233,17 +239,31 @@ public readonly record struct ActivityStats(
     SiftActivity CurrentActivity);
 
 public readonly record struct MaintenanceStats(
+    // Manifest generation observed by this snapshot.
     ulong Generation,
+    // Packs referenced by the manifest.
     int SegmentCount,
+    // All rows, including superseded and deleted versions.
     int TotalDocuments,
+    // Rows visible to new snapshots.
     int LiveDocuments,
+    // Rows retained only until compaction.
     int DeadDocuments,
+    // Dead rows as a share of all rows.
     double DeadDocumentFraction,
+    // Dead body bytes as a share of all body bytes.
+    double DeadContentFraction,
+    // Body bytes before dead content is reclaimed.
     long ContentBytes,
+    // Body bytes expected to remain after compaction.
     long EstimatedLiveContentBytes,
+    // Body bytes attributable to dead rows.
     long EstimatedReclaimableContentBytes,
+    // Manifest entries used to mask dead rows.
     long DeadOrdinalEntries,
+    // Packs containing at least one dead row.
     int SegmentsWithDeletions,
+    // Live packs below both configured segment targets.
     int SmallSegmentCount);
 
 public readonly record struct StorageStats(

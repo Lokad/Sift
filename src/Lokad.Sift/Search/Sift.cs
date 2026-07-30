@@ -179,35 +179,9 @@ public sealed class Sift : ISift
             if (segment.DeadOrdinals.Length > 0)
             {
                 segmentsWithDeletions++;
-                if (segment.DeadContentBytes >= 0)
-                {
-                    reclaimableContentBytes = checked(
-                        reclaimableContentBytes + segment.DeadContentBytes);
-                }
-                else
-                {
-                    var key = new LegacyMaintenanceKey(
-                        segment.SegmentId,
-                        segment.DocumentCount,
-                        segment.ContentBytes,
-                        segment.DeadOrdinals.Length);
-                    currentLegacyKeys.Add(key);
-                    if (!_legacyDeadContentBytes.TryGetValue(key, out var legacyDeadContentBytes))
-                    {
-                        using var mappedSegment = _storage.OpenSegment(segment.SegmentId);
-                        foreach (var deadOrdinal in segment.DeadOrdinals)
-                        {
-                            legacyDeadContentBytes = checked(
-                                legacyDeadContentBytes +
-                                mappedSegment.GetDocument(deadOrdinal).ContentLength);
-                        }
-
-                        _legacyDeadContentBytes.TryAdd(key, legacyDeadContentBytes);
-                    }
-
-                    reclaimableContentBytes = checked(
-                        reclaimableContentBytes + legacyDeadContentBytes);
-                }
+                reclaimableContentBytes = checked(
+                    reclaimableContentBytes +
+                    GetDeadContentBytes(segment, currentLegacyKeys));
             }
 
             if (segment.LiveDocumentCount > 0 &&
@@ -228,6 +202,7 @@ public sealed class Sift : ISift
 
         var liveDocuments = totalDocuments - deadDocuments;
         var deadDocumentFraction = totalDocuments == 0 ? 0d : (double)deadDocuments / totalDocuments;
+        var deadContentFraction = contentBytes == 0 ? 0d : (double)reclaimableContentBytes / contentBytes;
         var estimatedLiveContentBytes = contentBytes - reclaimableContentBytes;
 
         return new MaintenanceStats(
@@ -237,6 +212,7 @@ public sealed class Sift : ISift
             LiveDocuments: liveDocuments,
             DeadDocuments: deadDocuments,
             DeadDocumentFraction: deadDocumentFraction,
+            DeadContentFraction: deadContentFraction,
             ContentBytes: contentBytes,
             EstimatedLiveContentBytes: estimatedLiveContentBytes,
             EstimatedReclaimableContentBytes: reclaimableContentBytes,
@@ -626,6 +602,15 @@ public sealed class Sift : ISift
             throw new ArgumentOutOfRangeException(nameof(options), "DeadFractionThreshold must be between zero and one.");
         }
 
+        if (!double.IsFinite(options.DeadContentFractionThreshold) ||
+            options.DeadContentFractionThreshold < 0d ||
+            options.DeadContentFractionThreshold > 1d)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "DeadContentFractionThreshold must be between zero and one.");
+        }
+
         if (options.SegmentCountTrigger < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "SegmentCountTrigger must be positive.");
@@ -967,9 +952,13 @@ public sealed class Sift : ISift
                 Entry = entry,
                 SegmentBytes = _storage.GetSegmentBytes(entry.SegmentId),
                 DeadFraction = entry.DocumentCount == 0 ? 0d : (double)entry.DeadOrdinals.Length / entry.DocumentCount,
+                DeadContentFraction = entry.ContentBytes == 0
+                    ? 0d
+                    : (double)GetDeadContentBytes(entry) / entry.ContentBytes,
                 HasMetadataBloat = entry.DeadOrdinals.Length >= options.MetadataBloatDeadOrdinalsThreshold
             })
-            .OrderByDescending(item => item.DeadFraction)
+            .OrderByDescending(item => item.DeadContentFraction)
+            .ThenByDescending(item => item.DeadFraction)
             .ThenByDescending(item => item.HasMetadataBloat)
             .ThenBy(item => item.Entry.LiveDocumentCount)
             .ThenBy(item => item.Entry.SegmentId)
@@ -979,6 +968,7 @@ public sealed class Sift : ISift
         long selectedSegmentBytes = 0;
         foreach (var item in ordered.Where(item =>
                      item.DeadFraction >= options.DeadFractionThreshold ||
+                     item.DeadContentFraction >= options.DeadContentFractionThreshold ||
                      item.HasMetadataBloat))
         {
             if (selected.Count >= options.MaxMergedSegments)
@@ -1028,6 +1018,43 @@ public sealed class Sift : ISift
         }
 
         return selected;
+    }
+
+    private long GetDeadContentBytes(
+        SegmentManifestEntry segment,
+        ISet<LegacyMaintenanceKey>? currentLegacyKeys = null)
+    {
+        if (segment.DeadOrdinals.Length == 0)
+        {
+            return 0;
+        }
+
+        if (segment.DeadContentBytes >= 0)
+        {
+            return segment.DeadContentBytes;
+        }
+
+        var key = new LegacyMaintenanceKey(
+            segment.SegmentId,
+            segment.DocumentCount,
+            segment.ContentBytes,
+            segment.DeadOrdinals.Length);
+        currentLegacyKeys?.Add(key);
+        if (_legacyDeadContentBytes.TryGetValue(key, out var cachedBytes))
+        {
+            return cachedBytes;
+        }
+
+        long deadContentBytes = 0;
+        using var mappedSegment = _storage.OpenSegment(segment.SegmentId);
+        foreach (var deadOrdinal in segment.DeadOrdinals)
+        {
+            deadContentBytes = checked(
+                deadContentBytes +
+                mappedSegment.GetDocument(deadOrdinal).ContentLength);
+        }
+
+        return _legacyDeadContentBytes.GetOrAdd(key, deadContentBytes);
     }
 
     private readonly record struct LiveDocumentKey(

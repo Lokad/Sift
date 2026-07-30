@@ -409,6 +409,7 @@ public sealed class StorageLifecycleTests
 
         Assert.Equal(16, options.MaxMergedSegments);
         Assert.Equal(0.20, options.DeadFractionThreshold);
+        Assert.Equal(0.20, options.DeadContentFractionThreshold);
         Assert.Equal(16, options.SegmentCountTrigger);
         Assert.Equal(1024, options.MetadataBloatDeadOrdinalsThreshold);
         Assert.Equal(1L * 1024 * 1024 * 1024, options.MaxInputSegmentBytes);
@@ -421,6 +422,10 @@ public sealed class StorageLifecycleTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
             _ = index.Compact(new CompactOptions(MaxInputSegmentBytes: 0));
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            _ = index.Compact(new CompactOptions(DeadContentFractionThreshold: double.NaN));
         });
     }
 
