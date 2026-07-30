@@ -53,6 +53,34 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task UpdateValidatesExistingSegmentBeforeReadingIt()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Position = stream.Length / 2;
+            var current = stream.ReadByte();
+            stream.Position--;
+            stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
+        }
+
+        using var restarted = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await restarted.Update(
+                new InMemoryDocumentSource([]),
+                [new DocumentKey("src/a.txt")]));
+    }
+
+    [Fact]
     public async Task CorruptedSegmentHeaderIsRejected()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));

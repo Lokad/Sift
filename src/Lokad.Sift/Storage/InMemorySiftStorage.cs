@@ -75,7 +75,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
             : throw new FileNotFoundException("Sift manifest is not present in memory-backed storage.");
     }
 
-    public MappedSegment OpenSegment(ulong segmentId, bool validateChecksums = true)
+    public MappedSegment OpenSegment(ulong segmentId)
     {
         if (!_segments.TryGetValue(segmentId, out var bytes))
         {

@@ -279,10 +279,10 @@ public sealed class CorpusStorage : ISiftStorage
         return new CorpusManifest(corpusId, generation, segments);
     }
 
-    public MappedSegment OpenSegment(ulong segmentId, bool validateChecksums = true)
+    public MappedSegment OpenSegment(ulong segmentId)
     {
         var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
-        if (!validateChecksums || _validatedSegmentIds.ContainsKey(segmentId))
+        if (_validatedSegmentIds.ContainsKey(segmentId))
         {
             return OpenAndValidateIdentity(path, segmentId, validateChecksums: false);
         }

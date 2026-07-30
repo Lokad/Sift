@@ -111,9 +111,7 @@ public sealed class Sift : ISift
             if (segment.DeadOrdinals.Length > 0)
             {
                 segmentsWithDeletions++;
-                using var mappedSegment = _storage.OpenSegment(
-                    segment.SegmentId,
-                    validateChecksums: false);
+                using var mappedSegment = _storage.OpenSegment(segment.SegmentId);
                 foreach (var deadOrdinal in segment.DeadOrdinals)
                 {
                     reclaimableContentBytes = checked(
@@ -628,7 +626,7 @@ public sealed class Sift : ISift
         foreach (var entry in manifest.Segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var segment = _storage.OpenSegment(entry.SegmentId, validateChecksums: false);
+            using var segment = _storage.OpenSegment(entry.SegmentId);
             foreach (var path in affectedPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -657,7 +655,7 @@ public sealed class Sift : ISift
                     continue;
                 }
 
-                var cursor = new CompactionCursor(_storage.OpenSegment(entry.SegmentId, validateChecksums: false), entry.DeadOrdinals);
+                var cursor = new CompactionCursor(_storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals);
                 if (cursor.MoveNext())
                 {
                     cursors.Add(cursor);

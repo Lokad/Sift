@@ -9,7 +9,7 @@ public interface ISiftStorage
     SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken);
     void PublishManifest(CorpusManifest manifest);
     CorpusManifest ReadManifest();
-    MappedSegment OpenSegment(ulong segmentId, bool validateChecksums = true);
+    MappedSegment OpenSegment(ulong segmentId);
     void EnsureSnapshotMetadata();
     StorageReadSnapshot OpenReadSnapshot();
     StorageStats GetStorageStats();
