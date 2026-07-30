@@ -132,8 +132,14 @@ public sealed class CorpusStorage : ISiftStorage
         ValidateSegmentPack(tempSegmentPath);
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterSegmentFlushBeforePublish);
         var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.ToString("X16"));
+        var finalSegmentPath = Path.Combine(finalSegmentDirectory, "segment.pack");
+        if (File.Exists(finalSegmentPath))
+        {
+            throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
+        }
+
         Directory.CreateDirectory(finalSegmentDirectory);
-        File.Move(tempSegmentPath, Path.Combine(finalSegmentDirectory, "segment.pack"), overwrite: true);
+        File.Move(tempSegmentPath, finalSegmentPath);
         Directory.Delete(tempSegmentDirectory, recursive: true);
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, []);
     }
@@ -146,10 +152,21 @@ public sealed class CorpusStorage : ISiftStorage
 
     public CorpusManifest ReadManifest()
     {
-        using var stream = new FileStream(ManifestPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return ReadManifest(ManifestPath);
+    }
+
+    private static CorpusManifest ReadManifest(string manifestPath)
+    {
+        using var stream = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length < SegmentFormat.ManifestHeaderSize + sizeof(ulong) ||
+            stream.Length > int.MaxValue)
+        {
+            throw new InvalidDataException("Invalid Sift manifest length.");
+        }
+
         var length = checked((int)stream.Length);
         var bytes = GC.AllocateUninitializedArray<byte>(length);
-        RandomAccess.Read(stream.SafeFileHandle, bytes, 0);
+        stream.ReadExactly(bytes);
         var span = bytes.AsSpan();
         if (LittleEndianCodec.ReadUInt64(span) != SegmentFormat.ManifestMagic)
         {
@@ -169,6 +186,11 @@ public sealed class CorpusStorage : ISiftStorage
         var segmentTableLength = LittleEndianCodec.ReadInt32(span[44..]);
         var checksumOffset = LittleEndianCodec.ReadInt32(span[48..]);
         var checksumLength = LittleEndianCodec.ReadInt32(span[52..]);
+        if (count < 0)
+        {
+            throw new InvalidDataException("Invalid Sift manifest segment count.");
+        }
+
         ValidateManifestBounds(segmentTableOffset, segmentTableLength, bytes.Length, "segment table");
         ValidateManifestBounds(checksumOffset, checksumLength, bytes.Length, "checksum region");
         if (checksumLength != 8)
@@ -203,9 +225,14 @@ public sealed class CorpusStorage : ISiftStorage
             var deadCount = LittleEndianCodec.ReadInt32(span[(offset + 20)..]);
             var deadBytes = LittleEndianCodec.ReadInt32(span[(offset + 24)..]);
             offset += SegmentFormat.ManifestEntryHeaderSize;
-            if (deadCount < 0 || deadBytes < 0 || offset > limit - deadBytes)
+            if (documentCount < 0 ||
+                contentBytes < 0 ||
+                deadCount < 0 ||
+                deadCount > documentCount ||
+                deadBytes < 0 ||
+                offset > limit - deadBytes)
             {
-                throw new InvalidDataException("Invalid Sift manifest dead-ordinal bounds.");
+                throw new InvalidDataException("Invalid Sift manifest segment entry.");
             }
 
             var deadPayload = span.Slice(offset, deadBytes);
@@ -216,6 +243,12 @@ public sealed class CorpusStorage : ISiftStorage
             for (var j = 0; j < deadCount; j++)
             {
                 current += VarInt.ReadUInt32(deadPayload, ref deadOffset);
+                if (current >= documentCount ||
+                    (j > 0 && current <= deadOrdinals[j - 1]))
+                {
+                    throw new InvalidDataException("Invalid Sift manifest dead ordinal.");
+                }
+
                 deadOrdinals[j] = current;
             }
 
@@ -373,6 +406,44 @@ public sealed class CorpusStorage : ISiftStorage
 
     private void EnsureReplacementAllowedUnderWriterLock()
     {
+        if (!HasManifest)
+        {
+            // A full build is authoritative. Complete packs left by a crashed initial build
+            // have no readable generation and must not permanently prevent reconstruction.
+            var abandonedSegments = EnumeratePhysicalSegments();
+            var failedCount = 0;
+            long failedBytes = 0;
+            foreach (var segment in abandonedSegments)
+            {
+                try
+                {
+                    Directory.Delete(segment.DirectoryPath, recursive: true);
+                }
+                catch (DirectoryNotFoundException)
+                {
+                }
+                catch (IOException)
+                {
+                    failedCount++;
+                    failedBytes += segment.Bytes;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    failedCount++;
+                    failedBytes += segment.Bytes;
+                }
+            }
+
+            if (failedCount > 0)
+            {
+                throw new IOException(
+                    $"Cannot start a full Sift build because {failedCount} abandoned segment pack(s) " +
+                    $"({failedBytes} bytes) could not be deleted.");
+            }
+
+            return;
+        }
+
         // One unreclaimed replacement generation is the disk-growth bound.
         var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
         if (reclamation.IsBlocked)
@@ -502,6 +573,18 @@ public sealed class CorpusStorage : ISiftStorage
             return;
         }
 
+        try
+        {
+            _ = ReadManifest(tempPath);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException)
+        {
+            // A full build can safely discard any packs that were published before this
+            // incomplete first manifest because no generation ever made them visible.
+            File.Delete(tempPath);
+            return;
+        }
+
         File.Move(tempPath, ManifestPath, overwrite: true);
     }
 
@@ -525,6 +608,9 @@ public sealed class CorpusStorage : ISiftStorage
             return;
         }
 
+        var referencedSegmentIds = HasManifest
+            ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
+            : [];
         foreach (var directory in Directory.EnumerateDirectories(SegmentsPath))
         {
             var segmentPackPath = Path.Combine(directory, "segment.pack");
@@ -540,6 +626,15 @@ public sealed class CorpusStorage : ISiftStorage
             }
             catch (InvalidDataException)
             {
+                var directoryName = Path.GetFileName(directory);
+                if (directoryName.Length == 16 &&
+                    ulong.TryParse(directoryName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var segmentId) &&
+                    referencedSegmentIds.Contains(segmentId))
+                {
+                    throw new InvalidDataException(
+                        $"The current Sift manifest references corrupt segment '{segmentId:X16}'.");
+                }
+
                 Directory.Delete(directory, recursive: true);
             }
         }

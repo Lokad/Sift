@@ -174,6 +174,57 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task TruncatedInitialManifestTempIsDiscardedBeforeRebuild()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        Directory.CreateDirectory(fixture.CorpusPath);
+        File.WriteAllBytes(Path.Combine(fixture.CorpusPath, "manifest.bin.tmp"), [0x01, 0x02, 0x03]);
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        var stats = await index.Build(fixture.CreateSource());
+
+        Assert.Equal(1, stats.IndexedDocuments);
+        Assert.False(File.Exists(Path.Combine(fixture.CorpusPath, "manifest.bin.tmp")));
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+        Assert.Single(collector.Hits);
+    }
+
+    [Fact]
+    public async Task FullBuildReclaimsPacksLeftWithoutManifest()
+    {
+        using var fixture = new CorpusFixture(("src/current.txt", "current\n"));
+        var abandonedStorage = new CorpusStorage(fixture.CorpusPath);
+        var abandoned = abandonedStorage.PublishSegment(
+            [CreateStoredDocument("src/abandoned.txt", "abandoned\n")],
+            0x1234UL,
+            CancellationToken.None);
+        var abandonedPath = Path.Combine(
+            abandonedStorage.SegmentsPath,
+            abandoned.SegmentId.ToString("X16"),
+            "segment.pack");
+        Assert.True(File.Exists(abandonedPath));
+        Assert.False(abandonedStorage.HasManifest);
+
+        using var index = new SiftIndex(fixture.CorpusPath);
+        var stats = await index.Build(fixture.CreateSource());
+
+        Assert.Equal(1, stats.IndexedDocuments);
+        Assert.False(File.Exists(abandonedPath));
+        using var snapshot = index.OpenSnapshot();
+        var current = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("current", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            current);
+        Assert.Single(current.Hits);
+    }
+
+    [Fact]
     public async Task IncompleteSegmentDirectoriesAreRecovered()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
@@ -189,6 +240,41 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task RecoveryPreservesCorruptSegmentReferencedByCurrentManifest()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Position = 0;
+            stream.WriteByte(0);
+        }
+
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        Assert.Throws<InvalidDataException>(() => storage.EnsureLayout());
+        Assert.True(File.Exists(segmentPath));
+    }
+
+    [Fact]
+    public void TruncatedSegmentIsRejectedAsInvalidData()
+    {
+        using var fixture = new CorpusFixture();
+        var path = Path.Combine(fixture.CorpusPath, "truncated.pack");
+        Directory.CreateDirectory(fixture.CorpusPath);
+        File.WriteAllBytes(path, [0x01, 0x02, 0x03]);
+
+        Assert.Throws<InvalidDataException>(() => new MappedSegment(path));
+    }
+
+    [Fact]
     public async Task ManifestDeadOrdinalsRoundTripThroughCompressedEncoding()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
@@ -197,7 +283,7 @@ public sealed class StorageIntegrityTests
             Guid.NewGuid(),
             3,
             [
-                new SegmentManifestEntry(42, 10, 100, [1, 2, 3, 1000, 5000])
+                new SegmentManifestEntry(42, 6000, 100, [1, 2, 3, 1000, 5000])
             ]);
 
         storage.PublishManifest(manifest);

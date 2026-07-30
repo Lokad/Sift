@@ -92,6 +92,11 @@ public sealed unsafe class MappedSegment : IDisposable
 
     public SegmentDocument GetDocument(uint ordinal)
     {
+        if (ordinal >= (uint)DocumentCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ordinal));
+        }
+
         var offset = GetRegion(SegmentRegionId.DocumentTable).Offset + ordinal * SegmentFormat.DocumentRowSize;
         return new SegmentDocument(
             ordinal,
@@ -481,6 +486,11 @@ public sealed unsafe class MappedSegment : IDisposable
     private void Initialize(bool validateChecksums)
     {
         var fileLength = _mappedLength;
+        if (fileLength < SegmentFormat.HeaderSize)
+        {
+            throw new InvalidDataException("Sift segment header is truncated.");
+        }
+
         if (Read<ulong>(0) != SegmentFormat.SegmentMagic)
         {
             throw new InvalidDataException("Invalid Sift segment magic.");
@@ -497,6 +507,11 @@ public sealed unsafe class MappedSegment : IDisposable
         DocumentCount = Read<int>(28);
         ContentBytes = Read<long>(32);
         RegionCount = Read<int>(40);
+        if (DocumentCount < 0 || ContentBytes < 0)
+        {
+            throw new InvalidDataException("Invalid Sift segment document metadata.");
+        }
+
         if (RegionCount != SegmentFormat.RegionCount)
         {
             throw new InvalidDataException($"Unexpected Sift region count: {RegionCount}.");
@@ -525,9 +540,15 @@ public sealed unsafe class MappedSegment : IDisposable
         }
 
         var checksumCursor = checksumTableOffset;
+        var checksumIds = new HashSet<SegmentRegionId>();
         for (var i = 0; i < RegionCount; i++)
         {
             var id = (SegmentRegionId)Read<int>(checksumCursor);
+            if (!Enum.IsDefined(id) || !checksumIds.Add(id) || !_regions.ContainsKey(id))
+            {
+                throw new InvalidDataException($"Invalid or duplicate checksum region id '{id}'.");
+            }
+
             if (validateChecksums)
             {
                 var expected = Read<ulong>(checksumCursor + 4);
@@ -537,12 +558,56 @@ public sealed unsafe class MappedSegment : IDisposable
             checksumCursor += SegmentFormat.ChecksumEntrySize;
         }
 
+        var documentTable = GetRegion(SegmentRegionId.DocumentTable);
+        var expectedDocumentTableLength = checked((long)DocumentCount * SegmentFormat.DocumentRowSize);
+        if (documentTable.Length != expectedDocumentTableLength)
+        {
+            throw new InvalidDataException("Invalid Sift document table length.");
+        }
+
+        if (GetRegion(SegmentRegionId.ContentBlob).Length != ContentBytes)
+        {
+            throw new InvalidDataException("Invalid Sift content length.");
+        }
+
         ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex);
         ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex);
         ValidateLexiconRegion(SegmentRegionId.ContentBiCsLex);
         ValidateLexiconRegion(SegmentRegionId.ContentBiIcLex);
         ValidateLexiconRegion(SegmentRegionId.PathTriCsLex);
         ValidateLexiconRegion(SegmentRegionId.PathTriIcLex);
+        if (validateChecksums)
+        {
+            ValidateDocuments();
+        }
+    }
+
+    private void ValidateDocuments()
+    {
+        var pathBlob = GetRegion(SegmentRegionId.PathBlob);
+        var contentBlob = GetRegion(SegmentRegionId.ContentBlob);
+        var lineIndexBlob = GetRegion(SegmentRegionId.LineIndexBlob);
+        for (uint ordinal = 0; ordinal < DocumentCount; ordinal++)
+        {
+            var document = GetDocument(ordinal);
+            ValidateDocumentSlice(document.PathOffset, document.PathLength, pathBlob.Length, "path");
+            ValidateDocumentSlice(document.ContentOffset, document.ContentLength, contentBlob.Length, "content");
+            ValidateDocumentSlice(document.LineIndexOffset, document.LineIndexLength, lineIndexBlob.Length, "line index");
+            if (document.LineCount < 0)
+            {
+                throw new InvalidDataException($"Invalid line count for document ordinal {ordinal}.");
+            }
+        }
+    }
+
+    private static void ValidateDocumentSlice(ulong offset, int length, long regionLength, string name)
+    {
+        if (length < 0 ||
+            offset > (ulong)regionLength ||
+            (ulong)length > (ulong)regionLength - offset)
+        {
+            throw new InvalidDataException($"Invalid Sift document {name} bounds.");
+        }
     }
 }
 

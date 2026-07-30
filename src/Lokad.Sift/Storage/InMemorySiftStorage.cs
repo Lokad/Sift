@@ -54,7 +54,11 @@ public sealed class InMemorySiftStorage : ISiftStorage
         _reclamationPending = true;
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);
         using var _ = new MappedSegment(bytes, validateChecksums: true);
-        _segments[segmentId] = bytes;
+        if (!_segments.TryAdd(segmentId, bytes))
+        {
+            throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
+        }
+
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, []);
     }
 
