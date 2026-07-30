@@ -11,6 +11,37 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageIntegrityTests
 {
     [Fact]
+    public void AvailableBytesUsesMostSpecificMountedFileSystem()
+    {
+        var nestedDrive = DriveInfo.GetDrives()
+            .Where(static drive => drive.IsReady)
+            .Where(static drive =>
+            {
+                var root = drive.RootDirectory.FullName;
+                return root.Length > (Path.GetPathRoot(root)?.Length ?? 0);
+            })
+            .OrderByDescending(static drive => drive.RootDirectory.FullName.Length)
+            .FirstOrDefault();
+        if (nestedDrive is null)
+        {
+            return;
+        }
+
+        var expectedBefore = nestedDrive.AvailableFreeSpace;
+        var probePath = Path.Combine(
+            nestedDrive.RootDirectory.FullName,
+            $"sift-capacity-probe-{Guid.NewGuid():N}");
+        var actual = new CorpusStorage(probePath).GetAvailableBytes();
+        var expectedAfter = nestedDrive.AvailableFreeSpace;
+
+        Assert.NotNull(actual);
+        Assert.InRange(
+            actual.Value,
+            Math.Min(expectedBefore, expectedAfter),
+            Math.Max(expectedBefore, expectedAfter));
+    }
+
+    [Fact]
     public async Task BuildPublishesManifestAndSearchableSegment()
     {
         using var fixture = new CorpusFixture(

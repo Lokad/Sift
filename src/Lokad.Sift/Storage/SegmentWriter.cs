@@ -9,7 +9,13 @@ internal static unsafe class SegmentWriter
     {
         _ = tempPath;
         var prepared = Prepare(documents, cancellationToken);
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        using var stream = new FileStream(path, new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.ReadWrite,
+            Share = FileShare.None,
+            PreallocationSize = prepared.TotalLength
+        });
         stream.SetLength(prepared.TotalLength);
         using (var mappedFile = MemoryMappedFile.CreateFromFile(
                    stream,

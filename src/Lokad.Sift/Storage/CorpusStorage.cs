@@ -325,10 +325,13 @@ public sealed class CorpusStorage : ISiftStorage
         try
         {
             var fullPath = Path.GetFullPath(_rootPath);
-            var pathRoot = Path.GetPathRoot(fullPath);
-            return string.IsNullOrEmpty(pathRoot)
-                ? null
-                : new DriveInfo(pathRoot).AvailableFreeSpace;
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            var containingDrive = DriveInfo.GetDrives()
+                .Where(drive => IsPathWithinRoot(fullPath, drive.RootDirectory.FullName, comparison))
+                .MaxBy(drive => drive.RootDirectory.FullName.Length);
+            return containingDrive?.AvailableFreeSpace;
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException)
@@ -1367,6 +1370,27 @@ public sealed class CorpusStorage : ISiftStorage
             File.Delete(path);
         }
     }
+
+    private static bool IsPathWithinRoot(
+        string fullPath,
+        string rootPath,
+        StringComparison comparison)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        if (fullPath.Equals(normalizedRoot, comparison))
+        {
+            return true;
+        }
+
+        return fullPath.StartsWith(normalizedRoot, comparison) &&
+               (Path.EndsInDirectorySeparator(normalizedRoot) ||
+                fullPath.Length > normalizedRoot.Length &&
+                IsDirectorySeparator(fullPath[normalizedRoot.Length]));
+    }
+
+    private static bool IsDirectorySeparator(char value) =>
+        value == Path.DirectorySeparatorChar ||
+        value == Path.AltDirectorySeparatorChar;
 
     private static void FlushDirectoryEntry(string path)
     {
