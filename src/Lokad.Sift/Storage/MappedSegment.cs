@@ -19,6 +19,7 @@ public sealed unsafe class MappedSegment : IDisposable
     private readonly long _mappedLength;
     private readonly ReadOnlyMemory<byte> _backingMemory;
     private readonly Dictionary<SegmentRegionId, (long Offset, long Length)> _regions = new();
+    private int _disposed;
 
     public MappedSegment(string path, bool validateChecksums = true)
     {
@@ -403,6 +404,11 @@ public sealed unsafe class MappedSegment : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         if (_pointer is not null)
         {
             _view?.SafeMemoryMappedViewHandle.ReleasePointer();

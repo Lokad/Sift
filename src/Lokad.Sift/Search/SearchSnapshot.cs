@@ -56,6 +56,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
+        ThrowIfDisposed();
         var resolvedCaseMode = ResolveCaseMode(query);
         var matcher = new PathFilterMatcher(pathFilter);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
@@ -164,6 +165,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     internal SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, IPathVisibility? pathVisibility, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         return CanUseSegmentParallelSearch(query)
             ? SearchParallel(query, pathFilter, collector, pathVisibility, cancellationToken)
             : SearchSequential(query, pathFilter, collector, pathVisibility, cancellationToken);
@@ -464,6 +466,7 @@ Done:
 
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
     {
+        ThrowIfDisposed();
         var cache = GetSegment(hit.SegmentId);
 
         var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
@@ -490,6 +493,7 @@ Done:
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
+        ThrowIfDisposed();
         var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
 
         foreach (var cache in _segments)
@@ -558,6 +562,13 @@ Done:
         }
 
         throw new InvalidOperationException($"Unknown segment id {segmentId}.");
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
     }
 
     private static bool IsDeadOrdinal(uint[] deadOrdinals, uint ordinal)

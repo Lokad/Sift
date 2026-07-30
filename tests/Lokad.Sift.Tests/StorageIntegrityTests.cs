@@ -324,6 +324,23 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task MappedSegmentDisposeIsIdempotent()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        var segmentId = storage.ReadManifest().Segments.Single().SegmentId;
+        var baselineOpen = MappedSegment.CurrentOpenSegments;
+        var segment = storage.OpenSegment(segmentId);
+
+        segment.Dispose();
+        segment.Dispose();
+
+        Assert.Equal(baselineOpen, MappedSegment.CurrentOpenSegments);
+    }
+
+    [Fact]
     public async Task ReopenedCorpusValidatesEachImmutableSegmentOnce()
     {
         using var fixture = new CorpusFixture(

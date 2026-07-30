@@ -43,11 +43,13 @@ public sealed class Sift : ISift
 
     public IIndexSnapshot OpenSnapshot(SearchOptions options = default)
     {
+        ThrowIfDisposed();
         return new SearchSnapshot(_storage, _options, options, ScheduleReclamationIfPending);
     }
 
     public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default)
     {
+        ThrowIfDisposed();
         return new OverlaySnapshot(
             new SearchSnapshot(_storage, _options, options, ScheduleReclamationIfPending),
             _options,
@@ -70,7 +72,7 @@ public sealed class Sift : ISift
             {
                 activity.Dispose();
             }
-        }, cancellationToken);
+        });
     }
 
     private BuildStats BuildCore(IDocumentSource documents, CancellationToken cancellationToken)
@@ -80,6 +82,7 @@ public sealed class Sift : ISift
 
     public ActivityStats GetActivityStats()
     {
+        ThrowIfDisposed();
         var isBusy = Volatile.Read(ref _activeWriters) > 0;
         var currentActivity = (SiftActivity)Volatile.Read(ref _currentActivity);
         return new ActivityStats(isBusy, isBusy ? currentActivity : SiftActivity.Idle);
@@ -87,6 +90,7 @@ public sealed class Sift : ISift
 
     public MaintenanceStats GetMaintenanceStats()
     {
+        ThrowIfDisposed();
         using var snapshot = _storage.OpenReadSnapshot();
         var manifest = snapshot.Manifest;
         var segmentCount = manifest.Segments.Count;
@@ -147,6 +151,7 @@ public sealed class Sift : ISift
 
     public StorageStats GetStorageStats()
     {
+        ThrowIfDisposed();
         return _storage.GetStorageStats();
     }
 
@@ -164,7 +169,7 @@ public sealed class Sift : ISift
             {
                 activity.Dispose();
             }
-        }, cancellationToken);
+        });
     }
 
     private UpdateStats UpdateCore(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken)
@@ -297,7 +302,7 @@ public sealed class Sift : ISift
             {
                 activity.Dispose();
             }
-        }, cancellationToken);
+        });
     }
 
     private CompactStats CompactCore(CompactOptions options, CancellationToken cancellationToken)
@@ -496,12 +501,20 @@ public sealed class Sift : ISift
 
     private IDisposable BeginActivity(SiftActivity activity)
     {
+        ThrowIfDisposed();
         if (Interlocked.Increment(ref _activeWriters) == 1)
         {
             Volatile.Write(ref _currentActivity, (int)activity);
         }
 
         return new ActivityScope(this);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
     }
 
     private sealed class ActivityScope : IDisposable

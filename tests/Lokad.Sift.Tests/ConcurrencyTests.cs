@@ -67,6 +67,36 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task PreCancelledWriteDoesNotLeakActivity()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await index.Build(
+                new InMemoryDocumentSource([("src/a.txt", "alpha\n")]),
+                cancellation.Token));
+
+        var activity = index.GetActivityStats();
+        Assert.False(activity.IsWriteBusy);
+        Assert.Equal(SiftActivity.Idle, activity.CurrentActivity);
+    }
+
+    [Fact]
+    public async Task DisposedIndexRejectsNewOperations()
+    {
+        using var fixture = new CorpusFixture();
+        var index = new SiftIndex(fixture.CorpusPath);
+        index.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => index.OpenSnapshot());
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            await index.Build(new InMemoryDocumentSource([])));
+    }
+
+    [Fact]
     public async Task ReaderSnapshotRemainsConsistentDuringUpdatePublication()
     {
         using var fixture = new CorpusFixture(
