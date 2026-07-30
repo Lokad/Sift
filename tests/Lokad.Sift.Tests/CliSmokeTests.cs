@@ -48,6 +48,21 @@ public sealed class CliSmokeTests
         Assert.Contains("regexCacheHitRate=", stats.StandardOutput);
     }
 
+    [Fact]
+    public async Task SearchMaterializesHitsInsideTheCollectorCallback()
+    {
+        using var fixture = new CliCorpusFixture(
+            ("src/a.txt", "alpha beta\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        var result = RunCli($"search \"{fixture.CorpusPath}\" beta --literal");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("src/a.txt:1:7: beta", result.StandardOutput);
+        Assert.Contains("hits=1", result.StandardOutput);
+    }
+
     private static CliResult RunCli(string arguments)
     {
         var repoRoot = GetRepositoryRoot();

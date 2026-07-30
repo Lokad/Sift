@@ -21,7 +21,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly StorageReadSnapshot _storageSnapshot;
     // Keep the generation lease alive until every operation that may open one
     // of its segment packs has completed.
-    private readonly ReaderWriterLockSlim _lifetimeLock = new();
+    // Collectors may materialize hits while Search holds its disposal-exclusion read lease.
+    private readonly ReaderWriterLockSlim _lifetimeLock = new(LockRecursionPolicy.SupportsRecursion);
     private Action? _onDisposed;
     private readonly Action<Exception>? _onIndexFailure;
     private int _disposed;
