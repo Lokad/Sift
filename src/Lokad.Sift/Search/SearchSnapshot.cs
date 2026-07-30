@@ -323,7 +323,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
         }
 
-Done:
+    Done:
         watch.Stop();
         return new SearchStats(
             watch.ElapsedMilliseconds,
@@ -493,7 +493,7 @@ Done:
             }
         }
 
-Done:
+    Done:
         watch.Stop();
         return new SearchStats(
             watch.ElapsedMilliseconds,

@@ -326,7 +326,7 @@ internal static class Utf8RegexEngine
 
                 _index += 2;
             }
-            
+
             if (!TryParseExpression(out node))
             {
                 return false;
@@ -1233,13 +1233,13 @@ internal static class Utf8RegexEngine
             switch (atom.Kind)
             {
                 case Utf8RegexAtomKind.CharClass:
-                {
-                    var excludesNewline = atom.Negated
-                        ? atom.AsciiSet![(byte)'\r'] && atom.AsciiSet[(byte)'\n']
-                        : !atom.AsciiSet![(byte)'\r'] && !atom.AsciiSet[(byte)'\n'];
-                    separator = new OrderedAnchorSeparator(1, excludesNewline);
-                    return true;
-                }
+                    {
+                        var excludesNewline = atom.Negated
+                            ? atom.AsciiSet![(byte)'\r'] && atom.AsciiSet[(byte)'\n']
+                            : !atom.AsciiSet![(byte)'\r'] && !atom.AsciiSet[(byte)'\n'];
+                        separator = new OrderedAnchorSeparator(1, excludesNewline);
+                        return true;
+                    }
                 case Utf8RegexAtomKind.Dot:
                     separator = new OrderedAnchorSeparator(1, false);
                     return true;

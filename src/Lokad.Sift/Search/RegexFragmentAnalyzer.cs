@@ -791,7 +791,7 @@ internal static class RegexFragmentAnalyzer
         }
     }
 
-        private readonly record struct NodeResult(string[] Fragments, string[] AdvisorySeeds, bool CanBeEmpty, string RequiredPrefix, string RequiredSuffix, string? ExactLiteral)
+    private readonly record struct NodeResult(string[] Fragments, string[] AdvisorySeeds, bool CanBeEmpty, string RequiredPrefix, string RequiredSuffix, string? ExactLiteral)
     {
         public static NodeResult None => new([], [], true, string.Empty, string.Empty, null);
         public static NodeResult Optional => new([], [], true, string.Empty, string.Empty, null);
