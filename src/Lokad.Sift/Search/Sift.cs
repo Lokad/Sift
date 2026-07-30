@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
@@ -13,6 +14,7 @@ public sealed class Sift : ISift
     private readonly SiftOptions _options;
     private readonly CancellationTokenSource _reclamationCancellation = new();
     private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
+    private readonly ConcurrentDictionary<LegacyMaintenanceKey, long> _legacyDeadContentBytes = new();
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
     private readonly object _reclamationSync = new();
     private int _activeWriters;
@@ -167,6 +169,7 @@ public sealed class Sift : ISift
         long reclaimableContentBytes = 0;
         var segmentsWithDeletions = 0;
         var smallSegmentCount = 0;
+        var currentLegacyKeys = new HashSet<LegacyMaintenanceKey>();
 
         foreach (var segment in manifest.Segments)
         {
@@ -176,12 +179,34 @@ public sealed class Sift : ISift
             if (segment.DeadOrdinals.Length > 0)
             {
                 segmentsWithDeletions++;
-                using var mappedSegment = _storage.OpenSegment(segment.SegmentId);
-                foreach (var deadOrdinal in segment.DeadOrdinals)
+                if (segment.DeadContentBytes >= 0)
                 {
                     reclaimableContentBytes = checked(
-                        reclaimableContentBytes +
-                        mappedSegment.GetDocument(deadOrdinal).ContentLength);
+                        reclaimableContentBytes + segment.DeadContentBytes);
+                }
+                else
+                {
+                    var key = new LegacyMaintenanceKey(
+                        segment.SegmentId,
+                        segment.DocumentCount,
+                        segment.ContentBytes,
+                        segment.DeadOrdinals.Length);
+                    currentLegacyKeys.Add(key);
+                    if (!_legacyDeadContentBytes.TryGetValue(key, out var legacyDeadContentBytes))
+                    {
+                        using var mappedSegment = _storage.OpenSegment(segment.SegmentId);
+                        foreach (var deadOrdinal in segment.DeadOrdinals)
+                        {
+                            legacyDeadContentBytes = checked(
+                                legacyDeadContentBytes +
+                                mappedSegment.GetDocument(deadOrdinal).ContentLength);
+                        }
+
+                        _legacyDeadContentBytes.TryAdd(key, legacyDeadContentBytes);
+                    }
+
+                    reclaimableContentBytes = checked(
+                        reclaimableContentBytes + legacyDeadContentBytes);
                 }
             }
 
@@ -190,6 +215,14 @@ public sealed class Sift : ISift
                 segment.ContentBytes < _options.TargetSegmentContentBytes)
             {
                 smallSegmentCount++;
+            }
+        }
+
+        foreach (var key in _legacyDeadContentBytes.Keys)
+        {
+            if (!currentLegacyKeys.Contains(key))
+            {
+                _legacyDeadContentBytes.TryRemove(key, out _);
             }
         }
 
@@ -302,6 +335,10 @@ public sealed class Sift : ISift
                 static segment => segment.SegmentId,
                 static segment => new HashSet<uint>(segment.DeadOrdinals),
                 EqualityComparer<ulong>.Default);
+            var deadContentBytesBySegment = existingManifest.Segments.ToDictionary(
+                static segment => segment.SegmentId,
+                static segment => segment.DeadContentBytes,
+                EqualityComparer<ulong>.Default);
 
             // Every submitted upsert supersedes its old version, including rejected
             // replacements that the source will checkpoint and never submit again.
@@ -310,7 +347,7 @@ public sealed class Sift : ISift
                 cancellationToken.ThrowIfCancellationRequested();
                 if (liveDocumentKeys.TryGetValue(path, out var current))
                 {
-                    deadBySegment[current.SegmentId].Add(current.Ordinal);
+                    AddDeadDocument(current, deadBySegment, deadContentBytesBySegment);
                 }
             }
 
@@ -319,14 +356,18 @@ public sealed class Sift : ISift
                 cancellationToken.ThrowIfCancellationRequested();
                 if (liveDocumentKeys.TryGetValue(path, out var current))
                 {
-                    deadBySegment[current.SegmentId].Add(current.Ordinal);
+                    AddDeadDocument(current, deadBySegment, deadContentBytesBySegment);
                 }
             }
 
             foreach (var segment in existingManifest.Segments)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                newSegments.Add(segment with { DeadOrdinals = deadBySegment[segment.SegmentId].OrderBy(static value => value).ToArray() });
+                newSegments.Add(segment with
+                {
+                    DeadOrdinals = deadBySegment[segment.SegmentId].OrderBy(static value => value).ToArray(),
+                    DeadContentBytes = deadContentBytesBySegment[segment.SegmentId]
+                });
             }
 
             newSegments.AddRange(publishedSegments);
@@ -786,11 +827,29 @@ public sealed class Sift : ISift
                     continue;
                 }
 
-                live[path] = new LiveDocumentKey(entry.SegmentId, ordinal);
+                live[path] = new LiveDocumentKey(
+                    entry.SegmentId,
+                    ordinal,
+                    segment.GetDocument(ordinal).ContentLength);
             }
         }
 
         return live;
+    }
+
+    private static void AddDeadDocument(
+        in LiveDocumentKey document,
+        Dictionary<ulong, HashSet<uint>> deadBySegment,
+        Dictionary<ulong, long> deadContentBytesBySegment)
+    {
+        if (!deadBySegment[document.SegmentId].Add(document.Ordinal) ||
+            deadContentBytesBySegment[document.SegmentId] < 0)
+        {
+            return;
+        }
+
+        deadContentBytesBySegment[document.SegmentId] = checked(
+            deadContentBytesBySegment[document.SegmentId] + document.ContentLength);
     }
 
     private CompactionPublication PublishCompactedSegments(
@@ -949,7 +1008,14 @@ public sealed class Sift : ISift
 
     private readonly record struct LiveDocumentKey(
         ulong SegmentId,
-        uint Ordinal);
+        uint Ordinal,
+        int ContentLength);
+
+    private readonly record struct LegacyMaintenanceKey(
+        ulong SegmentId,
+        int DocumentCount,
+        long ContentBytes,
+        int DeadDocumentCount);
 
     private sealed class Utf8PathComparer : IComparer<byte[]>
     {

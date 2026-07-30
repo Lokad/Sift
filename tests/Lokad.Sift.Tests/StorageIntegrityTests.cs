@@ -323,7 +323,7 @@ public sealed class StorageIntegrityTests
             Guid.NewGuid(),
             3,
             [
-                new SegmentManifestEntry(42, 6000, 100, [1, 2, 3, 1000, 5000])
+                new SegmentManifestEntry(42, 6000, 100, [1, 2, 3, 1000, 5000], DeadContentBytes: 5)
             ]);
 
         storage.PublishManifest(manifest);
@@ -415,6 +415,66 @@ public sealed class StorageIntegrityTests
                 new PathFilter());
         }
 
+        Assert.Equal(1, storage.ValidatedSegmentCount);
+    }
+
+    [Fact]
+    public async Task LegacyManifestDeadBytesAreCachedAndMigratedOnMutation()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+            await index.Update(
+                new InMemoryDocumentSource([]),
+                [new DocumentKey("src/a.txt")]);
+        }
+
+        var manifestPath = Path.Combine(fixture.CorpusPath, "manifest.bin");
+        RewriteManifestAsLegacyV2(manifestPath);
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        var storage = TestHelpers.GetStorage(reopened);
+
+        var first = reopened.GetMaintenanceStats();
+        var segmentOpensAfterFirstStats = storage.SegmentOpenCount;
+        var second = reopened.GetMaintenanceStats();
+
+        Assert.Equal("alpha\n".Length, first.EstimatedReclaimableContentBytes);
+        Assert.Equal(first, second);
+        Assert.Equal(segmentOpensAfterFirstStats, storage.SegmentOpenCount);
+
+        await reopened.Update(new InMemoryDocumentSource([]), []);
+
+        var manifestBytes = File.ReadAllBytes(manifestPath);
+        Assert.Equal(
+            SegmentFormat.ManifestFormatVersion,
+            BinaryPrimitives.ReadInt32LittleEndian(manifestBytes.AsSpan(8)));
+        Assert.Equal(
+            "alpha\n".Length,
+            storage.ReadManifest().Segments.Single().DeadContentBytes);
+    }
+
+    [Fact]
+    public async Task ReclamationEvictsValidationMetadataForRetiredSegments()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 100,
+            TargetSegmentContentBytes = 100
+        });
+        await index.Build(new InMemoryDocumentSource([]));
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "alpha")]), []);
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        await index.Update(new InMemoryDocumentSource([("src/c.txt", "gamma")]), []);
+        var storage = TestHelpers.GetStorage(index);
+        Assert.Equal(3, storage.ValidatedSegmentCount);
+
+        await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+
+        Assert.Single(storage.ReadManifest().Segments);
         Assert.Equal(1, storage.ValidatedSegmentCount);
     }
 
@@ -642,6 +702,50 @@ public sealed class StorageIntegrityTests
     private static uint[] Decode(ReadOnlySpan<byte> postings)
     {
         return PostingsCodec.Decode(postings);
+    }
+
+    private static void RewriteManifestAsLegacyV2(string manifestPath)
+    {
+        var current = File.ReadAllBytes(manifestPath);
+        var count = BinaryPrimitives.ReadInt32LittleEndian(current.AsSpan(36));
+        var segmentTableOffset = BinaryPrimitives.ReadInt32LittleEndian(current.AsSpan(40));
+        var currentSegmentTableLength = BinaryPrimitives.ReadInt32LittleEndian(current.AsSpan(44));
+        var legacySegmentTableLength = currentSegmentTableLength -
+            count * (SegmentFormat.ManifestEntryHeaderSize - SegmentFormat.LegacyManifestEntryHeaderSize);
+        var checksumOffset = segmentTableOffset + legacySegmentTableLength;
+        var legacy = new byte[checksumOffset + sizeof(ulong)];
+        current.AsSpan(0, SegmentFormat.ManifestHeaderSize).CopyTo(legacy);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            legacy.AsSpan(8),
+            SegmentFormat.LegacyManifestFormatVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            legacy.AsSpan(44),
+            legacySegmentTableLength);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            legacy.AsSpan(48),
+            checksumOffset);
+
+        var currentOffset = segmentTableOffset;
+        var legacyOffset = segmentTableOffset;
+        for (var i = 0; i < count; i++)
+        {
+            var deadOrdinalBytes = BinaryPrimitives.ReadInt32LittleEndian(
+                current.AsSpan(currentOffset + 24));
+            current.AsSpan(currentOffset, SegmentFormat.LegacyManifestEntryHeaderSize)
+                .CopyTo(legacy.AsSpan(legacyOffset));
+            current.AsSpan(
+                    currentOffset + SegmentFormat.ManifestEntryHeaderSize,
+                    deadOrdinalBytes)
+                .CopyTo(legacy.AsSpan(
+                    legacyOffset + SegmentFormat.LegacyManifestEntryHeaderSize));
+            currentOffset += SegmentFormat.ManifestEntryHeaderSize + deadOrdinalBytes;
+            legacyOffset += SegmentFormat.LegacyManifestEntryHeaderSize + deadOrdinalBytes;
+        }
+
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            legacy.AsSpan(checksumOffset),
+            Hashing.Fnv1A64(legacy.AsSpan(0, checksumOffset)));
+        File.WriteAllBytes(manifestPath, legacy);
     }
 
     private static StoredDocument CreateStoredDocument(string path, string content)

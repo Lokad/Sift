@@ -36,7 +36,8 @@ internal static class SegmentFormat
     public const ulong SegmentMagic = 0x3154474553464953UL;
     public const ulong ManifestMagic = 0x314E414D46544953UL;
     public const int FormatVersion = 3;
-    public const int ManifestFormatVersion = 2;
+    public const int ManifestFormatVersion = 3;
+    public const int LegacyManifestFormatVersion = 2;
     public const int RegionCount = 17;
     public const int ReservedRegionIdStart = 18;
     public const int ReservedRegionIdEnd = 25;
@@ -45,7 +46,8 @@ internal static class SegmentFormat
     public const int RegionDirectoryEntrySize = 20;
     public const int ChecksumEntrySize = 12;
     public const int ManifestHeaderSize = 56;
-    public const int ManifestEntryHeaderSize = 28;
+    public const int ManifestEntryHeaderSize = 36;
+    public const int LegacyManifestEntryHeaderSize = 28;
     public const int LexiconBucketCount = 257;
     public const int LexiconHeaderSize = 4 + (LexiconBucketCount * 4);
 

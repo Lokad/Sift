@@ -35,7 +35,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
             throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
         }
 
-        return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, []);
+        return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
     }
 
     public void PublishManifest(CorpusManifest manifest)

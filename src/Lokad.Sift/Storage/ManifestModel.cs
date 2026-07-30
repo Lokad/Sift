@@ -4,7 +4,8 @@ public readonly record struct SegmentManifestEntry(
     ulong SegmentId,
     int DocumentCount,
     long ContentBytes,
-    uint[] DeadOrdinals)
+    uint[] DeadOrdinals,
+    long DeadContentBytes)
 {
     public int LiveDocumentCount => DocumentCount - DeadOrdinals.Length;
 }

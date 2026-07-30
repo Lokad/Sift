@@ -306,6 +306,28 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task MaintenanceStatsUseManifestMetadataWithoutOpeningSegments()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/small.txt", "x"),
+            ("src/large.txt", new string('x', 10_000)));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/large.txt")]);
+        var storage = TestHelpers.GetStorage(index);
+        var segmentOpensBeforeStats = storage.SegmentOpenCount;
+
+        var first = index.GetMaintenanceStats();
+        var second = index.GetMaintenanceStats();
+
+        Assert.Equal(10_000, first.EstimatedReclaimableContentBytes);
+        Assert.Equal(first, second);
+        Assert.Equal(segmentOpensBeforeStats, storage.SegmentOpenCount);
+    }
+
+    [Fact]
     public async Task SnapshotOpenedBeforeUpdateRemainsUsableAfterPublication()
     {
         using var fixture = new CorpusFixture(

@@ -16,6 +16,7 @@ public sealed class CorpusStorage : ISiftStorage
     private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
+    private long _segmentOpenCount;
 
     public CorpusStorage(string rootPath)
     {
@@ -28,6 +29,7 @@ public sealed class CorpusStorage : ISiftStorage
     public string LockPath => Path.Combine(_rootPath, "lock");
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
     internal int ValidatedSegmentCount => _validatedSegmentIds.Count;
+    internal long SegmentOpenCount => Interlocked.Read(ref _segmentOpenCount);
     private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
     private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
     internal PublicationFaultInjector? FaultInjector { get; set; }
@@ -142,7 +144,7 @@ public sealed class CorpusStorage : ISiftStorage
         FlushDirectoryEntry(SegmentsPath);
         _validatedSegmentIds.TryAdd(segmentId, 0);
         Directory.Delete(tempSegmentDirectory, recursive: true);
-        return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, []);
+        return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
     }
 
     public void PublishManifest(CorpusManifest manifest)
@@ -175,7 +177,8 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         var version = LittleEndianCodec.ReadInt32(span[8..]);
-        if (version != SegmentFormat.ManifestFormatVersion)
+        if (version is not SegmentFormat.LegacyManifestFormatVersion and
+            not SegmentFormat.ManifestFormatVersion)
         {
             throw new InvalidDataException($"Unsupported Sift manifest version: {version}.");
         }
@@ -213,9 +216,12 @@ public sealed class CorpusStorage : ISiftStorage
         var segments = new SegmentManifestEntry[count];
         var offset = segmentTableOffset;
         var limit = segmentTableOffset + segmentTableLength;
+        var entryHeaderSize = version == SegmentFormat.ManifestFormatVersion
+            ? SegmentFormat.ManifestEntryHeaderSize
+            : SegmentFormat.LegacyManifestEntryHeaderSize;
         for (var i = 0; i < count; i++)
         {
-            if (offset > limit - SegmentFormat.ManifestEntryHeaderSize)
+            if (offset > limit - entryHeaderSize)
             {
                 throw new InvalidDataException("Sift manifest segment table is truncated.");
             }
@@ -225,12 +231,17 @@ public sealed class CorpusStorage : ISiftStorage
             var contentBytes = LittleEndianCodec.ReadInt64(span[(offset + 12)..]);
             var deadCount = LittleEndianCodec.ReadInt32(span[(offset + 20)..]);
             var deadBytes = LittleEndianCodec.ReadInt32(span[(offset + 24)..]);
-            offset += SegmentFormat.ManifestEntryHeaderSize;
+            var deadContentBytes = version == SegmentFormat.ManifestFormatVersion
+                ? LittleEndianCodec.ReadInt64(span[(offset + 28)..])
+                : -1;
+            offset += entryHeaderSize;
             if (documentCount < 0 ||
                 contentBytes < 0 ||
                 deadCount < 0 ||
                 deadCount > documentCount ||
                 deadBytes < 0 ||
+                deadContentBytes < (version == SegmentFormat.ManifestFormatVersion ? 0 : -1) ||
+                deadContentBytes > contentBytes ||
                 offset > limit - deadBytes)
             {
                 throw new InvalidDataException("Invalid Sift manifest segment entry.");
@@ -262,7 +273,8 @@ public sealed class CorpusStorage : ISiftStorage
                 segmentId,
                 documentCount,
                 contentBytes,
-                deadOrdinals);
+                deadOrdinals,
+                deadContentBytes);
         }
 
         if (offset != limit)
@@ -275,6 +287,7 @@ public sealed class CorpusStorage : ISiftStorage
 
     public MappedSegment OpenSegment(ulong segmentId)
     {
+        Interlocked.Increment(ref _segmentOpenCount);
         var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
         if (_validatedSegmentIds.ContainsKey(segmentId))
         {
@@ -602,6 +615,7 @@ public sealed class CorpusStorage : ISiftStorage
 
     private void WriteManifest(CorpusManifest manifest)
     {
+        manifest = ResolveLegacyDeadContentBytes(manifest);
         // Set the retry marker and publish the reader lease before making the generation discoverable.
         SetReclamationPending(isPending: true);
         EnsureGenerationLease(manifest);
@@ -637,6 +651,7 @@ public sealed class CorpusStorage : ISiftStorage
             LittleEndianCodec.WriteInt32(span[(offset + 20)..], segment.DeadOrdinals.Length);
             var deadBytes = GetDeadOrdinalPayloadLength(segment.DeadOrdinals);
             LittleEndianCodec.WriteInt32(span[(offset + 24)..], deadBytes);
+            LittleEndianCodec.WriteInt64(span[(offset + 28)..], segment.DeadContentBytes);
             offset += SegmentFormat.ManifestEntryHeaderSize;
             uint previous = 0;
             foreach (var dead in segment.DeadOrdinals)
@@ -674,6 +689,39 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         TryReclaimAfterPublication();
+    }
+
+    private CorpusManifest ResolveLegacyDeadContentBytes(CorpusManifest manifest)
+    {
+        SegmentManifestEntry[]? resolvedSegments = null;
+        for (var i = 0; i < manifest.Segments.Count; i++)
+        {
+            var entry = manifest.Segments[i];
+            if (entry.DeadContentBytes >= 0)
+            {
+                if (resolvedSegments is not null)
+                {
+                    resolvedSegments[i] = entry;
+                }
+
+                continue;
+            }
+
+            resolvedSegments ??= manifest.Segments.ToArray();
+            long deadContentBytes = 0;
+            using var segment = OpenSegment(entry.SegmentId);
+            foreach (var ordinal in entry.DeadOrdinals)
+            {
+                deadContentBytes = checked(
+                    deadContentBytes + segment.GetDocument(ordinal).ContentLength);
+            }
+
+            resolvedSegments[i] = entry with { DeadContentBytes = deadContentBytes };
+        }
+
+        return resolvedSegments is null
+            ? manifest
+            : manifest with { Segments = resolvedSegments };
     }
 
     private static void ValidateSegmentPack(string path)
@@ -1112,11 +1160,13 @@ public sealed class CorpusStorage : ISiftStorage
             try
             {
                 Directory.Delete(segment.DirectoryPath, recursive: true);
+                ForgetSegmentValidation(segment.SegmentId);
                 reclaimedSegmentCount++;
                 reclaimedSegmentBytes += segment.Bytes;
             }
             catch (DirectoryNotFoundException)
             {
+                ForgetSegmentValidation(segment.SegmentId);
                 reclaimedSegmentCount++;
                 reclaimedSegmentBytes += segment.Bytes;
             }
@@ -1149,6 +1199,12 @@ public sealed class CorpusStorage : ISiftStorage
             IsBlocked: false,
             protection.LeasedGenerationCount,
             protection.OldestLeasedGeneration));
+    }
+
+    private void ForgetSegmentValidation(ulong segmentId)
+    {
+        _validatedSegmentIds.TryRemove(segmentId, out _);
+        _segmentValidationGates.TryRemove(segmentId, out _);
     }
 
     private StorageStats GetStorageStatsUnderWriterLock(SegmentReclamationStats reclamation)
