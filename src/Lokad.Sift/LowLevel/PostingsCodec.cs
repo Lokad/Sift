@@ -16,14 +16,41 @@ public static class PostingsCodec
 
     public static byte[] Encode(ReadOnlySpan<uint> ordinals)
     {
-        if (ordinals.Length == 0)
+        var payload = GC.AllocateUninitializedArray<byte>(GetEncodedLength(ordinals));
+        Encode(ordinals, payload);
+        return payload;
+    }
+
+    internal static int GetEncodedLength(ReadOnlySpan<uint> ordinals)
+    {
+        var totalBytes = ordinals.Length >= CheckpointThreshold
+            ? 1 + 4 + ((ordinals.Length + CheckpointInterval - 1) / CheckpointInterval) * 8
+            : 1;
+        uint previous = 0;
+        for (var i = 0; i < ordinals.Length; i++)
         {
-            return [PlainEncoding];
+            totalBytes = checked(totalBytes + VarInt.GetUInt32Length(ordinals[i] - previous));
+            previous = ordinals[i];
         }
 
-        return ordinals.Length >= CheckpointThreshold
-            ? EncodeCheckpointed(ordinals)
-            : EncodePlain(ordinals);
+        return totalBytes;
+    }
+
+    internal static void Encode(ReadOnlySpan<uint> ordinals, Span<byte> payload)
+    {
+        if (payload.Length != GetEncodedLength(ordinals))
+        {
+            throw new ArgumentException("The postings destination has an invalid length.", nameof(payload));
+        }
+
+        if (ordinals.Length >= CheckpointThreshold)
+        {
+            EncodeCheckpointed(ordinals, payload);
+        }
+        else
+        {
+            EncodePlain(ordinals, payload);
+        }
     }
 
     public static PostingsView Parse(ReadOnlySpan<byte> payload)
@@ -87,63 +114,41 @@ public static class PostingsCodec
             : IntersectSortedSequential(left, view.Data, docFreq);
     }
 
-    private static byte[] EncodePlain(ReadOnlySpan<uint> ordinals)
+    private static void EncodePlain(ReadOnlySpan<uint> ordinals, Span<byte> payload)
     {
-        var totalBytes = 1;
+        payload[0] = PlainEncoding;
+        var cursor = 1;
         uint previous = 0;
         for (var i = 0; i < ordinals.Length; i++)
         {
-            totalBytes += VarInt.GetUInt32Length(ordinals[i] - previous);
+            cursor += VarInt.WriteUInt32(payload[cursor..], ordinals[i] - previous);
             previous = ordinals[i];
         }
-
-        var payload = GC.AllocateUninitializedArray<byte>(totalBytes);
-        payload[0] = PlainEncoding;
-        var cursor = 1;
-        previous = 0;
-        for (var i = 0; i < ordinals.Length; i++)
-        {
-            cursor += VarInt.WriteUInt32(payload.AsSpan(cursor), ordinals[i] - previous);
-            previous = ordinals[i];
-        }
-
-        return payload;
     }
 
-    private static byte[] EncodeCheckpointed(ReadOnlySpan<uint> ordinals)
+    private static void EncodeCheckpointed(ReadOnlySpan<uint> ordinals, Span<byte> payload)
     {
         var checkpointCount = (ordinals.Length + CheckpointInterval - 1) / CheckpointInterval;
         var checkpointHeaderBytes = 1 + 4 + checkpointCount * 8;
-        var totalBytes = checkpointHeaderBytes;
-        uint previous = 0;
-        for (var i = 0; i < ordinals.Length; i++)
-        {
-            totalBytes += VarInt.GetUInt32Length(ordinals[i] - previous);
-            previous = ordinals[i];
-        }
-
-        var payload = GC.AllocateUninitializedArray<byte>(totalBytes);
         payload[0] = CheckpointedEncoding;
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(1, 4), checkpointCount);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(1, 4), checkpointCount);
 
         var checkpointCursor = 5;
         var dataCursor = checkpointHeaderBytes;
-        previous = 0;
+        uint previous = 0;
         for (var i = 0; i < ordinals.Length; i++)
         {
             var ordinal = ordinals[i];
-            dataCursor += VarInt.WriteUInt32(payload.AsSpan(dataCursor), ordinal - previous);
+            dataCursor += VarInt.WriteUInt32(payload[dataCursor..], ordinal - previous);
             if (i % CheckpointInterval == 0)
             {
-                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(checkpointCursor, 4), ordinal);
-                BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(checkpointCursor + 4, 4), dataCursor - checkpointHeaderBytes);
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(checkpointCursor, 4), ordinal);
+                BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(checkpointCursor + 4, 4), dataCursor - checkpointHeaderBytes);
                 checkpointCursor += 8;
             }
 
             previous = ordinal;
         }
-
-        return payload;
     }
 
     private static PostingsView ParseCheckpointed(ReadOnlySpan<byte> payload)

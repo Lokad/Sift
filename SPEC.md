@@ -190,7 +190,7 @@ Each segment is immutable and independently queryable.
 
 Segment size target:
 
-* **256–512 MiB normalized text**, or
+* **64–128 MiB normalized text**, or
 * **~50k documents**, whichever comes first
 
 Reason: bounded mmap footprint, bounded posting-list sizes, parallel query execution, cheap compaction.

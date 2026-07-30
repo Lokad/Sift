@@ -1,54 +1,73 @@
+using System.IO.MemoryMappedFiles;
 using Lokad.Sift.LowLevel;
-using System.Threading.Tasks;
 
 namespace Lokad.Sift.Storage;
 
-internal static class SegmentWriter
+internal static unsafe class SegmentWriter
 {
     public static long Write(string path, string tempPath, ulong segmentId, IReadOnlyList<ISegmentBuildDocument> documents, CancellationToken cancellationToken)
     {
-        var (bytes, contentBytes) = WriteToBytes(segmentId, documents, cancellationToken);
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        stream.SetLength(bytes.Length);
-        RandomAccess.Write(stream.SafeFileHandle, bytes, 0);
+        _ = tempPath;
+        var prepared = Prepare(documents, cancellationToken);
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        stream.SetLength(prepared.TotalLength);
+        using (var mappedFile = MemoryMappedFile.CreateFromFile(
+                   stream,
+                   mapName: null,
+                   prepared.TotalLength,
+                   MemoryMappedFileAccess.ReadWrite,
+                   HandleInheritability.None,
+                   leaveOpen: true))
+        using (var view = mappedFile.CreateViewAccessor(0, prepared.TotalLength, MemoryMappedFileAccess.ReadWrite))
+        {
+            byte* pointer = null;
+            view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+            try
+            {
+                var bytes = new Span<byte>(
+                    pointer + view.PointerOffset,
+                    prepared.TotalLength);
+                WritePrepared(bytes, segmentId, documents, prepared, cancellationToken);
+                view.Flush();
+            }
+            finally
+            {
+                view.SafeMemoryMappedViewHandle.ReleasePointer();
+            }
+        }
+
         RandomAccess.FlushToDisk(stream.SafeFileHandle);
-        return contentBytes;
+        return prepared.ContentBlobLength;
     }
 
     public static (byte[] Bytes, long ContentBytes) WriteToBytes(ulong segmentId, IReadOnlyList<ISegmentBuildDocument> documents, CancellationToken cancellationToken)
     {
-        BuiltIndex contentTriCs = default;
-        BuiltIndex contentTriIc = default;
-        BuiltIndex contentBiCs = default;
-        BuiltIndex contentBiIc = default;
-        BuiltIndex pathTriCs = default;
-        BuiltIndex pathTriIc = default;
-        if (documents.Count >= 64)
+        var prepared = Prepare(documents, cancellationToken);
+        var bytes = GC.AllocateUninitializedArray<byte>(prepared.TotalLength);
+        WritePrepared(bytes, segmentId, documents, prepared, cancellationToken);
+        return (bytes, prepared.ContentBlobLength);
+    }
+
+    private static PreparedSegment Prepare(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        CancellationToken cancellationToken)
+    {
+        // Build indexes sequentially so one segment cannot retain four 64 MiB trigram
+        // workspaces plus their variable postings state at the same time.
+        var indexes = new[]
         {
-            Parallel.Invoke(
-                new ParallelOptions { CancellationToken = cancellationToken },
-                () => contentTriCs = SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false),
-                () => contentTriIc = SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true),
-                () => contentBiCs = SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false),
-                () => contentBiIc = SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true),
-                () => pathTriCs = SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false),
-                () => pathTriIc = SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true));
-        }
-        else
-        {
-            contentTriCs = SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false);
-            contentTriIc = SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true);
-            contentBiCs = SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false);
-            contentBiIc = SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true);
-            pathTriCs = SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false);
-            pathTriIc = SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true);
-        }
+            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false),
+            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true),
+            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false),
+            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true),
+            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false),
+            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true)
+        };
 
         var rows = new DocumentRow[documents.Count];
         var pathBlobLength = 0;
         var contentBlobLength = 0;
         var lineIndexBlobLength = 0;
-
         for (var i = 0; i < documents.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -67,67 +86,108 @@ internal static class SegmentWriter
                 document.Flags,
                 document.MTimeUtcTicks,
                 document.ContentHash64);
-            pathBlobLength += pathUtf8.Length;
-            contentBlobLength += content.Length;
-            lineIndexBlobLength += encodedLineIndex.Length;
+            pathBlobLength = checked(pathBlobLength + pathUtf8.Length);
+            contentBlobLength = checked(contentBlobLength + content.Length);
+            lineIndexBlobLength = checked(lineIndexBlobLength + encodedLineIndex.Length);
         }
 
-        var regionDirectoryOffset = SegmentFormat.HeaderSize;
-        var documentTableOffset = SegmentFormat.HeaderSize + SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize;
-        var pathBlobOffset = documentTableOffset + rows.Length * SegmentFormat.DocumentRowSize;
-        var contentBlobOffset = pathBlobOffset + pathBlobLength;
-        var lineIndexBlobOffset = contentBlobOffset + contentBlobLength;
-        var contentTriCsLexOffset = lineIndexBlobOffset + lineIndexBlobLength;
-        var contentTriCsPostOffset = contentTriCsLexOffset + contentTriCs.Lexicon.Length;
-        var contentTriIcLexOffset = contentTriCsPostOffset + contentTriCs.Postings.Length;
-        var contentTriIcPostOffset = contentTriIcLexOffset + contentTriIc.Lexicon.Length;
-        var contentBiCsLexOffset = contentTriIcPostOffset + contentTriIc.Postings.Length;
-        var contentBiCsPostOffset = contentBiCsLexOffset + contentBiCs.Lexicon.Length;
-        var contentBiIcLexOffset = contentBiCsPostOffset + contentBiCs.Postings.Length;
-        var contentBiIcPostOffset = contentBiIcLexOffset + contentBiIc.Lexicon.Length;
-        var pathTriCsLexOffset = contentBiIcPostOffset + contentBiIc.Postings.Length;
-        var pathTriCsPostOffset = pathTriCsLexOffset + pathTriCs.Lexicon.Length;
-        var pathTriIcLexOffset = pathTriCsPostOffset + pathTriCs.Postings.Length;
-        var pathTriIcPostOffset = pathTriIcLexOffset + pathTriIc.Lexicon.Length;
-        var statsOffset = pathTriIcPostOffset + pathTriIc.Postings.Length;
-        var statsLength = 8 + (256 * 4);
-        var checksumTableOffset = statsOffset + statsLength;
-        var totalLength = checksumTableOffset + SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize;
+        var totalLength = checked(
+            SegmentFormat.HeaderSize +
+            SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize +
+            rows.Length * SegmentFormat.DocumentRowSize +
+            pathBlobLength +
+            contentBlobLength +
+            lineIndexBlobLength);
+        foreach (var index in indexes)
+        {
+            totalLength = checked(totalLength + index.Lexicon.Length + index.Postings.Length);
+        }
 
-        var bytes = GC.AllocateUninitializedArray<byte>(totalLength);
-        var header = bytes.AsSpan(0, SegmentFormat.HeaderSize);
+        totalLength = checked(
+            totalLength +
+            PreparedSegment.StatsLength +
+            SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize);
+        return new PreparedSegment(
+            rows,
+            pathBlobLength,
+            contentBlobLength,
+            lineIndexBlobLength,
+            indexes,
+            totalLength);
+    }
+
+    private static void WritePrepared(
+        Span<byte> bytes,
+        ulong segmentId,
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        PreparedSegment prepared,
+        CancellationToken cancellationToken)
+    {
+        if (bytes.Length != prepared.TotalLength)
+        {
+            throw new ArgumentException("The Sift segment destination has an invalid length.", nameof(bytes));
+        }
+
+        var rows = prepared.Rows;
+        var indexes = prepared.Indexes;
+        var regionDirectoryOffset = SegmentFormat.HeaderSize;
+        var documentTableOffset = checked(
+            SegmentFormat.HeaderSize +
+            SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize);
+        var pathBlobOffset = checked(documentTableOffset + rows.Length * SegmentFormat.DocumentRowSize);
+        var contentBlobOffset = checked(pathBlobOffset + prepared.PathBlobLength);
+        var lineIndexBlobOffset = checked(contentBlobOffset + prepared.ContentBlobLength);
+        var contentTriCsLexOffset = checked(lineIndexBlobOffset + prepared.LineIndexBlobLength);
+        var contentTriCsPostOffset = checked(contentTriCsLexOffset + indexes[0].Lexicon.Length);
+        var contentTriIcLexOffset = checked(contentTriCsPostOffset + indexes[0].Postings.Length);
+        var contentTriIcPostOffset = checked(contentTriIcLexOffset + indexes[1].Lexicon.Length);
+        var contentBiCsLexOffset = checked(contentTriIcPostOffset + indexes[1].Postings.Length);
+        var contentBiCsPostOffset = checked(contentBiCsLexOffset + indexes[2].Lexicon.Length);
+        var contentBiIcLexOffset = checked(contentBiCsPostOffset + indexes[2].Postings.Length);
+        var contentBiIcPostOffset = checked(contentBiIcLexOffset + indexes[3].Lexicon.Length);
+        var pathTriCsLexOffset = checked(contentBiIcPostOffset + indexes[3].Postings.Length);
+        var pathTriCsPostOffset = checked(pathTriCsLexOffset + indexes[4].Lexicon.Length);
+        var pathTriIcLexOffset = checked(pathTriCsPostOffset + indexes[4].Postings.Length);
+        var pathTriIcPostOffset = checked(pathTriIcLexOffset + indexes[5].Lexicon.Length);
+        var statsOffset = checked(pathTriIcPostOffset + indexes[5].Postings.Length);
+        var checksumTableOffset = checked(statsOffset + PreparedSegment.StatsLength);
+
+        var header = bytes[..SegmentFormat.HeaderSize];
         LittleEndianCodec.WriteUInt64(header, SegmentFormat.SegmentMagic);
         LittleEndianCodec.WriteInt32(header[8..], SegmentFormat.FormatVersion);
         LittleEndianCodec.WriteUInt64(header[12..], segmentId);
         LittleEndianCodec.WriteInt64(header[20..], DateTime.UtcNow.Ticks);
         LittleEndianCodec.WriteInt32(header[28..], rows.Length);
-        LittleEndianCodec.WriteInt64(header[32..], contentBlobLength);
+        LittleEndianCodec.WriteInt64(header[32..], prepared.ContentBlobLength);
         LittleEndianCodec.WriteInt32(header[40..], SegmentFormat.RegionCount);
         LittleEndianCodec.WriteInt64(header[44..], regionDirectoryOffset);
         LittleEndianCodec.WriteInt64(header[52..], checksumTableOffset);
 
         WriteRegionDirectory(
-            bytes.AsSpan(regionDirectoryOffset, SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize),
-            (int[])[
+            bytes.Slice(
+                regionDirectoryOffset,
+                SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize),
+            [
                 documentTableOffset, rows.Length * SegmentFormat.DocumentRowSize,
-                pathBlobOffset, pathBlobLength,
-                contentBlobOffset, contentBlobLength,
-                lineIndexBlobOffset, lineIndexBlobLength,
-                contentTriCsLexOffset, contentTriCs.Lexicon.Length,
-                contentTriCsPostOffset, contentTriCs.Postings.Length,
-                contentTriIcLexOffset, contentTriIc.Lexicon.Length,
-                contentTriIcPostOffset, contentTriIc.Postings.Length,
-                contentBiCsLexOffset, contentBiCs.Lexicon.Length,
-                contentBiCsPostOffset, contentBiCs.Postings.Length,
-                contentBiIcLexOffset, contentBiIc.Lexicon.Length,
-                contentBiIcPostOffset, contentBiIc.Postings.Length,
-                pathTriCsLexOffset, pathTriCs.Lexicon.Length,
-                pathTriCsPostOffset, pathTriCs.Postings.Length,
-                pathTriIcLexOffset, pathTriIc.Lexicon.Length,
-                pathTriIcPostOffset, pathTriIc.Postings.Length,
-                statsOffset, statsLength
+                pathBlobOffset, prepared.PathBlobLength,
+                contentBlobOffset, prepared.ContentBlobLength,
+                lineIndexBlobOffset, prepared.LineIndexBlobLength,
+                contentTriCsLexOffset, indexes[0].Lexicon.Length,
+                contentTriCsPostOffset, indexes[0].Postings.Length,
+                contentTriIcLexOffset, indexes[1].Lexicon.Length,
+                contentTriIcPostOffset, indexes[1].Postings.Length,
+                contentBiCsLexOffset, indexes[2].Lexicon.Length,
+                contentBiCsPostOffset, indexes[2].Postings.Length,
+                contentBiIcLexOffset, indexes[3].Lexicon.Length,
+                contentBiIcPostOffset, indexes[3].Postings.Length,
+                pathTriCsLexOffset, indexes[4].Lexicon.Length,
+                pathTriCsPostOffset, indexes[4].Postings.Length,
+                pathTriIcLexOffset, indexes[5].Lexicon.Length,
+                pathTriIcPostOffset, indexes[5].Postings.Length,
+                statsOffset, PreparedSegment.StatsLength
             ]);
-        var documentTable = bytes.AsSpan(documentTableOffset, rows.Length * SegmentFormat.DocumentRowSize);
+
+        var documentTable = bytes.Slice(documentTableOffset, rows.Length * SegmentFormat.DocumentRowSize);
         for (var i = 0; i < rows.Length; i++)
         {
             var row = rows[i];
@@ -144,13 +204,13 @@ internal static class SegmentWriter
             LittleEndianCodec.WriteUInt64(documentTable.Slice(rowOffset + 50, 8), row.ContentHash64);
         }
 
-        var pathBlob = bytes.AsSpan(pathBlobOffset, pathBlobLength);
-        var contentBlob = bytes.AsSpan(contentBlobOffset, contentBlobLength);
-        var lineIndexBlob = bytes.AsSpan(lineIndexBlobOffset, lineIndexBlobLength);
-        var stats = bytes.AsSpan(statsOffset, statsLength);
+        var pathBlob = bytes.Slice(pathBlobOffset, prepared.PathBlobLength);
+        var contentBlob = bytes.Slice(contentBlobOffset, prepared.ContentBlobLength);
+        var lineIndexBlob = bytes.Slice(lineIndexBlobOffset, prepared.LineIndexBlobLength);
+        var stats = bytes.Slice(statsOffset, PreparedSegment.StatsLength);
         stats.Clear();
         LittleEndianCodec.WriteInt32(stats, rows.Length);
-        LittleEndianCodec.WriteInt32(stats[4..], contentBlobLength);
+        LittleEndianCodec.WriteInt32(stats[4..], prepared.ContentBlobLength);
 
         var pathOffsetCursor = 0;
         var contentOffsetCursor = 0;
@@ -166,7 +226,7 @@ internal static class SegmentWriter
             content.CopyTo(contentBlob[contentOffsetCursor..]);
             for (var i = 0; i < content.Length; i++)
             {
-                var bucketOffset = 8 + (content[i] * 4);
+                var bucketOffset = 8 + content[i] * 4;
                 var current = LittleEndianCodec.ReadInt32(stats.Slice(bucketOffset, 4));
                 LittleEndianCodec.WriteInt32(stats.Slice(bucketOffset, 4), current + 1);
             }
@@ -176,38 +236,39 @@ internal static class SegmentWriter
             lineOffsetCursor += encodedLineIndex.Length;
         }
 
-        contentTriCs.Lexicon.CopyTo(bytes, contentTriCsLexOffset);
-        contentTriCs.Postings.CopyTo(bytes, contentTriCsPostOffset);
-        contentTriIc.Lexicon.CopyTo(bytes, contentTriIcLexOffset);
-        contentTriIc.Postings.CopyTo(bytes, contentTriIcPostOffset);
-        contentBiCs.Lexicon.CopyTo(bytes, contentBiCsLexOffset);
-        contentBiCs.Postings.CopyTo(bytes, contentBiCsPostOffset);
-        contentBiIc.Lexicon.CopyTo(bytes, contentBiIcLexOffset);
-        contentBiIc.Postings.CopyTo(bytes, contentBiIcPostOffset);
-        pathTriCs.Lexicon.CopyTo(bytes, pathTriCsLexOffset);
-        pathTriCs.Postings.CopyTo(bytes, pathTriCsPostOffset);
-        pathTriIc.Lexicon.CopyTo(bytes, pathTriIcLexOffset);
-        pathTriIc.Postings.CopyTo(bytes, pathTriIcPostOffset);
+        indexes[0].Lexicon.CopyTo(bytes[contentTriCsLexOffset..]);
+        indexes[0].Postings.CopyTo(bytes[contentTriCsPostOffset..]);
+        indexes[1].Lexicon.CopyTo(bytes[contentTriIcLexOffset..]);
+        indexes[1].Postings.CopyTo(bytes[contentTriIcPostOffset..]);
+        indexes[2].Lexicon.CopyTo(bytes[contentBiCsLexOffset..]);
+        indexes[2].Postings.CopyTo(bytes[contentBiCsPostOffset..]);
+        indexes[3].Lexicon.CopyTo(bytes[contentBiIcLexOffset..]);
+        indexes[3].Postings.CopyTo(bytes[contentBiIcPostOffset..]);
+        indexes[4].Lexicon.CopyTo(bytes[pathTriCsLexOffset..]);
+        indexes[4].Postings.CopyTo(bytes[pathTriCsPostOffset..]);
+        indexes[5].Lexicon.CopyTo(bytes[pathTriIcLexOffset..]);
+        indexes[5].Postings.CopyTo(bytes[pathTriIcPostOffset..]);
         WriteChecksumTable(
-            bytes.AsSpan(checksumTableOffset, SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize),
+            bytes.Slice(
+                checksumTableOffset,
+                SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize),
             documentTable,
             pathBlob,
             contentBlob,
             lineIndexBlob,
-            contentTriCs.Lexicon,
-            contentTriCs.Postings,
-            contentTriIc.Lexicon,
-            contentTriIc.Postings,
-            contentBiCs.Lexicon,
-            contentBiCs.Postings,
-            contentBiIc.Lexicon,
-            contentBiIc.Postings,
-            pathTriCs.Lexicon,
-            pathTriCs.Postings,
-            pathTriIc.Lexicon,
-            pathTriIc.Postings,
+            indexes[0].Lexicon,
+            indexes[0].Postings,
+            indexes[1].Lexicon,
+            indexes[1].Postings,
+            indexes[2].Lexicon,
+            indexes[2].Postings,
+            indexes[3].Lexicon,
+            indexes[3].Postings,
+            indexes[4].Lexicon,
+            indexes[4].Postings,
+            indexes[5].Lexicon,
+            indexes[5].Postings,
             stats);
-        return (bytes, contentBlobLength);
     }
 
     private static void WriteRegionDirectory(Span<byte> regionDirectory, int[] regionPairs)
@@ -267,8 +328,21 @@ internal static class SegmentWriter
                 _ => default
             };
             LittleEndianCodec.WriteInt32(checksumTable.Slice(offset, 4), regionId);
-            LittleEndianCodec.WriteUInt64(checksumTable.Slice(offset + 4, 8), Hashing.Fnv1A64(regionBytes));
+            LittleEndianCodec.WriteUInt64(
+                checksumTable.Slice(offset + 4, 8),
+                Hashing.Fnv1A64(regionBytes));
         }
+    }
+
+    private sealed record PreparedSegment(
+        DocumentRow[] Rows,
+        int PathBlobLength,
+        int ContentBlobLength,
+        int LineIndexBlobLength,
+        BuiltIndex[] Indexes,
+        int TotalLength)
+    {
+        public const int StatsLength = 8 + 256 * 4;
     }
 
     private readonly record struct DocumentRow(

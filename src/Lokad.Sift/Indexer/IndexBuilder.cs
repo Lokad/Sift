@@ -10,7 +10,7 @@ internal sealed class IndexBuilder
 {
     internal const int DefaultMaxDocumentBytes = 32 * 1024 * 1024;
     internal const int DefaultTargetSegmentDocumentCount = 50_000;
-    internal const long DefaultTargetSegmentContentBytes = 256L * 1024 * 1024;
+    internal const long DefaultTargetSegmentContentBytes = 64L * 1024 * 1024;
     private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
 

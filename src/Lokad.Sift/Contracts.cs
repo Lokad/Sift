@@ -71,7 +71,7 @@ public sealed class SiftOptions
 {
     public int MaxDocumentBytes { get; init; } = 32 * 1024 * 1024;
     public int TargetSegmentDocumentCount { get; init; } = 50_000;
-    public long TargetSegmentContentBytes { get; init; } = 256L * 1024 * 1024;
+    public long TargetSegmentContentBytes { get; init; } = 64L * 1024 * 1024;
     public int DirectScanScopeDocumentsThreshold { get; init; } = 8192;
     public long DirectScanScopeBytesThreshold { get; init; } = 64L * 1024 * 1024;
     public double DirectScanCandidateDensityThreshold { get; init; } = 0.85;

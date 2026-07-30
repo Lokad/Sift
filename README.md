@@ -25,7 +25,7 @@ var indexPath = @"C:\data\sift-index";
 using var index = new Sift(indexPath, new SiftOptions
 {
     TargetSegmentDocumentCount = 50_000, // Start a new segment once about 50k documents accumulate.
-    TargetSegmentContentBytes = 256L * 1024 * 1024 // Or once a segment reaches about 256 MiB of content.
+    TargetSegmentContentBytes = 64L * 1024 * 1024 // Or once a segment reaches about 64 MiB of content.
 });
 // Alternative in-memory form:
 // using var index = Sift.CreateInMemory();

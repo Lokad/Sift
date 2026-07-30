@@ -1,13 +1,12 @@
 using System.Runtime.InteropServices;
-using System.Collections.Concurrent;
 using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
 
 internal static class SegmentIndexBuilder
 {
-    private static readonly ConcurrentBag<DirectIndexedGramBuilder> BigramBuilders = [];
-    private static readonly ConcurrentBag<DirectIndexedGramBuilder> TrigramBuilders = [];
+    private static DirectIndexedGramBuilder? s_bigramBuilder;
+    private static DirectIndexedGramBuilder? s_trigramBuilder;
 
     public static BuiltIndex BuildContentIndex(IReadOnlyList<ISegmentBuildDocument> documents, int gramLength, bool caseInsensitive)
     {
@@ -550,17 +549,20 @@ internal static class SegmentIndexBuilder
 
     private static DirectIndexedGramBuilder RentBuilder(int gramLength)
     {
-        var pool = gramLength == 2 ? BigramBuilders : TrigramBuilders;
-        return pool.TryTake(out var builder)
-            ? builder
-            : new DirectIndexedGramBuilder(gramLength);
+        ref var pooledBuilder = ref gramLength == 2
+            ? ref s_bigramBuilder
+            : ref s_trigramBuilder;
+        return Interlocked.Exchange(ref pooledBuilder, null) ??
+            new DirectIndexedGramBuilder(gramLength);
     }
 
     private static void ReturnBuilder(DirectIndexedGramBuilder builder)
     {
         builder.ResetForReuse();
-        var pool = builder.GramLength == 2 ? BigramBuilders : TrigramBuilders;
-        pool.Add(builder);
+        ref var pooledBuilder = ref builder.GramLength == 2
+            ? ref s_bigramBuilder
+            : ref s_trigramBuilder;
+        _ = Interlocked.CompareExchange(ref pooledBuilder, builder, null);
     }
 
 }
@@ -678,7 +680,6 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         var entries = new List<IndexEntry>(_touchedCount);
-        var encodedPostings = new List<byte[]>(_touchedCount);
         var bucketStarts = GC.AllocateUninitializedArray<int>(SegmentFormat.LexiconBucketCount);
         Array.Fill(bucketStarts, -1);
 
@@ -694,10 +695,9 @@ internal sealed class DirectIndexedGramBuilder
                 bucketStarts[bucket] = entries.Count;
             }
 
-            var postings = PostingsCodec.Encode(_ordinals.AsSpan(ordinalsOffset, docFreq));
-            encodedPostings.Add(postings);
-            entries.Add(new IndexEntry(gram, totalBytes, postings.Length, docFreq));
-            totalBytes += postings.Length;
+            var postingsBytes = PostingsCodec.GetEncodedLength(_ordinals.AsSpan(ordinalsOffset, docFreq));
+            entries.Add(new IndexEntry(gram, totalBytes, postingsBytes, docFreq));
+            totalBytes = checked(totalBytes + postingsBytes);
             ordinalsOffset += docFreq;
         }
 
@@ -736,10 +736,14 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         var postingsBlob = GC.AllocateUninitializedArray<byte>(totalBytes);
+        ordinalsOffset = 0;
         for (var i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
-            encodedPostings[i].AsSpan().CopyTo(postingsBlob.AsSpan(entry.PostingsOffset));
+            PostingsCodec.Encode(
+                _ordinals.AsSpan(ordinalsOffset, entry.DocFreq),
+                postingsBlob.AsSpan(entry.PostingsOffset, entry.PostingsBytes));
+            ordinalsOffset += entry.DocFreq;
         }
 
         return new BuiltIndex(lexicon, postingsBlob, [.. entries]);
@@ -757,8 +761,21 @@ internal sealed class DirectIndexedGramBuilder
 
     public void ResetForReuse()
     {
-        _overflowCounts?.Clear();
-        _touchedLookup?.Clear();
+        for (var i = 0; i < _touchedCount; i++)
+        {
+            _counts[_touched[i]] = 0;
+        }
+
+        _overflowCounts = null;
+        _touchedLookup = null;
+        _ordinals = [];
+        _docFrequencies = [];
+        _writePositions = [];
+        if (_touched.Length > 1024)
+        {
+            _touched = GC.AllocateUninitializedArray<int>(1024);
+        }
+
         _touchedCount = 0;
     }
 
