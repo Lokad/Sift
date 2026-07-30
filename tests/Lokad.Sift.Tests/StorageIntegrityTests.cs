@@ -324,6 +324,33 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task ReopenedCorpusValidatesEachImmutableSegmentOnce()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        var storage = TestHelpers.GetStorage(reopened);
+        Assert.Equal(0, storage.ValidatedSegmentCount);
+
+        using (reopened.OpenSnapshot())
+        {
+        }
+
+        Assert.Equal(1, storage.ValidatedSegmentCount);
+        using (reopened.OpenSnapshot())
+        {
+        }
+
+        Assert.Equal(1, storage.ValidatedSegmentCount);
+    }
+
+    [Fact]
     public async Task CorruptedManifestChecksumIsRejected()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));

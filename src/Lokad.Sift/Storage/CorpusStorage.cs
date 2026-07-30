@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Concurrent;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
 
@@ -12,6 +13,8 @@ public sealed class CorpusStorage : ISiftStorage
     private const int GenerationLeaseChecksumSize = 8;
     private readonly string _rootPath;
     private readonly object _layoutLock = new();
+    private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
+    private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
 
     public CorpusStorage(string rootPath)
@@ -24,6 +27,7 @@ public sealed class CorpusStorage : ISiftStorage
     public string TempPath => Path.Combine(_rootPath, "temp");
     public string LockPath => Path.Combine(_rootPath, "lock");
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
+    internal int ValidatedSegmentCount => _validatedSegmentIds.Count;
     private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
     internal PublicationFaultInjector? FaultInjector { get; set; }
     public bool HasManifest => File.Exists(ManifestPath);
@@ -140,6 +144,7 @@ public sealed class CorpusStorage : ISiftStorage
 
         Directory.CreateDirectory(finalSegmentDirectory);
         File.Move(tempSegmentPath, finalSegmentPath);
+        _validatedSegmentIds.TryAdd(segmentId, 0);
         Directory.Delete(tempSegmentDirectory, recursive: true);
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, []);
     }
@@ -274,7 +279,25 @@ public sealed class CorpusStorage : ISiftStorage
 
     public MappedSegment OpenSegment(ulong segmentId, bool validateChecksums = true)
     {
-        return new MappedSegment(Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack"), validateChecksums);
+        var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
+        if (!validateChecksums || _validatedSegmentIds.ContainsKey(segmentId))
+        {
+            return OpenAndValidateIdentity(path, segmentId, validateChecksums: false);
+        }
+
+        var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
+        lock (validationGate)
+        {
+            if (_validatedSegmentIds.ContainsKey(segmentId))
+            {
+                return OpenAndValidateIdentity(path, segmentId, validateChecksums: false);
+            }
+
+            var segment = OpenAndValidateIdentity(path, segmentId, validateChecksums: true);
+            _validatedSegmentIds.TryAdd(segmentId, 0);
+            _segmentValidationGates.TryRemove(segmentId, out _);
+            return segment;
+        }
     }
 
     bool ISiftStorage.IsReclamationPending
@@ -541,6 +564,20 @@ public sealed class CorpusStorage : ISiftStorage
         using var _ = new MappedSegment(path);
     }
 
+    private static MappedSegment OpenAndValidateIdentity(string path, ulong expectedSegmentId, bool validateChecksums)
+    {
+        var segment = new MappedSegment(path, validateChecksums);
+        if (segment.SegmentId == expectedSegmentId)
+        {
+            return segment;
+        }
+
+        var actualSegmentId = segment.SegmentId;
+        segment.Dispose();
+        throw new InvalidDataException(
+            $"Sift segment '{expectedSegmentId:X16}' contains id '{actualSegmentId:X16}'.");
+    }
+
     private void RecoverStaleTempEntries()
     {
         if (!Directory.Exists(TempPath))
@@ -622,7 +659,15 @@ public sealed class CorpusStorage : ISiftStorage
 
             try
             {
-                using var _ = new MappedSegment(segmentPackPath);
+                var directoryName = Path.GetFileName(directory);
+                if (directoryName.Length != 16 ||
+                    !ulong.TryParse(directoryName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var segmentId))
+                {
+                    Directory.Delete(directory, recursive: true);
+                    continue;
+                }
+
+                using var _ = OpenSegment(segmentId);
             }
             catch (InvalidDataException)
             {

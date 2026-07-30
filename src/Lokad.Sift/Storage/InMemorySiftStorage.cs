@@ -82,7 +82,17 @@ public sealed class InMemorySiftStorage : ISiftStorage
             throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
         }
 
-        return new MappedSegment(bytes, validateChecksums);
+        // Published in-memory packs were checksummed immediately before insertion.
+        var segment = new MappedSegment(bytes, validateChecksums: false);
+        if (segment.SegmentId == segmentId)
+        {
+            return segment;
+        }
+
+        var actualSegmentId = segment.SegmentId;
+        segment.Dispose();
+        throw new InvalidDataException(
+            $"Sift segment '{segmentId:X16}' contains id '{actualSegmentId:X16}'.");
     }
 
     bool ISiftStorage.IsReclamationPending

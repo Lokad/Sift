@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,7 +9,8 @@ namespace Lokad.Sift.Search;
 
 internal static class RegexVerifier
 {
-    private static readonly ConcurrentDictionary<RegexCacheKey, RegexEntry> Cache = new();
+    internal const int CacheCapacity = 256;
+    private static readonly BoundedLruCache<RegexCacheKey, RegexEntry> Cache = new(CacheCapacity);
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
     private static long _cacheHits;
     private static long _cacheMisses;
@@ -170,21 +170,16 @@ internal static class RegexVerifier
         }
 
         var key = new RegexCacheKey(pattern, options);
-        if (Cache.TryGetValue(key, out var cached))
+        var entry = Cache.GetOrAdd(key, static cacheKey => CreateRegex(cacheKey.Pattern, cacheKey.Options), out var cacheHit);
+        if (cacheHit)
         {
             Interlocked.Increment(ref _cacheHits);
-            return cached;
         }
-
-        var created = CreateRegex(key.Pattern, key.Options);
-        var entry = Cache.GetOrAdd(key, created);
-        if (ReferenceEquals(entry.Regex, created.Regex))
+        else
         {
             Interlocked.Increment(ref _cacheMisses);
-            return entry;
         }
 
-        Interlocked.Increment(ref _cacheHits);
         return entry;
     }
 

@@ -1,18 +1,19 @@
 using System.Text;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Storage;
-using Utf8Regex = Lokad.Utf8Regex.Utf8Regex;
+using CompiledUtf8Regex = Lokad.Utf8Regex.Utf8Regex;
 
 namespace Lokad.Sift.Search;
 
 internal static class Utf8RegexEngine
 {
-    private static readonly ConcurrentDictionary<Utf8RegexCacheKey, Utf8RegexEntry> Cache = new();
+    internal const int CacheCapacity = 256;
+    private static readonly BoundedLruCache<Utf8RegexCacheKey, CompiledUtf8Regex> Cache = new(CacheCapacity);
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
+    internal static int CacheCount => Cache.Count;
 
     public static bool TryCompile(in SearchQuery query, CaseMode resolvedCaseMode, out Utf8RegexProgram program)
     {
@@ -54,8 +55,8 @@ internal static class Utf8RegexEngine
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         byteRegexInvocations++;
-        var entry = GetRegexEntry(program);
-        if (entry.CacheHit)
+        var regex = GetRegex(program, out var cacheHit);
+        if (cacheHit)
         {
             byteRegexCacheHits++;
         }
@@ -69,7 +70,7 @@ internal static class Utf8RegexEngine
         {
             // Stay on the byte-native API surface. If Sift ever needs to continue from a byte offset,
             // it should slice contentBytes or use a future byte-offset Utf8Regex API rather than a UTF-16 startAt overload.
-            foreach (var match in entry.Regex.EnumerateMatches(contentBytes))
+            foreach (var match in regex.EnumerateMatches(contentBytes))
             {
                 if (!match.TryGetByteRange(out var startByte, out var lengthInBytes))
                 {
@@ -104,7 +105,7 @@ internal static class Utf8RegexEngine
         return matched;
     }
 
-    private static Utf8RegexEntry GetRegexEntry(Utf8RegexProgram program)
+    private static CompiledUtf8Regex GetRegex(Utf8RegexProgram program, out bool cacheHit)
     {
         var options = RegexOptions.CultureInvariant;
         if (program.Multiline)
@@ -123,16 +124,10 @@ internal static class Utf8RegexEngine
         }
 
         var key = new Utf8RegexCacheKey(program.Pattern, options);
-        if (Cache.TryGetValue(key, out var cached))
-        {
-            return new Utf8RegexEntry(cached.Regex, CacheHit: true);
-        }
-
-        var created = new Lokad.Utf8Regex.Utf8Regex(program.Pattern, options, DefaultTimeout);
-        var entry = Cache.GetOrAdd(key, new Utf8RegexEntry(created, CacheHit: false));
-        return ReferenceEquals(entry.Regex, created)
-            ? entry
-            : new Utf8RegexEntry(entry.Regex, CacheHit: true);
+        return Cache.GetOrAdd(
+            key,
+            static cacheKey => new CompiledUtf8Regex(cacheKey.Pattern, cacheKey.Options, DefaultTimeout),
+            out cacheHit);
     }
 
     private static bool IsAscii(string text) => Encoding.UTF8.GetByteCount(text) == text.Length;
@@ -1342,10 +1337,6 @@ internal sealed record Utf8RegexProgram(
 internal readonly record struct Utf8RegexCacheKey(
     string Pattern,
     RegexOptions Options);
-
-internal readonly record struct Utf8RegexEntry(
-    Lokad.Utf8Regex.Utf8Regex Regex,
-    bool CacheHit);
 
 internal readonly record struct Utf8RegexOrderedAnchorGroup(
     Utf8RegexOrderedAnchor[] Anchors);
