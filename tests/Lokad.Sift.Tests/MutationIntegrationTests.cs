@@ -181,6 +181,58 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task RejectedUpsertHidesPreviouslyIndexedContent()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaxDocumentBytes = 8
+        });
+        await index.Build(fixture.CreateSource());
+
+        var stats = await index.Update(
+            new InMemoryDocumentSource([("src/a.txt", "replacement is too large\n")]),
+            []);
+
+        Assert.Equal(1, stats.SubmittedUpserts);
+        Assert.Equal(0, stats.UpsertedDocuments);
+        Assert.Equal(1, stats.RejectedUpserts);
+
+        using var snapshot = index.OpenSnapshot();
+        var oldContent = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            oldContent);
+        Assert.Empty(oldContent.Hits);
+
+        var replacement = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("replacement", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            replacement);
+        Assert.Empty(replacement.Hits);
+    }
+
+    [Fact]
+    public async Task DuplicateRejectedUpsertPathsAreRejected()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaxDocumentBytes = 1
+        });
+        await index.Build(fixture.CreateSource());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await index.Update(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "too large"),
+                ("src\\a.txt", "also too large")
+            ]),
+            []));
+    }
+
+    [Fact]
     public async Task CompactDropsDeadDocuments()
     {
         using var fixture = new CorpusFixture(

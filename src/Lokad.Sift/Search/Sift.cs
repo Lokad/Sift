@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Search;
@@ -168,7 +167,6 @@ public sealed class Sift : ISift
         var existingManifest = _storage.HasManifest
             ? _storage.ReadManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
-        var liveDocumentKeys = LoadLiveDocumentKeys(existingManifest, cancellationToken);
 
         var upsertLoad = IndexBuilder.LoadDocuments(upserts, cancellationToken, _options);
         var upsertsByPath = new Dictionary<string, StoredDocument>(StringComparer.Ordinal);
@@ -181,6 +179,8 @@ public sealed class Sift : ISift
             }
         }
 
+        var submittedUpsertPaths = new HashSet<string>(upsertsByPath.Keys, StringComparer.Ordinal);
+        submittedUpsertPaths.UnionWith(upsertLoad.RejectedPaths);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {
@@ -191,12 +191,18 @@ public sealed class Sift : ISift
                 throw new InvalidOperationException($"Duplicate deletion path in update batch: '{normalized}'.");
             }
 
-            if (upsertsByPath.ContainsKey(normalized))
+            if (submittedUpsertPaths.Contains(normalized))
             {
                 throw new InvalidOperationException($"Path '{normalized}' cannot appear in both upserts and deletions.");
             }
         }
 
+        var affectedPaths = new HashSet<string>(submittedUpsertPaths, StringComparer.Ordinal);
+        affectedPaths.UnionWith(deletionSet);
+        var liveDocumentKeys = FindLiveDocumentKeys(
+            existingManifest,
+            affectedPaths,
+            cancellationToken);
         var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + 1);
         var deadBySegment = existingManifest.Segments.ToDictionary(
             static segment => segment.SegmentId,
@@ -206,7 +212,18 @@ public sealed class Sift : ISift
         foreach (var document in upsertsByPath.Values)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (liveDocumentKeys.TryGetValue(document.PathUtf8, out var current))
+            if (liveDocumentKeys.TryGetValue(document.Path, out var current))
+            {
+                deadBySegment[current.SegmentId].Add(current.Ordinal);
+            }
+        }
+
+        // A rejected replacement must hide the previous version; otherwise callers that
+        // checkpoint the rejection would keep stale content searchable indefinitely.
+        foreach (var path in upsertLoad.RejectedPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (liveDocumentKeys.TryGetValue(path, out var current))
             {
                 deadBySegment[current.SegmentId].Add(current.Ordinal);
             }
@@ -215,7 +232,7 @@ public sealed class Sift : ISift
         foreach (var path in deletionSet)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (liveDocumentKeys.TryGetValue(Encoding.UTF8.GetBytes(path), out var current))
+            if (liveDocumentKeys.TryGetValue(path, out var current))
             {
                 deadBySegment[current.SegmentId].Add(current.Ordinal);
             }
@@ -570,29 +587,31 @@ public sealed class Sift : ISift
         }
     }
 
-    private Dictionary<byte[], LiveDocumentKey> LoadLiveDocumentKeys(CorpusManifest manifest, CancellationToken cancellationToken)
+    private Dictionary<string, LiveDocumentKey> FindLiveDocumentKeys(
+        CorpusManifest manifest,
+        IReadOnlySet<string> affectedPaths,
+        CancellationToken cancellationToken)
     {
-        var live = new Dictionary<byte[], LiveDocumentKey>(ByteArrayComparer.Instance);
+        var live = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
+        if (affectedPaths.Count == 0)
+        {
+            return live;
+        }
+
         foreach (var entry in manifest.Segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var segment = _storage.OpenSegment(entry.SegmentId, validateChecksums: false);
-            var deadIndex = 0;
-            for (uint ordinal = 0; ordinal < segment.DocumentCount; ordinal++)
+            foreach (var path in affectedPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                while (deadIndex < entry.DeadOrdinals.Length && entry.DeadOrdinals[deadIndex] < ordinal)
-                {
-                    deadIndex++;
-                }
-
-                if (deadIndex < entry.DeadOrdinals.Length && entry.DeadOrdinals[deadIndex] == ordinal)
+                if (!segment.TryFindDocumentOrdinal(path, out var ordinal) ||
+                    Array.BinarySearch(entry.DeadOrdinals, ordinal) >= 0)
                 {
                     continue;
                 }
 
-                var document = segment.GetDocument(ordinal);
-                live[segment.GetPathBytes(document).ToArray()] = new LiveDocumentKey(entry.SegmentId, ordinal);
+                live[path] = new LiveDocumentKey(entry.SegmentId, ordinal);
             }
         }
 
@@ -710,37 +729,6 @@ public sealed class Sift : ISift
     private readonly record struct LiveDocumentKey(
         ulong SegmentId,
         uint Ordinal);
-
-    private sealed class ByteArrayComparer : IEqualityComparer<byte[]>
-    {
-        public static ByteArrayComparer Instance { get; } = new();
-
-        public bool Equals(byte[]? left, byte[]? right)
-        {
-            if (ReferenceEquals(left, right))
-            {
-                return true;
-            }
-
-            if (left is null || right is null || left.Length != right.Length)
-            {
-                return false;
-            }
-
-            return left.AsSpan().SequenceEqual(right);
-        }
-
-        public int GetHashCode(byte[] value)
-        {
-            var hash = new HashCode();
-            for (var i = 0; i < value.Length; i++)
-            {
-                hash.Add(value[i]);
-            }
-
-            return hash.ToHashCode();
-        }
-    }
 
     private sealed class Utf8PathComparer : IComparer<byte[]>
     {

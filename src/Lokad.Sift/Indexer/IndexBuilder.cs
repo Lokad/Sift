@@ -58,6 +58,7 @@ internal sealed class IndexBuilder
         long rejectedBytes = 0;
         long acceptedBytes = 0;
         var documents = new List<StoredDocument>();
+        var rejectedPaths = new List<string>();
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
 
         while (source.TryReadNext(out var submittedDocument))
@@ -66,23 +67,32 @@ internal sealed class IndexBuilder
             submitted++;
             submittedBytes += submittedDocument.Content.Length;
 
-            if (!TryNormalize(submittedDocument, options, out var normalizedPath, out var storedDocument))
-            {
-                rejected++;
-                rejectedBytes += submittedDocument.Content.Length;
-                continue;
-            }
-
+            var accepted = TryNormalize(submittedDocument, options, out var normalizedPath, out var storedDocument);
             if (!seenPaths.Add(normalizedPath))
             {
                 throw new InvalidOperationException($"Duplicate canonical path in build batch: '{normalizedPath}'.");
+            }
+
+            if (!accepted)
+            {
+                rejected++;
+                rejectedBytes += submittedDocument.Content.Length;
+                rejectedPaths.Add(normalizedPath);
+                continue;
             }
 
             documents.Add(storedDocument!);
             acceptedBytes += storedDocument!.Content.Length;
         }
 
-        return new LoadedDocuments(submitted, submittedBytes, rejected, rejectedBytes, acceptedBytes, documents);
+        return new LoadedDocuments(
+            submitted,
+            submittedBytes,
+            rejected,
+            rejectedBytes,
+            acceptedBytes,
+            documents,
+            rejectedPaths);
     }
 
     public static List<List<StoredDocument>> PartitionDocuments(IReadOnlyList<StoredDocument> documents, SiftOptions? options = null)
@@ -237,5 +247,6 @@ internal readonly record struct LoadedDocuments(
     int Rejected,
     long RejectedBytes,
     long AcceptedBytes,
-    List<StoredDocument> Documents);
+    List<StoredDocument> Documents,
+    List<string> RejectedPaths);
 
