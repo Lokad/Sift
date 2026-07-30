@@ -87,16 +87,17 @@ public sealed class Sift : ISift
 
     public MaintenanceStats GetMaintenanceStats()
     {
-        var manifest = _storage.HasManifest
-            ? _storage.ReadManifest()
-            : new CorpusManifest(Guid.Empty, 0, []);
+        using var snapshot = _storage.OpenReadSnapshot();
+        var manifest = snapshot.Manifest;
         var segmentCount = manifest.Segments.Count;
         var totalDocuments = 0;
         var deadDocuments = 0;
         long contentBytes = 0;
+        long reclaimableContentBytes = 0;
         var segmentsWithDeletions = 0;
         var smallSegmentCount = 0;
-        var smallSegmentThreshold = Math.Max(1, _options.TargetSegmentDocumentCount / 4);
+        var smallDocumentThreshold = Math.Max(1, _options.TargetSegmentDocumentCount / 4);
+        var smallContentThreshold = Math.Max(1L, _options.TargetSegmentContentBytes / 4);
 
         foreach (var segment in manifest.Segments)
         {
@@ -106,9 +107,20 @@ public sealed class Sift : ISift
             if (segment.DeadOrdinals.Length > 0)
             {
                 segmentsWithDeletions++;
+                using var mappedSegment = _storage.OpenSegment(
+                    segment.SegmentId,
+                    validateChecksums: false);
+                foreach (var deadOrdinal in segment.DeadOrdinals)
+                {
+                    reclaimableContentBytes = checked(
+                        reclaimableContentBytes +
+                        mappedSegment.GetDocument(deadOrdinal).ContentLength);
+                }
             }
 
-            if (segment.LiveDocumentCount > 0 && segment.LiveDocumentCount <= smallSegmentThreshold)
+            if (segment.LiveDocumentCount > 0 &&
+                (segment.LiveDocumentCount <= smallDocumentThreshold ||
+                 segment.ContentBytes <= smallContentThreshold))
             {
                 smallSegmentCount++;
             }
@@ -116,10 +128,7 @@ public sealed class Sift : ISift
 
         var liveDocuments = totalDocuments - deadDocuments;
         var deadDocumentFraction = totalDocuments == 0 ? 0d : (double)deadDocuments / totalDocuments;
-        var estimatedReclaimableContentBytes = totalDocuments == 0
-            ? 0
-            : checked((long)Math.Round(contentBytes * deadDocumentFraction, MidpointRounding.AwayFromZero));
-        var estimatedLiveContentBytes = contentBytes - estimatedReclaimableContentBytes;
+        var estimatedLiveContentBytes = contentBytes - reclaimableContentBytes;
 
         return new MaintenanceStats(
             Generation: manifest.Generation,
@@ -130,7 +139,7 @@ public sealed class Sift : ISift
             DeadDocumentFraction: deadDocumentFraction,
             ContentBytes: contentBytes,
             EstimatedLiveContentBytes: estimatedLiveContentBytes,
-            EstimatedReclaimableContentBytes: estimatedReclaimableContentBytes,
+            EstimatedReclaimableContentBytes: reclaimableContentBytes,
             DeadOrdinalEntries: deadDocuments,
             SegmentsWithDeletions: segmentsWithDeletions,
             SmallSegmentCount: smallSegmentCount);
@@ -694,12 +703,16 @@ public sealed class Sift : ISift
 
     private HashSet<ulong> SelectSegmentsForCompaction(CorpusManifest manifest, CompactOptions options)
     {
+        var smallDocumentThreshold = Math.Max(1, _options.TargetSegmentDocumentCount / 4);
+        var smallContentThreshold = Math.Max(1L, _options.TargetSegmentContentBytes / 4);
         var ordered = manifest.Segments
             .Select(entry => new
             {
                 Entry = entry,
                 DeadFraction = entry.DocumentCount == 0 ? 0d : (double)entry.DeadOrdinals.Length / entry.DocumentCount,
-                IsSmallSegment = entry.LiveDocumentCount > 0 && entry.LiveDocumentCount <= Math.Max(1, _options.TargetSegmentDocumentCount / 4),
+                IsSmallSegment = entry.LiveDocumentCount > 0 &&
+                    (entry.LiveDocumentCount <= smallDocumentThreshold ||
+                     entry.ContentBytes <= smallContentThreshold),
                 HasMetadataBloat = entry.DeadOrdinals.Length >= options.MetadataBloatDeadOrdinalsThreshold
             })
             .Where(item =>

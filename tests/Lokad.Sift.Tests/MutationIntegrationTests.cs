@@ -286,6 +286,25 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task MaintenanceStatsUseDeletedDocumentSizes()
+    {
+        var largeContent = new string('x', 10_000);
+        using var fixture = new CorpusFixture(
+            ("src/small.txt", "x"),
+            ("src/large.txt", largeContent));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        await index.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/large.txt")]);
+
+        var stats = index.GetMaintenanceStats();
+
+        Assert.Equal(largeContent.Length, stats.EstimatedReclaimableContentBytes);
+        Assert.Equal(1, stats.EstimatedLiveContentBytes);
+    }
+
+    [Fact]
     public async Task SnapshotOpenedBeforeUpdateRemainsUsableAfterPublication()
     {
         using var fixture = new CorpusFixture(
