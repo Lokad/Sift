@@ -62,12 +62,12 @@ internal static unsafe class SegmentWriter
         // workspaces plus their variable postings state at the same time.
         var indexes = new[]
         {
-            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false),
-            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true),
-            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false),
-            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true),
-            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false),
-            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true)
+            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false, cancellationToken),
+            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true, cancellationToken),
+            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false, cancellationToken),
+            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true, cancellationToken),
+            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false, cancellationToken),
+            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true, cancellationToken)
         };
 
         var rows = new DocumentRow[documents.Count];
@@ -232,6 +232,11 @@ internal static unsafe class SegmentWriter
             content.CopyTo(contentBlob[contentOffsetCursor..]);
             for (var i = 0; i < content.Length; i++)
             {
+                if ((i & 0xFFFF) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 var bucketOffset = 8 + content[i] * 4;
                 var current = LittleEndianCodec.ReadInt32(stats.Slice(bucketOffset, 4));
                 LittleEndianCodec.WriteInt32(stats.Slice(bucketOffset, 4), current + 1);
@@ -274,7 +279,8 @@ internal static unsafe class SegmentWriter
             indexes[4].Postings,
             indexes[5].Lexicon,
             indexes[5].Postings,
-            stats);
+            stats,
+            cancellationToken);
     }
 
     private static void WriteRegionDirectory(Span<byte> regionDirectory, int[] regionPairs)
@@ -307,7 +313,8 @@ internal static unsafe class SegmentWriter
         ReadOnlySpan<byte> pathTriCsPost,
         ReadOnlySpan<byte> pathTriIcLex,
         ReadOnlySpan<byte> pathTriIcPost,
-        ReadOnlySpan<byte> stats)
+        ReadOnlySpan<byte> stats,
+        CancellationToken cancellationToken)
     {
         for (var regionId = 1; regionId <= SegmentFormat.RegionCount; regionId++)
         {
@@ -336,7 +343,7 @@ internal static unsafe class SegmentWriter
             LittleEndianCodec.WriteInt32(checksumTable.Slice(offset, 4), regionId);
             LittleEndianCodec.WriteUInt64(
                 checksumTable.Slice(offset + 4, 8),
-                Hashing.Fnv1A64(regionBytes));
+                Hashing.Fnv1A64(regionBytes, cancellationToken));
         }
     }
 

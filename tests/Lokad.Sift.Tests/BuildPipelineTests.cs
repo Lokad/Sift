@@ -152,6 +152,20 @@ public sealed class BuildPipelineTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(storage.TempPath));
     }
 
+    [Fact]
+    public void SegmentIndexConstructionObservesCancellationInsideADocument()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var document = new CancelOnContentReadDocument(cancellation);
+
+        Assert.Throws<OperationCanceledException>(() =>
+            SegmentWriter.WriteToBytes(
+                segmentId: 1,
+                [document],
+                cancellation.Token));
+        Assert.Equal(1, document.ContentReadCount);
+    }
+
     private static StoredDocument CreateStoredDocument(string path, int contentLength)
     {
         return new StoredDocument
@@ -218,6 +232,34 @@ public sealed class BuildPipelineTests
             document = _documents[_index++];
             return true;
         }
+    }
+
+    private sealed class CancelOnContentReadDocument : ISegmentBuildDocument
+    {
+        private readonly CancellationTokenSource _cancellation;
+        private readonly byte[] _content = "alphabet"u8.ToArray();
+
+        public CancelOnContentReadDocument(CancellationTokenSource cancellation)
+        {
+            _cancellation = cancellation;
+        }
+
+        public int ContentReadCount { get; private set; }
+        public int LineCount => 1;
+        public ushort Flags => 0;
+        public long MTimeUtcTicks => 0;
+        public ulong ContentHash64 => 0;
+
+        public ReadOnlySpan<byte> GetPathUtf8() => "src/a.txt"u8;
+
+        public ReadOnlySpan<byte> GetContentBytes()
+        {
+            ContentReadCount++;
+            _cancellation.Cancel();
+            return _content;
+        }
+
+        public ReadOnlySpan<byte> GetEncodedLineIndex() => [0];
     }
 }
 

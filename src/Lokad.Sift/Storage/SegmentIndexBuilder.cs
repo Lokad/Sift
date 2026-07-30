@@ -8,27 +8,33 @@ internal static class SegmentIndexBuilder
     private static DirectIndexedGramBuilder? s_bigramBuilder;
     private static DirectIndexedGramBuilder? s_trigramBuilder;
 
-    public static BuiltIndex BuildContentIndex(IReadOnlyList<ISegmentBuildDocument> documents, int gramLength, bool caseInsensitive)
+    public static BuiltIndex BuildContentIndex(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        int gramLength,
+        bool caseInsensitive,
+        CancellationToken cancellationToken)
     {
         return (gramLength, caseInsensitive) switch
         {
-            (2, false) => BuildContentIndexSensitiveBigram(documents),
-            (2, true) => BuildContentIndexInsensitiveBigram(documents),
-            (3, false) => BuildContentIndexSensitiveTrigram(documents),
-            (3, true) => BuildContentIndexInsensitiveTrigram(documents),
+            (2, false) => BuildContentIndexSensitiveBigram(documents, cancellationToken),
+            (2, true) => BuildContentIndexInsensitiveBigram(documents, cancellationToken),
+            (3, false) => BuildContentIndexSensitiveTrigram(documents, cancellationToken),
+            (3, true) => BuildContentIndexInsensitiveTrigram(documents, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(gramLength))
         };
     }
 
-    private static BuiltIndex BuildContentIndexSensitiveBigram(IReadOnlyList<ISegmentBuildDocument> documents)
+    private static BuiltIndex BuildContentIndexSensitiveBigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        CancellationToken cancellationToken)
     {
         var builder = RentBuilder(2);
         try
         {
-            CountContentIndexPairsSensitiveBigram(documents, builder);
-            builder.PrepareForFill();
-            FillContentIndexPairsSensitiveBigram(documents, builder);
-            return builder.BuildIndex(2);
+            CountContentIndexPairsSensitiveBigram(documents, builder, cancellationToken);
+            builder.PrepareForFill(cancellationToken);
+            FillContentIndexPairsSensitiveBigram(documents, builder, cancellationToken);
+            return builder.BuildIndex(2, cancellationToken);
         }
         finally
         {
@@ -36,15 +42,17 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static BuiltIndex BuildContentIndexInsensitiveBigram(IReadOnlyList<ISegmentBuildDocument> documents)
+    private static BuiltIndex BuildContentIndexInsensitiveBigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        CancellationToken cancellationToken)
     {
         var builder = RentBuilder(2);
         try
         {
-            CountContentIndexPairsInsensitiveBigram(documents, builder);
-            builder.PrepareForFill();
-            FillContentIndexPairsInsensitiveBigram(documents, builder);
-            return builder.BuildIndex(2);
+            CountContentIndexPairsInsensitiveBigram(documents, builder, cancellationToken);
+            builder.PrepareForFill(cancellationToken);
+            FillContentIndexPairsInsensitiveBigram(documents, builder, cancellationToken);
+            return builder.BuildIndex(2, cancellationToken);
         }
         finally
         {
@@ -52,15 +60,17 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static BuiltIndex BuildContentIndexSensitiveTrigram(IReadOnlyList<ISegmentBuildDocument> documents)
+    private static BuiltIndex BuildContentIndexSensitiveTrigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        CancellationToken cancellationToken)
     {
         var builder = RentBuilder(3);
         try
         {
-            CountContentIndexPairsSensitiveTrigram(documents, builder);
-            builder.PrepareForFill();
-            FillContentIndexPairsSensitiveTrigram(documents, builder);
-            return builder.BuildIndex(3);
+            CountContentIndexPairsSensitiveTrigram(documents, builder, cancellationToken);
+            builder.PrepareForFill(cancellationToken);
+            FillContentIndexPairsSensitiveTrigram(documents, builder, cancellationToken);
+            return builder.BuildIndex(3, cancellationToken);
         }
         finally
         {
@@ -68,15 +78,17 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static BuiltIndex BuildContentIndexInsensitiveTrigram(IReadOnlyList<ISegmentBuildDocument> documents)
+    private static BuiltIndex BuildContentIndexInsensitiveTrigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        CancellationToken cancellationToken)
     {
         var builder = RentBuilder(3);
         try
         {
-            CountContentIndexPairsInsensitiveTrigram(documents, builder);
-            builder.PrepareForFill();
-            FillContentIndexPairsInsensitiveTrigram(documents, builder);
-            return builder.BuildIndex(3);
+            CountContentIndexPairsInsensitiveTrigram(documents, builder, cancellationToken);
+            builder.PrepareForFill(cancellationToken);
+            FillContentIndexPairsInsensitiveTrigram(documents, builder, cancellationToken);
+            return builder.BuildIndex(3, cancellationToken);
         }
         finally
         {
@@ -84,15 +96,18 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    public static BuiltIndex BuildPathTrigramIndex(IReadOnlyList<ISegmentBuildDocument> documents, bool caseInsensitive)
+    public static BuiltIndex BuildPathTrigramIndex(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        bool caseInsensitive,
+        CancellationToken cancellationToken)
     {
         var builder = RentBuilder(3);
         try
         {
-            CountPathIndexPairs(documents, caseInsensitive, builder);
-            builder.PrepareForFill();
-            FillPathIndexPairs(documents, caseInsensitive, builder);
-            return builder.BuildIndex(3);
+            CountPathIndexPairs(documents, caseInsensitive, builder, cancellationToken);
+            builder.PrepareForFill(cancellationToken);
+            FillPathIndexPairs(documents, caseInsensitive, builder, cancellationToken);
+            return builder.BuildIndex(3, cancellationToken);
         }
         finally
         {
@@ -100,10 +115,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsSensitiveBigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void CountContentIndexPairsSensitiveBigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 2)
@@ -113,6 +132,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 1; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeBigramSensitive(content, i, out var gram))
                 {
                     continue;
@@ -123,10 +143,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsSensitiveBigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void FillContentIndexPairsSensitiveBigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 2)
@@ -136,6 +160,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 1; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeBigramSensitive(content, i, out var gram))
                 {
                     continue;
@@ -146,10 +171,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsInsensitiveBigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void CountContentIndexPairsInsensitiveBigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 2)
@@ -159,6 +188,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 1; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeBigramInsensitiveAscii(content, i, out var gram))
                 {
                     continue;
@@ -169,10 +199,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsInsensitiveBigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void FillContentIndexPairsInsensitiveBigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 2)
@@ -182,6 +216,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 1; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeBigramInsensitiveAscii(content, i, out var gram))
                 {
                     continue;
@@ -192,10 +227,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsSensitiveTrigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void CountContentIndexPairsSensitiveTrigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 3)
@@ -205,6 +244,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramSensitive(content, i, out var gram))
                 {
                     continue;
@@ -215,10 +255,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsSensitiveTrigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void FillContentIndexPairsSensitiveTrigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 3)
@@ -228,6 +272,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramSensitive(content, i, out var gram))
                 {
                     continue;
@@ -238,10 +283,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsInsensitiveTrigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void CountContentIndexPairsInsensitiveTrigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 3)
@@ -251,6 +300,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramInsensitiveAscii(content, i, out var gram))
                 {
                     continue;
@@ -261,10 +311,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsInsensitiveTrigram(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void FillContentIndexPairsInsensitiveTrigram(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var content = documents[(int)ordinal].GetContentBytes();
             if (content.Length < 3)
@@ -274,6 +328,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < content.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramInsensitiveAscii(content, i, out var gram))
                 {
                     continue;
@@ -284,34 +339,46 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountPathIndexPairs(IReadOnlyList<ISegmentBuildDocument> documents, bool caseInsensitive, DirectIndexedGramBuilder builder)
+    private static void CountPathIndexPairs(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        bool caseInsensitive,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         if (caseInsensitive)
         {
-            CountPathIndexPairsInsensitive(documents, builder);
+            CountPathIndexPairsInsensitive(documents, builder, cancellationToken);
         }
         else
         {
-            CountPathIndexPairsSensitive(documents, builder);
+            CountPathIndexPairsSensitive(documents, builder, cancellationToken);
         }
     }
 
-    private static void FillPathIndexPairs(IReadOnlyList<ISegmentBuildDocument> documents, bool caseInsensitive, DirectIndexedGramBuilder builder)
+    private static void FillPathIndexPairs(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        bool caseInsensitive,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         if (caseInsensitive)
         {
-            FillPathIndexPairsInsensitive(documents, builder);
+            FillPathIndexPairsInsensitive(documents, builder, cancellationToken);
         }
         else
         {
-            FillPathIndexPairsSensitive(documents, builder);
+            FillPathIndexPairsSensitive(documents, builder, cancellationToken);
         }
     }
 
-    private static void CountPathIndexPairsSensitive(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void CountPathIndexPairsSensitive(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var path = documents[(int)ordinal].GetPathUtf8();
             if (path.Length < 3)
@@ -321,6 +388,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < path.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramSensitive(path, i, out var gram))
                 {
                     continue;
@@ -331,10 +399,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillPathIndexPairsSensitive(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void FillPathIndexPairsSensitive(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var path = documents[(int)ordinal].GetPathUtf8();
             if (path.Length < 3)
@@ -344,6 +416,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < path.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramSensitive(path, i, out var gram))
                 {
                     continue;
@@ -354,10 +427,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountPathIndexPairsInsensitive(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void CountPathIndexPairsInsensitive(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var path = documents[(int)ordinal].GetPathUtf8();
             if (path.Length < 3)
@@ -367,6 +444,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < path.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramInsensitiveAscii(path, i, out var gram))
                 {
                     continue;
@@ -377,10 +455,14 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillPathIndexPairsInsensitive(IReadOnlyList<ISegmentBuildDocument> documents, DirectIndexedGramBuilder builder)
+    private static void FillPathIndexPairsInsensitive(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        DirectIndexedGramBuilder builder,
+        CancellationToken cancellationToken)
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             builder.StartDocument();
             var path = documents[(int)ordinal].GetPathUtf8();
             if (path.Length < 3)
@@ -390,6 +472,7 @@ internal static class SegmentIndexBuilder
 
             for (var i = 0; i < path.Length - 2; i++)
             {
+                ThrowIfCancellationRequested(cancellationToken, i);
                 if (!TryEncodeTrigramInsensitiveAscii(path, i, out var gram))
                 {
                     continue;
@@ -426,6 +509,16 @@ internal static class SegmentIndexBuilder
         }
 
         return true;
+    }
+
+    private static void ThrowIfCancellationRequested(
+        CancellationToken cancellationToken,
+        int offset)
+    {
+        if ((offset & 0xFFFF) == 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
     }
 
     private static bool TryEncodeBigram(ReadOnlySpan<byte> value, int start, bool caseInsensitive, out int gram)
@@ -629,8 +722,9 @@ internal sealed class DirectIndexedGramBuilder
             : ushort.MaxValue + 1;
     }
 
-    public void PrepareForFill()
+    public void PrepareForFill(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (_touchedCount == 0)
         {
             _ordinals = [];
@@ -638,12 +732,18 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         Array.Sort(_touched, 0, _touchedCount);
+        cancellationToken.ThrowIfCancellationRequested();
         var totalPairs = 0;
         EnsureLocalCapacity();
         _touchedLookup ??= new Dictionary<int, int>(_touchedCount);
         _touchedLookup.Clear();
         for (var i = 0; i < _touchedCount; i++)
         {
+            if ((i & 0x3FF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var gram = _touched[i];
             var docFreq = GetCount(gram);
             _docFrequencies[i] = docFreq;
@@ -669,8 +769,11 @@ internal sealed class DirectIndexedGramBuilder
         _ordinals[_writePositions[_touchedLookup![gram]]++] = ordinal;
     }
 
-    public BuiltIndex BuildIndex(int gramLength)
+    public BuiltIndex BuildIndex(
+        int gramLength,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (_touchedCount == 0)
         {
             var emptyLexicon = GC.AllocateUninitializedArray<byte>(SegmentFormat.LexiconHeaderSize);
@@ -687,6 +790,11 @@ internal sealed class DirectIndexedGramBuilder
         var ordinalsOffset = 0;
         for (var i = 0; i < _touchedCount; i++)
         {
+            if ((i & 0x3FF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var gram = _touched[i];
             var docFreq = _docFrequencies[i];
             var bucket = SegmentIndexBuilder.GetBucket(gram, gramLength);
@@ -712,6 +820,11 @@ internal sealed class DirectIndexedGramBuilder
 
         for (var i = 0; i < _touchedCount; i++)
         {
+            if ((i & 0x3FF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var gram = _touched[i];
             _counts[gram] = 0;
         }
@@ -727,6 +840,11 @@ internal sealed class DirectIndexedGramBuilder
         SegmentIndexBuilder.WriteBucketTable(lexicon, bucketStarts, entries.Count);
         for (var i = 0; i < entries.Count; i++)
         {
+            if ((i & 0x3FF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
             var entry = entries[i];
             SegmentIndexBuilder.WriteSuffix(lexicon.AsSpan(entryOffset, suffixSize), entry.Gram, suffixSize);
@@ -739,6 +857,11 @@ internal sealed class DirectIndexedGramBuilder
         ordinalsOffset = 0;
         for (var i = 0; i < entries.Count; i++)
         {
+            if ((i & 0x3FF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var entry = entries[i];
             PostingsCodec.Encode(
                 _ordinals.AsSpan(ordinalsOffset, entry.DocFreq),
