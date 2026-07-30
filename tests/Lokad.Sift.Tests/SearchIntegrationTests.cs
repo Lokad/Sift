@@ -193,6 +193,40 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task PathLookupAndPrefixRangesHandleSupplementaryUnicode()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/\uE000.txt", "beta\n"),
+            ("src/\U00010000.txt", "beta\n"),
+            ("src/\U0010FFFF.txt", "beta\n"),
+            ("tests/other.txt", "beta\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(PathPrefix: "src/"),
+            collector);
+        var paths = collector.Hits
+            .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
+            .OrderBy(static path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+        [
+            "src/\U00010000.txt",
+            "src/\U0010FFFF.txt",
+            "src/\uE000.txt"
+        ], paths);
+        Assert.True(snapshot.TryGetDocumentBytes(
+            new DocumentKey("src/\U00010000.txt"),
+            out var content));
+        Assert.Equal("beta\n", Encoding.UTF8.GetString(content.Span));
+    }
+
+    [Fact]
     public async Task TryGetDocumentBytesReturnsIndexedDocumentByCanonicalPath()
     {
         var expected = "caf\u00E9\nalpha\n";

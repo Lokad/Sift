@@ -133,15 +133,21 @@ public sealed unsafe class MappedSegment : IDisposable
             return (0, 0);
         }
 
-        var prefixBytes = Encoding.UTF8.GetBytes(prefix);
-        var first = LowerBound(prefixBytes);
+        if (prefix.Length == 0)
+        {
+            return (0, (uint)DocumentCount);
+        }
+
+        var first = LowerBound(prefix);
         if (first >= DocumentCount)
         {
             return ((uint)DocumentCount, (uint)DocumentCount);
         }
 
-        var upperPrefixBytes = Encoding.UTF8.GetBytes(prefix + '\uffff');
-        var pastLast = LowerBound(upperPrefixBytes);
+        var upperPrefix = GetExclusivePrefixUpperBound(prefix);
+        var pastLast = upperPrefix is null
+            ? (uint)DocumentCount
+            : LowerBound(upperPrefix);
         return (first, pastLast);
     }
 
@@ -164,23 +170,7 @@ public sealed unsafe class MappedSegment : IDisposable
     {
         ArgumentNullException.ThrowIfNull(normalizedPath);
 
-        var low = 0;
-        var high = DocumentCount;
-        while (low < high)
-        {
-            var mid = low + ((high - low) >> 1);
-            var document = GetDocument((uint)mid);
-            if (string.CompareOrdinal(GetPath(document), normalizedPath) < 0)
-            {
-                low = mid + 1;
-            }
-            else
-            {
-                high = mid;
-            }
-        }
-
-        ordinal = (uint)low;
+        ordinal = LowerBound(normalizedPath);
         if (ordinal >= (uint)DocumentCount)
         {
             return false;
@@ -429,7 +419,7 @@ public sealed unsafe class MappedSegment : IDisposable
 
     private (long Offset, long Length) GetRegion(SegmentRegionId regionId) => _regions[regionId];
 
-    private uint LowerBound(ReadOnlySpan<byte> value)
+    private uint LowerBound(string value)
     {
         var low = 0;
         var high = DocumentCount;
@@ -437,7 +427,7 @@ public sealed unsafe class MappedSegment : IDisposable
         {
             var mid = low + ((high - low) >> 1);
             var document = GetDocument((uint)mid);
-            if (ComparePathBytes(GetPathBytes(document), value) < 0)
+            if (string.CompareOrdinal(GetPath(document), value) < 0)
             {
                 low = mid + 1;
             }
@@ -450,19 +440,21 @@ public sealed unsafe class MappedSegment : IDisposable
         return (uint)low;
     }
 
-    private static int ComparePathBytes(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+    private static string? GetExclusivePrefixUpperBound(string prefix)
     {
-        var length = Math.Min(left.Length, right.Length);
-        for (var i = 0; i < length; i++)
+        var upperBound = prefix.ToCharArray();
+        for (var i = upperBound.Length - 1; i >= 0; i--)
         {
-            var difference = left[i] - right[i];
-            if (difference != 0)
+            if (upperBound[i] == char.MaxValue)
             {
-                return difference;
+                continue;
             }
+
+            upperBound[i]++;
+            return new string(upperBound, 0, i + 1);
         }
 
-        return left.Length - right.Length;
+        return null;
     }
 
     private void ValidateRegionChecksum(SegmentRegionId regionId, ulong expected)
