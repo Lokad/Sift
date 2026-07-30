@@ -497,6 +497,11 @@ public sealed class Sift : ISift
         {
             throw new ArgumentOutOfRangeException(nameof(options), "MetadataBloatDeadOrdinalsThreshold must be positive.");
         }
+
+        if (options.MaxInputContentBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxInputContentBytes must be positive.");
+        }
     }
 
     private IDisposable BeginActivity(SiftActivity activity)
@@ -739,6 +744,7 @@ public sealed class Sift : ISift
             .ToArray();
 
         var selected = new HashSet<ulong>();
+        long selectedContentBytes = 0;
         foreach (var item in ordered)
         {
             if (selected.Count >= options.MaxMergedSegments)
@@ -746,7 +752,14 @@ public sealed class Sift : ISift
                 break;
             }
 
+            if (selected.Count > 0 &&
+                item.Entry.ContentBytes > options.MaxInputContentBytes - selectedContentBytes)
+            {
+                continue;
+            }
+
             selected.Add(item.Entry.SegmentId);
+            selectedContentBytes += item.Entry.ContentBytes;
         }
 
         return selected;

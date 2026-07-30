@@ -356,12 +356,37 @@ public sealed class StorageLifecycleTests
         Assert.Equal(0.20, options.DeadFractionThreshold);
         Assert.Equal(16, options.SegmentCountTrigger);
         Assert.Equal(1024, options.MetadataBloatDeadOrdinalsThreshold);
+        Assert.Equal(1L * 1024 * 1024 * 1024, options.MaxInputContentBytes);
 
         using var index = SiftIndex.CreateInMemory();
         Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
             _ = index.Compact(new CompactOptions(MaxMergedSegments: 0));
         });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            _ = index.Compact(new CompactOptions(MaxInputContentBytes: 0));
+        });
+    }
+
+    [Fact]
+    public async Task CompactionInputBudgetLimitsEachMaintenancePass()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentContentBytes = 10
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "0123456789"),
+            ("src/b.txt", "0123456789"),
+            ("src/c.txt", "0123456789")
+        ]));
+
+        var compact = await index.Compact(new CompactOptions(
+            DeadFractionThreshold: 0,
+            MaxInputContentBytes: 15));
+
+        Assert.Equal(1, compact.InputSegments);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)

@@ -483,7 +483,10 @@ deleted automatically after the last generation lease that names it is released;
 callers do not run a separate cleanup phase.
 To bound physical growth, another replacement build or compaction is refused
 while a previously retired generation remains leased. Compaction requires
-temporary headroom for its output before reclamation can occur.
+temporary headroom for its output before reclamation can occur. Each pass limits
+selected source content through `CompactOptions.MaxInputContentBytes`; one segment
+may exceed the limit so that an oversized segment does not become permanently
+ineligible.
 
 ---
 
