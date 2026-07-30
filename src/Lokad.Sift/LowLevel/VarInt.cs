@@ -17,19 +17,35 @@ public static class VarInt
 
     public static uint ReadUInt32(ReadOnlySpan<byte> buffer, ref int offset)
     {
-        uint value = 0;
-        var shift = 0;
-        while (true)
+        var cursor = offset;
+        if ((uint)cursor > (uint)buffer.Length)
         {
-            var current = buffer[offset++];
+            throw new InvalidDataException("The variable integer offset is outside the payload.");
+        }
+
+        uint value = 0;
+        for (var shift = 0; shift <= 28; shift += 7)
+        {
+            if (cursor == buffer.Length)
+            {
+                throw new InvalidDataException("The variable integer is truncated.");
+            }
+
+            var current = buffer[cursor++];
+            if (shift == 28 && (current & 0xF0) != 0)
+            {
+                throw new InvalidDataException("The variable integer exceeds UInt32.");
+            }
+
             value |= (uint)(current & 0x7Fu) << shift;
             if ((current & 0x80) == 0)
             {
+                offset = cursor;
                 return value;
             }
-
-            shift += 7;
         }
+
+        throw new InvalidDataException("The variable integer exceeds UInt32.");
     }
 
     public static int GetUInt32Length(uint value)

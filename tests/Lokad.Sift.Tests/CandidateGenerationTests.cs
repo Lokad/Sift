@@ -77,6 +77,38 @@ public sealed class CandidateGenerationTests
         Assert.Empty(result);
     }
 
+    [Theory]
+    [InlineData(new byte[] { 0x80 })]
+    [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x10 })]
+    [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x80, 0x00 })]
+    public void VarIntRejectsMalformedValues(byte[] payload)
+    {
+        var offset = 0;
+
+        Assert.Throws<InvalidDataException>(() => VarInt.ReadUInt32(payload, ref offset));
+    }
+
+    [Fact]
+    public void PostingsCodecRejectsOverflowingCheckpointCount()
+    {
+        var payload = new byte[5];
+        payload[0] = 1;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(1), int.MaxValue);
+
+        Assert.Throws<InvalidDataException>(() => PostingsCodec.Parse(payload));
+    }
+
+    [Fact]
+    public void PostingsCodecRejectsCheckpointOutsideData()
+    {
+        var payload = new byte[14];
+        payload[0] = 1;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(1), 1);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(9), 2);
+
+        Assert.Throws<InvalidDataException>(() => PostingsCodec.Parse(payload));
+    }
+
     private static uint[] CreateRange(uint start, int count, uint step)
     {
         var values = new uint[count];

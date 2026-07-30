@@ -164,14 +164,35 @@ public static class PostingsCodec
             throw new InvalidDataException("Invalid checkpoint count.");
         }
 
-        var checkpointBytes = checkpointCount * 8;
-        var dataOffset = 5 + checkpointBytes;
-        if (dataOffset > payload.Length)
+        if (checkpointCount > (payload.Length - 5) / 8)
         {
             throw new InvalidDataException("Checkpoint table exceeds postings payload.");
         }
 
-        return new PostingsView(IsCheckpointed: true, payload[dataOffset..], payload.Slice(5, checkpointBytes));
+        var checkpointBytes = checkpointCount * 8;
+        var dataOffset = 5 + checkpointBytes;
+        var dataLength = payload.Length - dataOffset;
+        var checkpoints = payload.Slice(5, checkpointBytes);
+        var previousDataOffset = -1;
+        uint previousOrdinal = 0;
+        for (var i = 0; i < checkpointCount; i++)
+        {
+            var checkpoint = checkpoints.Slice(i * 8, 8);
+            var ordinal = BinaryPrimitives.ReadUInt32LittleEndian(checkpoint);
+            var checkpointDataOffset = BinaryPrimitives.ReadInt32LittleEndian(checkpoint[4..]);
+            if (checkpointDataOffset < 0 ||
+                checkpointDataOffset > dataLength ||
+                checkpointDataOffset <= previousDataOffset ||
+                (i > 0 && ordinal <= previousOrdinal))
+            {
+                throw new InvalidDataException("Invalid postings checkpoint.");
+            }
+
+            previousDataOffset = checkpointDataOffset;
+            previousOrdinal = ordinal;
+        }
+
+        return new PostingsView(IsCheckpointed: true, payload[dataOffset..], checkpoints);
     }
 
     private static uint[] IntersectSortedSequential(ReadOnlySpan<uint> left, ReadOnlySpan<byte> data, int docFreq)
