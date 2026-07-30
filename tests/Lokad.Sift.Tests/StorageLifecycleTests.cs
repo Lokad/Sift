@@ -236,8 +236,7 @@ public sealed class StorageLifecycleTests
         Directory.CreateDirectory(orphanDirectory);
         File.Copy(sourcePack, orphanPack);
 
-        var leaseBytes = File.ReadAllBytes(leasePath);
-        var corruptLeaseBytes = leaseBytes.ToArray();
+        var corruptLeaseBytes = File.ReadAllBytes(leasePath);
         BinaryPrimitives.WriteInt32LittleEndian(corruptLeaseBytes.AsSpan(36), int.MaxValue);
         File.WriteAllBytes(leasePath, corruptLeaseBytes);
 
@@ -245,10 +244,13 @@ public sealed class StorageLifecycleTests
         Assert.True(blocked.IsReclamationBlocked);
         Assert.True(File.Exists(orphanPack));
         Assert.Throws<InvalidDataException>(() => index.OpenSnapshot());
+        Assert.True(index.RequiresRebuild);
 
-        File.WriteAllBytes(leasePath, leaseBytes);
-        Assert.False(index.GetStorageStats().IsReclamationBlocked);
+        await index.Build(fixture.CreateSource());
+
+        Assert.False(index.RequiresRebuild);
         Assert.False(File.Exists(orphanPack));
+        Assert.False(index.GetStorageStats().IsReclamationBlocked);
     }
 
     [Fact]
@@ -313,7 +315,7 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
-    public async Task CorruptManifestPreventsOrphanDeletion()
+    public async Task CorruptManifestRequiresExplicitFullRebuild()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         using var index = new SiftIndex(fixture.CorpusPath);
@@ -338,11 +340,53 @@ public sealed class StorageLifecycleTests
             stream.WriteByte(unchecked((byte)(value ^ 0x5A)));
         }
 
-        Assert.Throws<InvalidDataException>(() =>
-        {
-            _ = new SiftIndex(fixture.CorpusPath);
-        });
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        Assert.True(reopened.RequiresRebuild);
+        Assert.Throws<InvalidDataException>(() => reopened.OpenSnapshot());
         Assert.True(File.Exists(orphanPack));
+
+        await reopened.Build(fixture.CreateSource());
+
+        Assert.False(reopened.RequiresRebuild);
+        Assert.False(File.Exists(orphanPack));
+        using var snapshot = reopened.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+        Assert.Single(collector.Hits);
+    }
+
+    [Fact]
+    public async Task InterruptedRecoveryCannotAppearAsAnEmptyIndex()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var markerPath = Path.Combine(fixture.CorpusPath, "lock", "rebuild.required");
+        File.WriteAllBytes(markerPath, [1]);
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        Assert.True(reopened.RequiresRebuild);
+        Assert.Throws<InvalidDataException>(() => reopened.OpenSnapshot());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.Build(new InMemoryDocumentSource(
+            [
+                ("src/duplicate.txt", "first\n"),
+                ("src/duplicate.txt", "second\n")
+            ])));
+        Assert.True(reopened.RequiresRebuild);
+        Assert.True(File.Exists(markerPath));
+
+        await reopened.Build(fixture.CreateSource());
+
+        Assert.False(reopened.RequiresRebuild);
+        Assert.False(File.Exists(markerPath));
     }
 
     [Fact]

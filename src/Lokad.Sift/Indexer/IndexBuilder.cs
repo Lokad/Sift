@@ -20,13 +20,16 @@ internal sealed class IndexBuilder
         _options = options ?? new SiftOptions();
     }
 
-    public BuildStats Build(IDocumentSource source, CancellationToken cancellationToken = default)
+    public BuildStats Build(
+        IDocumentSource source,
+        bool discardCorruptState,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
 
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
-        _storage.EnsureReplacementAllowedUnderWriterLock();
+        _storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
 
         var existing = _storage.HasManifest ? _storage.ReadManifest() : null;
         var corpusId = existing?.CorpusId ?? Guid.NewGuid();

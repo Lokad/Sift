@@ -140,6 +140,21 @@ public sealed class InMemorySiftStorage : ISiftStorage
         EnsureReplacementAllowedUnderWriterLock();
     }
 
+    void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
+    {
+        if (!discardCorruptState)
+        {
+            EnsureReplacementAllowedUnderWriterLock();
+            return;
+        }
+
+        _manifest = null;
+        _segments.Clear();
+        _snapshotSegmentReferences.Clear();
+        _snapshotGenerationReferences.Clear();
+        _reclamationPending = false;
+    }
+
     void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
         ArgumentNullException.ThrowIfNull(attemptedSegmentIds);

@@ -20,7 +20,9 @@ public sealed class Sift : ISift
     private int _reclamationRequests;
     private int _reclamationWorkerActive;
     private int _disposed;
+    private Exception? _rebuildCause;
     internal ISiftStorage Storage => _storage;
+    public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;
 
     public Sift(string rootPath, SiftOptions? options = null)
         : this(new CorpusStorage(rootPath), options)
@@ -32,7 +34,16 @@ public sealed class Sift : ISift
         _options = options ?? new SiftOptions();
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _builder = new IndexBuilder(_storage, _options);
-        _storage.EnsureSnapshotMetadata();
+        try
+        {
+            _storage.EnsureSnapshotMetadata();
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            _rebuildCause = exception;
+            return;
+        }
+
         ScheduleReclamationIfPending();
     }
 
@@ -44,16 +55,44 @@ public sealed class Sift : ISift
     public IIndexSnapshot OpenSnapshot(SearchOptions options = default)
     {
         ThrowIfDisposed();
-        return new SearchSnapshot(_storage, _options, options, ScheduleReclamationIfPending);
+        ThrowIfRebuildRequired();
+        try
+        {
+            return new SearchSnapshot(
+                _storage,
+                _options,
+                options,
+                ScheduleReclamationIfPending,
+                MarkRequiresRebuild);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
     }
 
     public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default)
     {
         ThrowIfDisposed();
-        return new OverlaySnapshot(
-            new SearchSnapshot(_storage, _options, options, ScheduleReclamationIfPending),
-            _options,
-            options);
+        ThrowIfRebuildRequired();
+        try
+        {
+            return new OverlaySnapshot(
+                new SearchSnapshot(
+                    _storage,
+                    _options,
+                    options,
+                    ScheduleReclamationIfPending,
+                    MarkRequiresRebuild),
+                _options,
+                options);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
     }
 
     public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken = default)
@@ -77,7 +116,20 @@ public sealed class Sift : ISift
 
     private BuildStats BuildCore(IDocumentSource documents, CancellationToken cancellationToken)
     {
-        return _builder.Build(documents, cancellationToken);
+        var isRecovery = RequiresRebuild;
+        try
+        {
+            var stats = _builder.Build(documents, isRecovery, cancellationToken);
+            Volatile.Write(ref _rebuildCause, null);
+            return stats;
+        }
+        catch (Exception exception) when (isRecovery)
+        {
+            MarkRequiresRebuild(new InvalidDataException(
+                "The full Sift rebuild did not complete.",
+                exception));
+            throw;
+        }
     }
 
     public ActivityStats GetActivityStats()
@@ -91,6 +143,20 @@ public sealed class Sift : ISift
     public MaintenanceStats GetMaintenanceStats()
     {
         ThrowIfDisposed();
+        ThrowIfRebuildRequired();
+        try
+        {
+            return GetMaintenanceStatsCore();
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
+    }
+
+    private MaintenanceStats GetMaintenanceStatsCore()
+    {
         using var snapshot = _storage.OpenReadSnapshot();
         var manifest = snapshot.Manifest;
         var segmentCount = manifest.Segments.Count;
@@ -148,11 +214,22 @@ public sealed class Sift : ISift
     public StorageStats GetStorageStats()
     {
         ThrowIfDisposed();
-        return _storage.GetStorageStats();
+        ThrowIfRebuildRequired();
+        try
+        {
+            return _storage.GetStorageStats();
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
     }
 
     public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
+        ThrowIfRebuildRequired();
         var deletionArray = deletions.ToArray();
         var activity = BeginActivity(SiftActivity.Update);
         return Task.Run(() =>
@@ -160,6 +237,11 @@ public sealed class Sift : ISift
             try
             {
                 return UpdateCore(upserts, deletionArray, cancellationToken);
+            }
+            catch (Exception exception) when (IsIndexCorruption(exception))
+            {
+                MarkRequiresRebuild(exception);
+                throw;
             }
             finally
             {
@@ -272,6 +354,8 @@ public sealed class Sift : ISift
 
     public Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
+        ThrowIfRebuildRequired();
         ValidateCompactOptions(options);
         var activity = BeginActivity(SiftActivity.Compact);
         return Task.Run(async () =>
@@ -282,6 +366,11 @@ public sealed class Sift : ISift
                 var stats = CompactCore(options, cancellationToken);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
                 return stats with { PeakManagedBytes = peakManagedBytes };
+            }
+            catch (Exception exception) when (IsIndexCorruption(exception))
+            {
+                MarkRequiresRebuild(exception);
+                throw;
             }
             finally
             {
@@ -510,6 +599,30 @@ public sealed class Sift : ISift
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
+    }
+
+    private void ThrowIfRebuildRequired()
+    {
+        var cause = Volatile.Read(ref _rebuildCause);
+        if (cause is not null)
+        {
+            throw new InvalidDataException(
+                "The Sift index is corrupt or incomplete. Run a full Build to replace it.",
+                cause);
+        }
+    }
+
+    private void MarkRequiresRebuild(Exception exception)
+    {
+        if (IsIndexCorruption(exception))
+        {
+            Interlocked.CompareExchange(ref _rebuildCause, exception, null);
+        }
+    }
+
+    private static bool IsIndexCorruption(Exception exception)
+    {
+        return exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException;
     }
 
     private sealed class ActivityScope : IDisposable

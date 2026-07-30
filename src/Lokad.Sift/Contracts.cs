@@ -305,6 +305,7 @@ public interface IOverlaySnapshot : IIndexSnapshot
 
 public interface ISift : IDisposable
 {
+    bool RequiresRebuild { get; }
     IIndexSnapshot OpenSnapshot(SearchOptions options = default);
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default);
     ActivityStats GetActivityStats();

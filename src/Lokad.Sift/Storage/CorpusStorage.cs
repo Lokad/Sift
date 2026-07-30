@@ -29,6 +29,7 @@ public sealed class CorpusStorage : ISiftStorage
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
     internal int ValidatedSegmentCount => _validatedSegmentIds.Count;
     private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
+    private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
     internal PublicationFaultInjector? FaultInjector { get; set; }
     public bool HasManifest => File.Exists(ManifestPath);
 
@@ -91,6 +92,12 @@ public sealed class CorpusStorage : ISiftStorage
             try
             {
                 EnsureLayout();
+                return stream;
+            }
+            catch (InvalidDataException)
+            {
+                // The writer lock is also required to replace a corrupt derived
+                // index. The operation itself still observes the corruption.
                 return stream;
             }
             catch
@@ -312,6 +319,12 @@ public sealed class CorpusStorage : ISiftStorage
 
     void ISiftStorage.EnsureSnapshotMetadata()
     {
+        if (File.Exists(RebuildRequiredPath))
+        {
+            throw new InvalidDataException(
+                "A previous Sift rebuild did not complete; a full Build is required.");
+        }
+
         if (!HasManifest)
         {
             if (!File.Exists(ManifestPath + ".tmp"))
@@ -420,6 +433,17 @@ public sealed class CorpusStorage : ISiftStorage
     void ISiftStorage.EnsureReplacementAllowedUnderWriterLock()
     {
         EnsureReplacementAllowedUnderWriterLock();
+    }
+
+    void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
+    {
+        if (!discardCorruptState)
+        {
+            EnsureReplacementAllowedUnderWriterLock();
+            return;
+        }
+
+        ResetCorruptIndexUnderWriterLock();
     }
 
     void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
@@ -546,6 +570,36 @@ public sealed class CorpusStorage : ISiftStorage
         }
     }
 
+    private void ResetCorruptIndexUnderWriterLock()
+    {
+        Directory.CreateDirectory(_rootPath);
+        Directory.CreateDirectory(LockPath);
+        using (var marker = new FileStream(
+                   RebuildRequiredPath,
+                   FileMode.Create,
+                   FileAccess.Write,
+                   FileShare.Read))
+        {
+            marker.WriteByte(1);
+            marker.Flush(flushToDisk: true);
+        }
+
+        FlushDirectoryEntry(LockPath);
+        DeleteFileForRebuild(ManifestPath);
+        DeleteFileForRebuild(ManifestPath + ".tmp");
+        DeleteDirectoryEntriesForRebuild(SegmentsPath);
+        DeleteDirectoryEntriesForRebuild(TempPath);
+        DeleteDirectoryEntriesForRebuild(GenerationLeasesPath);
+        FlushDirectoryEntry(SegmentsPath);
+        FlushDirectoryEntry(TempPath);
+        FlushDirectoryEntry(GenerationLeasesPath);
+        _validatedSegmentIds.Clear();
+        _segmentValidationGates.Clear();
+        _segmentDirectoriesRecovered = true;
+        SetReclamationPending(isPending: false);
+        FlushDirectoryEntry(_rootPath);
+    }
+
     private void WriteManifest(CorpusManifest manifest)
     {
         // Set the retry marker and publish the reader lease before making the generation discoverable.
@@ -613,6 +667,12 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         FlushDirectoryEntry(_rootPath);
+        if (File.Exists(RebuildRequiredPath))
+        {
+            File.Delete(RebuildRequiredPath);
+            FlushDirectoryEntry(LockPath);
+        }
+
         TryReclaimAfterPublication();
     }
 
@@ -1200,6 +1260,33 @@ public sealed class CorpusStorage : ISiftStorage
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return false;
+        }
+    }
+
+    private static void DeleteDirectoryEntriesForRebuild(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            Directory.CreateDirectory(path);
+            return;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(path))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
+        foreach (var file in Directory.EnumerateFiles(path))
+        {
+            File.Delete(file);
+        }
+    }
+
+    private static void DeleteFileForRebuild(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
         }
     }
 

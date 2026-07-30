@@ -23,18 +23,21 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     // of its segment packs has completed.
     private readonly ReaderWriterLockSlim _lifetimeLock = new();
     private Action? _onDisposed;
+    private readonly Action<Exception>? _onIndexFailure;
     private int _disposed;
 
     public SearchSnapshot(
         ISiftStorage storage,
         SiftOptions options,
         SearchOptions searchOptions,
-        Action? onDisposed = null)
+        Action? onDisposed = null,
+        Action<Exception>? onIndexFailure = null)
     {
         _storage = storage;
         _options = options;
         _searchOptions = searchOptions;
         _onDisposed = onDisposed;
+        _onIndexFailure = onIndexFailure;
         _storageSnapshot = storage.OpenReadSnapshot();
         // A snapshot pins the manifest generation, not every segment mapping.
         // Search operations open only the segment packs they are actively using.
@@ -559,7 +562,16 @@ Done:
 
     private SegmentCache OpenSegment(SegmentManifestEntry entry)
     {
-        return new SegmentCache(_storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals);
+        try
+        {
+            return new SegmentCache(_storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals);
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException)
+        {
+            _onIndexFailure?.Invoke(exception);
+            throw;
+        }
     }
 
     private SnapshotOperation BeginOperation()

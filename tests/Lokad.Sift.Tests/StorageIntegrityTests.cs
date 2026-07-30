@@ -78,6 +78,18 @@ public sealed class StorageIntegrityTests
             await restarted.Update(
                 new InMemoryDocumentSource([]),
                 [new DocumentKey("src/a.txt")]));
+        Assert.True(restarted.RequiresRebuild);
+
+        await restarted.Build(new InMemoryDocumentSource([("src/a.txt", "recovered\n")]));
+
+        Assert.False(restarted.RequiresRebuild);
+        using var snapshot = restarted.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("recovered", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+        Assert.Single(collector.Hits);
     }
 
     [Fact]

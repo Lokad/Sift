@@ -16,6 +16,8 @@ public interface ISiftStorage
     void ReclaimUnreferencedSegments(CancellationToken cancellationToken);
     // Caller holds the writer lock; this enforces the retained-generation disk bound.
     void EnsureReplacementAllowedUnderWriterLock();
+    // Caller holds the writer lock; an explicit rebuild may discard corrupt index artifacts.
+    void PrepareFullBuildUnderWriterLock(bool discardCorruptState);
     // Caller holds the writer lock; committed segment references are never removed.
     void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds);
 }

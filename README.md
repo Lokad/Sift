@@ -193,6 +193,13 @@ publication and manifest publication. No separate cleanup call is required.
 Snapshots acquire an immutable generation lease read-only; opening or disposing a
 snapshot does not create files or take the writer lock.
 
+Corrupt manifest, lease, or segment metadata is fail-closed. The `Sift` instance
+remains constructible and reports `RequiresRebuild`; searches, updates, and
+maintenance reject the unusable index. Calling `Build(...)` is the explicit
+recovery operation: it purges the derived index artifacts, publishes a fresh
+generation, and clears `RequiresRebuild`. An interrupted recovery remains marked
+as requiring another full build instead of appearing to be an empty index.
+
 To keep disk growth bounded, `Build(...)` and a compaction that would replace
 segments are refused while an earlier retired generation is still leased. Dispose
 the old snapshot and retry. A compaction pass selects at most
