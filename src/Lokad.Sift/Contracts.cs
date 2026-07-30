@@ -19,6 +19,7 @@ public enum SearchStopReason
     MaxHits,
     MaxDocuments,
     MaxBytesScanned,
+    MaxElapsedTime,
     RegexTimeout,
     Cancelled
 }
@@ -42,7 +43,8 @@ public readonly record struct SearchQuery(
     int MaxDocuments = int.MaxValue,
     long MaxBytesScanned = long.MaxValue,
     TimeoutPolicy TimeoutPolicy = TimeoutPolicy.StopSearch,
-    int MaxHitsPerDocument = int.MaxValue);
+    int MaxHitsPerDocument = int.MaxValue,
+    long MaxElapsedMilliseconds = 30_000);
 
 public readonly record struct SearchOptions(
     int SegmentParallelism = 1);

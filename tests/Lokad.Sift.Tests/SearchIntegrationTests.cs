@@ -2129,6 +2129,40 @@ public sealed class SearchIntegrationTests
         var materialized = snapshot.Materialize(collector.Hits[0], 0, 0);
         Assert.Equal("src/a.txt", materialized.Path);
     }
+
+    [Fact]
+    public async Task SearchStopsAtTheWallClockBudgetBetweenDocuments()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "needle"),
+            ("src/b.txt", "needle"),
+            ("src/c.txt", "needle"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new SlowHitCollector();
+
+        var stats = snapshot.Search(
+            new SearchQuery(
+                "needle",
+                PatternMode.Literal,
+                CaseMode.Sensitive,
+                MaxElapsedMilliseconds: 50),
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(1, stats.HitsReturned);
+        Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
+    }
+
+    private sealed class SlowHitCollector : IHitCollector
+    {
+        public bool OnHit(in RawHit hit)
+        {
+            Thread.Sleep(100);
+            return true;
+        }
+    }
 }
 
 

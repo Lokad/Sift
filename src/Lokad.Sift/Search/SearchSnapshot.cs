@@ -210,6 +210,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         foreach (var entry in _segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (HasElapsed(query, watch))
+            {
+                stopReason = SearchStopReason.MaxElapsedTime;
+                break;
+            }
+
             using var cache = OpenSegment(entry);
             var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
             scopeDocuments += segmentPlan.Scope.Ordinals.Length;
@@ -226,6 +232,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             foreach (var ordinal in candidates.Ordinals)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (HasElapsed(query, watch))
+                {
+                    stopReason = SearchStopReason.MaxElapsedTime;
+                    goto Done;
+                }
+
                 var document = cache.Segment.GetDocument(ordinal);
                 if (pathVisibility is not null && !pathVisibility.IsVisible(cache.Segment.GetPathBytes(document)))
                 {
@@ -379,12 +391,18 @@ Done:
             Math.Min(_searchOptions.SegmentParallelism, _segments.Count)];
         for (var batchStart = 0; batchStart < _segments.Count; batchStart += batchResults.Length)
         {
+            if (HasElapsed(query, watch))
+            {
+                stopReason = SearchStopReason.MaxElapsedTime;
+                goto Done;
+            }
+
             var batchLength = Math.Min(batchResults.Length, _segments.Count - batchStart);
             Parallel.For(0, batchLength, options, batchIndex =>
             {
                 var segmentIndex = batchStart + batchIndex;
                 using var cache = OpenSegment(_segments[segmentIndex]);
-                batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, cancellationToken);
+                batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, watch, cancellationToken);
             });
 
             for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
@@ -458,6 +476,18 @@ Done:
                         stopReason = SearchStopReason.MaxHits;
                         goto Done;
                     }
+                }
+
+                if (result.StopReason != SearchStopReason.None)
+                {
+                    stopReason = result.StopReason;
+                    goto Done;
+                }
+
+                if (HasElapsed(query, watch))
+                {
+                    stopReason = SearchStopReason.MaxElapsedTime;
+                    goto Done;
                 }
             }
         }
@@ -694,6 +724,11 @@ Done:
         {
             throw new ArgumentOutOfRangeException(nameof(query), "MaxHitsPerDocument must be positive.");
         }
+
+        if (query.MaxElapsedMilliseconds <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "MaxElapsedMilliseconds must be positive.");
+        }
     }
 
     private static int GetDocumentHitLimit(int hitsReturned, in SearchQuery query)
@@ -703,12 +738,17 @@ Done:
             Math.Min(int.MaxValue, (long)hitsReturned + query.MaxHitsPerDocument));
     }
 
+    private static bool HasElapsed(in SearchQuery query, Stopwatch watch)
+    {
+        return watch.ElapsedMilliseconds >= query.MaxElapsedMilliseconds;
+    }
+
     private static bool IsDeadOrdinal(uint[] deadOrdinals, uint ordinal)
     {
         return Array.BinarySearch(deadOrdinals, ordinal) >= 0;
     }
 
-    private SegmentSearchResult SearchSegmentFully(SegmentCache cache, in SearchQuery query, PathFilterMatcher matcher, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, PreparedLiteralQuery? preparedLiteral, PreparedMandatoryFragment[] preparedMandatoryFragments, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, RegexExecutionPlan regexPlan, IPathVisibility? pathVisibility, CancellationToken cancellationToken)
+    private SegmentSearchResult SearchSegmentFully(SegmentCache cache, in SearchQuery query, PathFilterMatcher matcher, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, PreparedLiteralQuery? preparedLiteral, PreparedMandatoryFragment[] preparedMandatoryFragments, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, RegexExecutionPlan regexPlan, IPathVisibility? pathVisibility, Stopwatch watch, CancellationToken cancellationToken)
     {
         var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
         var scope = segmentPlan.Scope;
@@ -723,10 +763,17 @@ Done:
         candidateDocumentsAfterIndex = candidates.Ordinals.Length;
         var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Length);
         var documents = new List<DocumentSearchResult>(candidates.Ordinals.Length);
+        var segmentStopReason = SearchStopReason.None;
 
         foreach (var ordinal in candidates.Ordinals)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (HasElapsed(query, watch))
+            {
+                segmentStopReason = SearchStopReason.MaxElapsedTime;
+                break;
+            }
+
             var document = cache.Segment.GetDocument(ordinal);
             if (pathVisibility is not null && !pathVisibility.IsVisible(cache.Segment.GetPathBytes(document)))
             {
@@ -852,6 +899,7 @@ Done:
             scope.Bytes,
             postingsBytesRead,
             candidateDocumentsAfterIndex,
+            segmentStopReason,
             documents);
     }
 
@@ -1734,6 +1782,7 @@ internal readonly record struct SegmentSearchResult(
     long ScopeBytes,
     long PostingsBytesRead,
     int CandidateDocumentsAfterIndex,
+    SearchStopReason StopReason,
     List<DocumentSearchResult> Documents);
 
 internal readonly record struct DocumentSearchResult(
