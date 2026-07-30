@@ -241,7 +241,7 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
-    public async Task StartupReclaimsPackLeftByFailedManifestSwap()
+    public async Task FailedManifestSwapImmediatelyReclaimsAttemptedPack()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha\n"),
@@ -265,7 +265,7 @@ public sealed class StorageLifecycleTests
             storage.SegmentsPath,
             "segment.pack",
             SearchOption.AllDirectories).Count();
-        Assert.True(packsBeforeRestart > manifestBeforeRestart.Segments.Count);
+        Assert.Equal(manifestBeforeRestart.Segments.Count, packsBeforeRestart);
 
         using var restartedIndex = new SiftIndex(fixture.CorpusPath);
         var afterRestart = restartedIndex.GetStorageStats();

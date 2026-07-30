@@ -410,6 +410,62 @@ public sealed class CorpusStorage : ISiftStorage
         EnsureReplacementAllowedUnderWriterLock();
     }
 
+    void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
+    {
+        ArgumentNullException.ThrowIfNull(attemptedSegmentIds);
+        HashSet<ulong>? referencedSegmentIds;
+        try
+        {
+            referencedSegmentIds = HasManifest
+                ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // An unreadable manifest could reference any attempted pack. Leave final
+            // packs untouched and let explicit recovery decide what is authoritative.
+            referencedSegmentIds = null;
+        }
+
+        var deletedFinalSegment = false;
+        foreach (var segmentId in attemptedSegmentIds.Distinct())
+        {
+            TryDeleteDirectory(Path.Combine(TempPath, segmentId.ToString("X16")));
+            if (referencedSegmentIds is null || referencedSegmentIds.Contains(segmentId))
+            {
+                continue;
+            }
+
+            if (TryDeleteDirectory(Path.Combine(SegmentsPath, segmentId.ToString("X16"))))
+            {
+                deletedFinalSegment = true;
+                _validatedSegmentIds.TryRemove(segmentId, out _);
+                _segmentValidationGates.TryRemove(segmentId, out _);
+            }
+        }
+
+        if (deletedFinalSegment)
+        {
+            try
+            {
+                FlushDirectoryEntry(SegmentsPath);
+            }
+            catch (IOException)
+            {
+                // Cleanup is best effort and the persistent marker schedules a retry.
+            }
+        }
+
+        try
+        {
+            _ = ReclaimUnreferencedSegmentsUnderWriterLock();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // Keep the retry marker set when normal reachability cleanup cannot finish.
+        }
+    }
+
     private void EnsureReplacementAllowedUnderWriterLock()
     {
         if (!HasManifest)
@@ -1114,6 +1170,24 @@ public sealed class CorpusStorage : ISiftStorage
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+        }
+    }
+
+    private static bool TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (!Directory.Exists(path))
+            {
+                return false;
+            }
+
+            Directory.Delete(path, recursive: true);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

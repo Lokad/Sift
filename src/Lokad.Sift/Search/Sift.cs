@@ -190,61 +190,73 @@ public sealed class Sift : ISift
         }
 
         var publishedSegments = new List<SegmentManifestEntry>();
-        var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        var upsertLoad = IndexBuilder.StreamDocuments(
-            upserts,
-            cancellationToken,
-            _options,
-            operationName: "update",
-            forbiddenPaths: deletionSet,
-            partition =>
-            {
-                var segmentId = segmentSeed + (ulong)publishedSegments.Count;
-                publishedSegments.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
-            });
-
-        var affectedPaths = new HashSet<string>(upsertLoad.SubmittedPaths, StringComparer.Ordinal);
-        affectedPaths.UnionWith(deletionSet);
-        var liveDocumentKeys = FindLiveDocumentKeys(
-            existingManifest,
-            affectedPaths,
-            cancellationToken);
-        var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
-        var deadBySegment = existingManifest.Segments.ToDictionary(
-            static segment => segment.SegmentId,
-            static segment => new HashSet<uint>(segment.DeadOrdinals),
-            EqualityComparer<ulong>.Default);
-
-        // Every submitted upsert supersedes its old version, including rejected
-        // replacements that the source will checkpoint and never submit again.
-        foreach (var path in upsertLoad.SubmittedPaths)
+        var attemptedSegmentIds = new List<ulong>();
+        StreamedDocuments upsertLoad;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (liveDocumentKeys.TryGetValue(path, out var current))
+            var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+            upsertLoad = IndexBuilder.StreamDocuments(
+                upserts,
+                cancellationToken,
+                _options,
+                operationName: "update",
+                forbiddenPaths: deletionSet,
+                partition =>
+                {
+                    var segmentId = segmentSeed + (ulong)publishedSegments.Count;
+                    attemptedSegmentIds.Add(segmentId);
+                    publishedSegments.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
+                });
+
+            var affectedPaths = new HashSet<string>(upsertLoad.SubmittedPaths, StringComparer.Ordinal);
+            affectedPaths.UnionWith(deletionSet);
+            var liveDocumentKeys = FindLiveDocumentKeys(
+                existingManifest,
+                affectedPaths,
+                cancellationToken);
+            var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
+            var deadBySegment = existingManifest.Segments.ToDictionary(
+                static segment => segment.SegmentId,
+                static segment => new HashSet<uint>(segment.DeadOrdinals),
+                EqualityComparer<ulong>.Default);
+
+            // Every submitted upsert supersedes its old version, including rejected
+            // replacements that the source will checkpoint and never submit again.
+            foreach (var path in upsertLoad.SubmittedPaths)
             {
-                deadBySegment[current.SegmentId].Add(current.Ordinal);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (liveDocumentKeys.TryGetValue(path, out var current))
+                {
+                    deadBySegment[current.SegmentId].Add(current.Ordinal);
+                }
             }
-        }
 
-        foreach (var path in deletionSet)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (liveDocumentKeys.TryGetValue(path, out var current))
+            foreach (var path in deletionSet)
             {
-                deadBySegment[current.SegmentId].Add(current.Ordinal);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (liveDocumentKeys.TryGetValue(path, out var current))
+                {
+                    deadBySegment[current.SegmentId].Add(current.Ordinal);
+                }
             }
-        }
 
-        foreach (var segment in existingManifest.Segments)
+            foreach (var segment in existingManifest.Segments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                newSegments.Add(segment with { DeadOrdinals = deadBySegment[segment.SegmentId].OrderBy(static value => value).ToArray() });
+            }
+
+            newSegments.AddRange(publishedSegments);
+
+            var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
+            _storage.PublishManifest(manifest);
+        }
+        catch
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            newSegments.Add(segment with { DeadOrdinals = deadBySegment[segment.SegmentId].OrderBy(static value => value).ToArray() });
+            _storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+            throw;
         }
 
-        newSegments.AddRange(publishedSegments);
-
-        var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
-        _storage.PublishManifest(manifest);
         watch.Stop();
         return new UpdateStats(
             SubmittedUpserts: upsertLoad.Submitted,
@@ -300,22 +312,39 @@ public sealed class Sift : ISift
 
         _storage.EnsureReplacementAllowedUnderWriterLock();
         var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        var publication = PublishCompactedSegments(manifest, selectedSegmentIds, segmentSeed, cancellationToken);
-        var newSegments = publication.Segments;
-
-        var retainedSegments = manifest.Segments
-            .Where(entry => !selectedSegmentIds.Contains(entry.SegmentId))
-            .ToArray();
-        var mergedSegments = new SegmentManifestEntry[retainedSegments.Length + newSegments.Count];
-        Array.Copy(retainedSegments, mergedSegments, retainedSegments.Length);
-        for (var i = 0; i < newSegments.Count; i++)
+        var attemptedSegmentIds = new List<ulong>();
+        var newSegments = new List<SegmentManifestEntry>();
+        CompactionPublication publication;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            mergedSegments[retainedSegments.Length + i] = newSegments[i];
+            publication = PublishCompactedSegments(
+                manifest,
+                selectedSegmentIds,
+                segmentSeed,
+                attemptedSegmentIds,
+                newSegments,
+                cancellationToken);
+
+            var retainedSegments = manifest.Segments
+                .Where(entry => !selectedSegmentIds.Contains(entry.SegmentId))
+                .ToArray();
+            var mergedSegments = new SegmentManifestEntry[retainedSegments.Length + newSegments.Count];
+            Array.Copy(retainedSegments, mergedSegments, retainedSegments.Length);
+            for (var i = 0; i < newSegments.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                mergedSegments[retainedSegments.Length + i] = newSegments[i];
+            }
+
+            var newManifest = new CorpusManifest(manifest.CorpusId, manifest.Generation + 1UL, mergedSegments);
+            _storage.PublishManifest(newManifest);
+        }
+        catch
+        {
+            _storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+            throw;
         }
 
-        var newManifest = new CorpusManifest(manifest.CorpusId, manifest.Generation + 1UL, mergedSegments);
-        _storage.PublishManifest(newManifest);
         watch.Stop();
         return new CompactStats(
             InputSegments: selectedSegmentIds.Count,
@@ -606,7 +635,13 @@ public sealed class Sift : ISift
         return live;
     }
 
-    private CompactionPublication PublishCompactedSegments(CorpusManifest manifest, HashSet<ulong> selectedSegmentIds, ulong segmentSeed, CancellationToken cancellationToken)
+    private CompactionPublication PublishCompactedSegments(
+        CorpusManifest manifest,
+        HashSet<ulong> selectedSegmentIds,
+        ulong segmentSeed,
+        List<ulong> attemptedSegmentIds,
+        List<SegmentManifestEntry> published,
+        CancellationToken cancellationToken)
     {
         var cursors = new List<CompactionCursor>();
         try
@@ -635,7 +670,6 @@ public sealed class Sift : ISift
                 queue.Enqueue(cursors[i], new CompactionPriority(cursors[i].Segment, cursors[i].Current.Document));
             }
 
-            var published = new List<SegmentManifestEntry>();
             var currentPartition = new List<CompactionDocument>();
             long currentBytes = 0;
             var mergedDocuments = 0;
@@ -648,7 +682,9 @@ public sealed class Sift : ISift
                 if (currentPartition.Count > 0 &&
                     (currentPartition.Count >= _options.TargetSegmentDocumentCount || currentBytes + next.ContentLength > _options.TargetSegmentContentBytes))
                 {
-                    published.Add(_storage.PublishSegment(currentPartition, segmentSeed + (ulong)published.Count, cancellationToken));
+                    var segmentId = segmentSeed + (ulong)published.Count;
+                    attemptedSegmentIds.Add(segmentId);
+                    published.Add(_storage.PublishSegment(currentPartition, segmentId, cancellationToken));
                     currentPartition = new List<CompactionDocument>();
                     currentBytes = 0;
                 }
@@ -666,7 +702,9 @@ public sealed class Sift : ISift
 
             if (currentPartition.Count > 0)
             {
-                published.Add(_storage.PublishSegment(currentPartition, segmentSeed + (ulong)published.Count, cancellationToken));
+                var segmentId = segmentSeed + (ulong)published.Count;
+                attemptedSegmentIds.Add(segmentId);
+                published.Add(_storage.PublishSegment(currentPartition, segmentId, cancellationToken));
             }
 
             return new CompactionPublication(published, mergedDocuments, contentBytes);

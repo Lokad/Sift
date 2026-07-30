@@ -140,6 +140,23 @@ public sealed class InMemorySiftStorage : ISiftStorage
         EnsureReplacementAllowedUnderWriterLock();
     }
 
+    void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
+    {
+        ArgumentNullException.ThrowIfNull(attemptedSegmentIds);
+        var referencedSegmentIds = _manifest?.Segments
+            .Select(static segment => segment.SegmentId)
+            .ToHashSet() ?? [];
+        foreach (var segmentId in attemptedSegmentIds)
+        {
+            if (!referencedSegmentIds.Contains(segmentId))
+            {
+                _segments.Remove(segmentId);
+            }
+        }
+
+        _reclamationPending = _segments.Keys.Any(segmentId => !referencedSegmentIds.Contains(segmentId));
+    }
+
     private StorageStats GetStorageStatsUnderWriterLock(SegmentReclamationStats reclamation)
     {
         var manifestSegmentIds = _manifest?.Segments.Select(static segment => segment.SegmentId).ToHashSet() ?? [];

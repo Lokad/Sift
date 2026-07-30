@@ -33,19 +33,31 @@ internal sealed class IndexBuilder
         var generation = (existing?.Generation ?? 0UL) + 1UL;
         var segmentSeed = generation ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var entries = new List<SegmentManifestEntry>();
-        var load = StreamDocuments(
-            source,
-            cancellationToken,
-            _options,
-            operationName: "build",
-            forbiddenPaths: null,
-            partition =>
-            {
-                var segmentId = segmentSeed + (ulong)entries.Count;
-                entries.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
-            });
+        var attemptedSegmentIds = new List<ulong>();
+        StreamedDocuments load;
+        try
+        {
+            load = StreamDocuments(
+                source,
+                cancellationToken,
+                _options,
+                operationName: "build",
+                forbiddenPaths: null,
+                partition =>
+                {
+                    var segmentId = segmentSeed + (ulong)entries.Count;
+                    attemptedSegmentIds.Add(segmentId);
+                    entries.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
+                });
 
-        _storage.PublishManifest(new CorpusManifest(corpusId, generation, entries));
+            _storage.PublishManifest(new CorpusManifest(corpusId, generation, entries));
+        }
+        catch
+        {
+            _storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+            throw;
+        }
+
         watch.Stop();
 
         return new BuildStats(

@@ -128,6 +128,30 @@ public sealed class BuildPipelineTests
         Assert.Equal(3, stats.SegmentCount);
     }
 
+    [Fact]
+    public async Task FailedStreamingBuildRemovesAlreadyPublishedPartitions()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentContentBytes = 5,
+            TargetSegmentDocumentCount = 50_000
+        });
+        var source = new BinaryDocumentSource(
+            [
+                new SubmittedDocument("src/a.txt", "aaaaa"u8.ToArray()),
+                new SubmittedDocument("src/b.txt", "bbbbb"u8.ToArray()),
+                new SubmittedDocument("src/a.txt", "ccccc"u8.ToArray())
+            ]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => index.Build(source));
+
+        var storage = TestHelpers.GetStorage(index);
+        Assert.False(storage.HasManifest);
+        Assert.Empty(Directory.EnumerateFiles(storage.SegmentsPath, "segment.pack", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(storage.TempPath));
+    }
+
     private static StoredDocument CreateStoredDocument(string path, int contentLength)
     {
         return new StoredDocument

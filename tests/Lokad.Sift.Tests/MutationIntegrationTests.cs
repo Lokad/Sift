@@ -516,6 +516,9 @@ public sealed class MutationIntegrationTests
         var after = storage.ReadManifest();
         Assert.Equal(before.Generation, after.Generation);
         Assert.Equal(before.Segments.Select(static segment => segment.SegmentId), after.Segments.Select(static segment => segment.SegmentId));
+        var storageStats = index.GetStorageStats();
+        Assert.Equal(0, storageStats.RetiredSegmentCount);
+        Assert.Equal(0, storageStats.TemporaryBytes);
 
         using var snapshot = index.OpenSnapshot();
         var omega = new HitBuffer();
@@ -551,6 +554,9 @@ public sealed class MutationIntegrationTests
         var after = storage.ReadManifest();
         Assert.Equal(before.Generation, after.Generation);
         Assert.Equal(before.Segments.Select(static segment => segment.SegmentId), after.Segments.Select(static segment => segment.SegmentId));
+        var storageStats = index.GetStorageStats();
+        Assert.Equal(0, storageStats.RetiredSegmentCount);
+        Assert.Equal(storageStats.ManifestSegmentBytes, storageStats.PhysicalSegmentBytes);
 
         using var snapshot = index.OpenSnapshot();
         var omega = new HitBuffer();
