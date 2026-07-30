@@ -25,30 +25,6 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    public BuildPublication PublishFullBuild(IReadOnlyList<IReadOnlyList<StoredDocument>> segments, CancellationToken cancellationToken)
-    {
-        EnsureReplacementAllowedUnderWriterLock();
-        var existing = _manifest;
-        var corpusId = existing?.CorpusId ?? Guid.NewGuid();
-        var generation = (existing?.Generation ?? 0UL) + 1UL;
-        var entries = new List<SegmentManifestEntry>(segments.Count);
-        var totalDocuments = 0;
-        long totalBytes = 0;
-        ulong segmentSeed = generation ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var segmentId = segmentSeed + (ulong)i;
-            var entry = PublishSegment(segments[i], segmentId, cancellationToken);
-            entries.Add(entry);
-            totalDocuments += entry.DocumentCount;
-            totalBytes += entry.ContentBytes;
-        }
-
-        _manifest = CloneManifest(new CorpusManifest(corpusId, generation, entries));
-        _ = ReclaimUnreferencedSegmentsUnderWriterLock();
-        return new BuildPublication(totalDocuments, entries.Count, totalBytes);
-    }
-
     public SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken)
     {
         _reclamationPending = true;

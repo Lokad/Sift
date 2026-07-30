@@ -101,6 +101,33 @@ public sealed class BuildPipelineTests
         Assert.Equal(["src/c.txt"], partitions[2].Select(static doc => doc.Path).ToArray());
     }
 
+    [Fact]
+    public async Task BuildPublishesFullPartitionsBeforeReadingTheWholeSource()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentContentBytes = 5,
+            TargetSegmentDocumentCount = 50_000
+        });
+        var source = new ObservingDocumentSource(
+            [
+                new SubmittedDocument("src/a.txt", "aaaaa"u8.ToArray()),
+                new SubmittedDocument("src/b.txt", "bbbbb"u8.ToArray()),
+                new SubmittedDocument("src/c.txt", "ccccc"u8.ToArray())
+            ],
+            beforeThirdDocument: () =>
+            {
+                var segmentsPath = Path.Combine(fixture.CorpusPath, "segments");
+                Assert.Single(Directory.EnumerateFiles(segmentsPath, "segment.pack", SearchOption.AllDirectories));
+            });
+
+        var stats = await index.Build(source);
+
+        Assert.Equal(3, stats.IndexedDocuments);
+        Assert.Equal(3, stats.SegmentCount);
+    }
+
     private static StoredDocument CreateStoredDocument(string path, int contentLength)
     {
         return new StoredDocument
@@ -128,6 +155,36 @@ public sealed class BuildPipelineTests
 
         public bool TryReadNext(out SubmittedDocument document)
         {
+            if (_index >= _documents.Count)
+            {
+                document = default;
+                return false;
+            }
+
+            document = _documents[_index++];
+            return true;
+        }
+    }
+
+    private sealed class ObservingDocumentSource : IDocumentSource
+    {
+        private readonly IReadOnlyList<SubmittedDocument> _documents;
+        private readonly Action _beforeThirdDocument;
+        private int _index;
+
+        public ObservingDocumentSource(IReadOnlyList<SubmittedDocument> documents, Action beforeThirdDocument)
+        {
+            _documents = documents;
+            _beforeThirdDocument = beforeThirdDocument;
+        }
+
+        public bool TryReadNext(out SubmittedDocument document)
+        {
+            if (_index == 2)
+            {
+                _beforeThirdDocument();
+            }
+
             if (_index >= _documents.Count)
             {
                 document = default;

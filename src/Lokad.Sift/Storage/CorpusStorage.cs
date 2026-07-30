@@ -99,31 +99,6 @@ public sealed class CorpusStorage : ISiftStorage
 
     IDisposable ISiftStorage.AcquireWriterLock(CancellationToken cancellationToken) => AcquireWriterLock(cancellationToken);
 
-    public BuildPublication PublishFullBuild(IReadOnlyList<IReadOnlyList<StoredDocument>> segments, CancellationToken cancellationToken)
-    {
-        EnsureLayout();
-        EnsureReplacementAllowedUnderWriterLock();
-
-        var existing = File.Exists(ManifestPath) ? ReadManifest() : null;
-        var corpusId = existing?.CorpusId ?? Guid.NewGuid();
-        var generation = (existing?.Generation ?? 0UL) + 1UL;
-        var entries = new List<SegmentManifestEntry>(segments.Count);
-        var totalDocuments = 0;
-        long totalBytes = 0;
-        ulong segmentSeed = generation ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var segmentId = segmentSeed + (ulong)i;
-            var entry = PublishSegment(segments[i], segmentId, cancellationToken);
-            entries.Add(entry);
-            totalDocuments += entry.DocumentCount;
-            totalBytes += entry.ContentBytes;
-        }
-
-        WriteManifest(new CorpusManifest(corpusId, generation, entries));
-        return new BuildPublication(totalDocuments, entries.Count, totalBytes);
-    }
-
     public SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken)
     {
         EnsureLayout();
@@ -1261,8 +1236,6 @@ public sealed class CorpusStorage : ISiftStorage
         }
     }
 }
-
-public readonly record struct BuildPublication(int IndexedDocuments, int SegmentCount, long ContentBytes);
 
 internal enum PublicationStage
 {

@@ -178,19 +178,6 @@ public sealed class Sift : ISift
             ? _storage.ReadManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
 
-        var upsertLoad = IndexBuilder.LoadDocuments(upserts, cancellationToken, _options);
-        var upsertsByPath = new Dictionary<string, StoredDocument>(StringComparer.Ordinal);
-        foreach (var document in upsertLoad.Documents)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!upsertsByPath.TryAdd(document.Path, document))
-            {
-                throw new InvalidOperationException($"Duplicate canonical path in update batch: '{document.Path}'.");
-            }
-        }
-
-        var submittedUpsertPaths = new HashSet<string>(upsertsByPath.Keys, StringComparer.Ordinal);
-        submittedUpsertPaths.UnionWith(upsertLoad.RejectedPaths);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {
@@ -200,37 +187,37 @@ public sealed class Sift : ISift
             {
                 throw new InvalidOperationException($"Duplicate deletion path in update batch: '{normalized}'.");
             }
-
-            if (submittedUpsertPaths.Contains(normalized))
-            {
-                throw new InvalidOperationException($"Path '{normalized}' cannot appear in both upserts and deletions.");
-            }
         }
 
-        var affectedPaths = new HashSet<string>(submittedUpsertPaths, StringComparer.Ordinal);
+        var publishedSegments = new List<SegmentManifestEntry>();
+        var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+        var upsertLoad = IndexBuilder.StreamDocuments(
+            upserts,
+            cancellationToken,
+            _options,
+            operationName: "update",
+            forbiddenPaths: deletionSet,
+            partition =>
+            {
+                var segmentId = segmentSeed + (ulong)publishedSegments.Count;
+                publishedSegments.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
+            });
+
+        var affectedPaths = new HashSet<string>(upsertLoad.SubmittedPaths, StringComparer.Ordinal);
         affectedPaths.UnionWith(deletionSet);
         var liveDocumentKeys = FindLiveDocumentKeys(
             existingManifest,
             affectedPaths,
             cancellationToken);
-        var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + 1);
+        var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
         var deadBySegment = existingManifest.Segments.ToDictionary(
             static segment => segment.SegmentId,
             static segment => new HashSet<uint>(segment.DeadOrdinals),
             EqualityComparer<ulong>.Default);
 
-        foreach (var document in upsertsByPath.Values)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (liveDocumentKeys.TryGetValue(document.Path, out var current))
-            {
-                deadBySegment[current.SegmentId].Add(current.Ordinal);
-            }
-        }
-
-        // A rejected replacement must hide the previous version; otherwise callers that
-        // checkpoint the rejection would keep stale content searchable indefinitely.
-        foreach (var path in upsertLoad.RejectedPaths)
+        // Every submitted upsert supersedes its old version, including rejected
+        // replacements that the source will checkpoint and never submit again.
+        foreach (var path in upsertLoad.SubmittedPaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (liveDocumentKeys.TryGetValue(path, out var current))
@@ -254,27 +241,17 @@ public sealed class Sift : ISift
             newSegments.Add(segment with { DeadOrdinals = deadBySegment[segment.SegmentId].OrderBy(static value => value).ToArray() });
         }
 
-        if (upsertLoad.Documents.Count > 0)
-        {
-            upsertLoad.Documents.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
-            var partitions = IndexBuilder.PartitionDocuments(upsertLoad.Documents, _options);
-            var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-            for (var i = 0; i < partitions.Count; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                newSegments.Add(_storage.PublishSegment(partitions[i], segmentSeed + (ulong)i, cancellationToken));
-            }
-        }
+        newSegments.AddRange(publishedSegments);
 
         var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
         _storage.PublishManifest(manifest);
         watch.Stop();
         return new UpdateStats(
             SubmittedUpserts: upsertLoad.Submitted,
-            UpsertedDocuments: upsertLoad.Documents.Count,
+            UpsertedDocuments: upsertLoad.Accepted,
             RejectedUpserts: upsertLoad.Rejected,
             DeletedDocuments: deletionSet.Count,
-            PublishedSegments: upsertLoad.Documents.Count > 0 ? newSegments.Count - existingManifest.Segments.Count : 0,
+            PublishedSegments: publishedSegments.Count,
             SubmittedBytes: upsertLoad.SubmittedBytes,
             ContentBytes: upsertLoad.AcceptedBytes,
             RejectedBytes: upsertLoad.RejectedBytes,
