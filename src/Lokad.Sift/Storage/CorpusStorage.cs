@@ -302,6 +302,12 @@ public sealed class CorpusStorage : ISiftStorage
         }
     }
 
+    public long GetSegmentBytes(ulong segmentId)
+    {
+        var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
+        return new FileInfo(path).Length;
+    }
+
     bool ISiftStorage.IsReclamationPending
     {
         get

@@ -175,7 +175,7 @@ public sealed record CompactOptions
             DeadFractionThreshold: 0.20,
             SegmentCountTrigger: 16,
             MetadataBloatDeadOrdinalsThreshold: 1024,
-            MaxInputContentBytes: 1L * 1024 * 1024 * 1024)
+            MaxInputSegmentBytes: 1L * 1024 * 1024 * 1024)
     {
     }
 
@@ -184,21 +184,21 @@ public sealed record CompactOptions
         double DeadFractionThreshold = 0.20,
         int SegmentCountTrigger = 16,
         int MetadataBloatDeadOrdinalsThreshold = 1024,
-        long MaxInputContentBytes = 1L * 1024 * 1024 * 1024)
+        long MaxInputSegmentBytes = 1L * 1024 * 1024 * 1024)
     {
         this.MaxMergedSegments = MaxMergedSegments;
         this.DeadFractionThreshold = DeadFractionThreshold;
         this.SegmentCountTrigger = SegmentCountTrigger;
         this.MetadataBloatDeadOrdinalsThreshold = MetadataBloatDeadOrdinalsThreshold;
-        this.MaxInputContentBytes = MaxInputContentBytes;
+        this.MaxInputSegmentBytes = MaxInputSegmentBytes;
     }
 
     public int MaxMergedSegments { get; init; }
     public double DeadFractionThreshold { get; init; }
     public int SegmentCountTrigger { get; init; }
     public int MetadataBloatDeadOrdinalsThreshold { get; init; }
-    // Bounds a maintenance pass; one larger segment is still allowed so it remains reclaimable.
-    public long MaxInputContentBytes { get; init; }
+    // Applies to physical packs; one larger debt-bearing segment remains reclaimable.
+    public long MaxInputSegmentBytes { get; init; }
 }
 
 public readonly record struct CompactStats(

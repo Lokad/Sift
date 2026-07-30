@@ -100,8 +100,6 @@ public sealed class Sift : ISift
         long reclaimableContentBytes = 0;
         var segmentsWithDeletions = 0;
         var smallSegmentCount = 0;
-        var smallDocumentThreshold = Math.Max(1, _options.TargetSegmentDocumentCount / 4);
-        var smallContentThreshold = Math.Max(1L, _options.TargetSegmentContentBytes / 4);
 
         foreach (var segment in manifest.Segments)
         {
@@ -121,8 +119,8 @@ public sealed class Sift : ISift
             }
 
             if (segment.LiveDocumentCount > 0 &&
-                (segment.LiveDocumentCount <= smallDocumentThreshold ||
-                 segment.ContentBytes <= smallContentThreshold))
+                segment.LiveDocumentCount < _options.TargetSegmentDocumentCount &&
+                segment.ContentBytes < _options.TargetSegmentContentBytes)
             {
                 smallSegmentCount++;
             }
@@ -310,25 +308,13 @@ public sealed class Sift : ISift
         var manifest = _storage.HasManifest
             ? _storage.ReadManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
-        if (manifest.Segments.Count <= 1 && manifest.Segments.All(static segment => segment.DeadOrdinals.Length == 0))
-        {
-            watch.Stop();
-            return new CompactStats(
-                InputSegments: manifest.Segments.Count,
-                OutputSegments: manifest.Segments.Count,
-                MergedDocuments: manifest.Segments.Sum(static segment => segment.LiveDocumentCount),
-                ContentBytes: manifest.Segments.Sum(static segment => segment.ContentBytes),
-                ElapsedMilliseconds: watch.ElapsedMilliseconds,
-                PeakManagedBytes: 0);
-        }
-
         var selectedSegmentIds = SelectSegmentsForCompaction(manifest, options);
         if (selectedSegmentIds.Count == 0)
         {
             watch.Stop();
             return new CompactStats(
-                InputSegments: manifest.Segments.Count,
-                OutputSegments: manifest.Segments.Count,
+                InputSegments: 0,
+                OutputSegments: 0,
                 MergedDocuments: 0,
                 ContentBytes: 0,
                 ElapsedMilliseconds: watch.ElapsedMilliseconds,
@@ -337,7 +323,7 @@ public sealed class Sift : ISift
 
         _storage.EnsureReplacementAllowedUnderWriterLock();
         var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        var publication = PublishCompactedSegments(manifest, selectedSegmentIds, segmentSeed, options, cancellationToken);
+        var publication = PublishCompactedSegments(manifest, selectedSegmentIds, segmentSeed, cancellationToken);
         var newSegments = publication.Segments;
 
         var retainedSegments = manifest.Segments
@@ -496,9 +482,9 @@ public sealed class Sift : ISift
             throw new ArgumentOutOfRangeException(nameof(options), "MetadataBloatDeadOrdinalsThreshold must be positive.");
         }
 
-        if (options.MaxInputContentBytes <= 0)
+        if (options.MaxInputSegmentBytes <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxInputContentBytes must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxInputSegmentBytes must be positive.");
         }
     }
 
@@ -643,7 +629,7 @@ public sealed class Sift : ISift
         return live;
     }
 
-    private CompactionPublication PublishCompactedSegments(CorpusManifest manifest, HashSet<ulong> selectedSegmentIds, ulong segmentSeed, CompactOptions options, CancellationToken cancellationToken)
+    private CompactionPublication PublishCompactedSegments(CorpusManifest manifest, HashSet<ulong> selectedSegmentIds, ulong segmentSeed, CancellationToken cancellationToken)
     {
         var cursors = new List<CompactionCursor>();
         try
@@ -719,22 +705,14 @@ public sealed class Sift : ISift
 
     private HashSet<ulong> SelectSegmentsForCompaction(CorpusManifest manifest, CompactOptions options)
     {
-        var smallDocumentThreshold = Math.Max(1, _options.TargetSegmentDocumentCount / 4);
-        var smallContentThreshold = Math.Max(1L, _options.TargetSegmentContentBytes / 4);
         var ordered = manifest.Segments
             .Select(entry => new
             {
                 Entry = entry,
+                SegmentBytes = _storage.GetSegmentBytes(entry.SegmentId),
                 DeadFraction = entry.DocumentCount == 0 ? 0d : (double)entry.DeadOrdinals.Length / entry.DocumentCount,
-                IsSmallSegment = entry.LiveDocumentCount > 0 &&
-                    (entry.LiveDocumentCount <= smallDocumentThreshold ||
-                     entry.ContentBytes <= smallContentThreshold),
                 HasMetadataBloat = entry.DeadOrdinals.Length >= options.MetadataBloatDeadOrdinalsThreshold
             })
-            .Where(item =>
-                item.DeadFraction >= options.DeadFractionThreshold ||
-                item.HasMetadataBloat ||
-                (manifest.Segments.Count > options.SegmentCountTrigger && item.IsSmallSegment))
             .OrderByDescending(item => item.DeadFraction)
             .ThenByDescending(item => item.HasMetadataBloat)
             .ThenBy(item => item.Entry.LiveDocumentCount)
@@ -742,8 +720,10 @@ public sealed class Sift : ISift
             .ToArray();
 
         var selected = new HashSet<ulong>();
-        long selectedContentBytes = 0;
-        foreach (var item in ordered)
+        long selectedSegmentBytes = 0;
+        foreach (var item in ordered.Where(item =>
+                     item.DeadFraction >= options.DeadFractionThreshold ||
+                     item.HasMetadataBloat))
         {
             if (selected.Count >= options.MaxMergedSegments)
             {
@@ -751,13 +731,44 @@ public sealed class Sift : ISift
             }
 
             if (selected.Count > 0 &&
-                item.Entry.ContentBytes > options.MaxInputContentBytes - selectedContentBytes)
+                item.SegmentBytes > options.MaxInputSegmentBytes - selectedSegmentBytes)
             {
                 continue;
             }
 
             selected.Add(item.Entry.SegmentId);
-            selectedContentBytes += item.Entry.ContentBytes;
+            selectedSegmentBytes += item.SegmentBytes;
+        }
+
+        if (selected.Count > 0 || manifest.Segments.Count <= options.SegmentCountTrigger)
+        {
+            return selected;
+        }
+
+        long mergedContentBytes = 0;
+        var mergedDocuments = 0;
+        foreach (var item in ordered.OrderBy(item => item.Entry.ContentBytes)
+                     .ThenBy(item => item.Entry.LiveDocumentCount)
+                     .ThenBy(item => item.Entry.SegmentId))
+        {
+            if (selected.Count >= options.MaxMergedSegments ||
+                item.Entry.LiveDocumentCount == 0 ||
+                item.SegmentBytes > options.MaxInputSegmentBytes - selectedSegmentBytes ||
+                item.Entry.ContentBytes > _options.TargetSegmentContentBytes - mergedContentBytes ||
+                item.Entry.LiveDocumentCount > _options.TargetSegmentDocumentCount - mergedDocuments)
+            {
+                continue;
+            }
+
+            selected.Add(item.Entry.SegmentId);
+            selectedSegmentBytes += item.SegmentBytes;
+            mergedContentBytes += item.Entry.ContentBytes;
+            mergedDocuments += item.Entry.LiveDocumentCount;
+        }
+
+        if (selected.Count < 2)
+        {
+            selected.Clear();
         }
 
         return selected;

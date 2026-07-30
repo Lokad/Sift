@@ -95,6 +95,13 @@ public sealed class InMemorySiftStorage : ISiftStorage
             $"Sift segment '{segmentId:X16}' contains id '{actualSegmentId:X16}'.");
     }
 
+    public long GetSegmentBytes(ulong segmentId)
+    {
+        return _segments.TryGetValue(segmentId, out var bytes)
+            ? bytes.Length
+            : throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+    }
+
     bool ISiftStorage.IsReclamationPending
     {
         get

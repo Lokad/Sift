@@ -244,8 +244,9 @@ public sealed class MutationIntegrationTests
         await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), [new DocumentKey("src/b.txt")]);
 
         var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
-        Assert.True(compact.OutputSegments >= 1);
-        Assert.Equal("omega\n".Length, compact.ContentBytes);
+        Assert.Equal(1, compact.InputSegments);
+        Assert.Equal(0, compact.OutputSegments);
+        Assert.Equal(0, compact.ContentBytes);
 
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
@@ -367,7 +368,7 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task CompactionSelectsBoundedSubsetOfSegments()
+    public async Task CountDrivenCompactionDoesNotRewriteOneCleanSegment()
     {
         var documents = Enumerable.Range(0, 150_003)
             .Select(static i => ($"src/{i:D6}.txt", "alpha\n"))
@@ -380,7 +381,7 @@ public sealed class MutationIntegrationTests
 
         var compact = await index.Compact(new CompactOptions(MaxMergedSegments: 1, SegmentCountTrigger: 1));
 
-        Assert.Equal(1, compact.InputSegments);
+        Assert.Equal(0, compact.InputSegments);
 
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = storage.ReadManifest();
@@ -440,9 +441,55 @@ public sealed class MutationIntegrationTests
 
         var compact = await index.Compact(new CompactOptions());
 
-        Assert.Equal(2, compact.InputSegments);
-        Assert.Equal(2, compact.OutputSegments);
+        Assert.Equal(0, compact.InputSegments);
+        Assert.Equal(0, compact.OutputSegments);
         Assert.Equal(0, compact.MergedDocuments);
+    }
+
+    [Fact]
+    public async Task CompactionDoesNotRewriteContentFullSegments()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentDocumentCount = 100,
+            TargetSegmentContentBytes = 10
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "0123456789"),
+            ("src/b.txt", "0123456789"),
+            ("src/c.txt", "0123456789")
+        ]));
+        var before = index.Storage.ReadManifest();
+
+        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        var after = index.Storage.ReadManifest();
+
+        Assert.Equal(0, compact.InputSegments);
+        Assert.Equal(0, compact.OutputSegments);
+        Assert.Equal(before.Generation, after.Generation);
+        Assert.Equal(
+            before.Segments.Select(static segment => segment.SegmentId),
+            after.Segments.Select(static segment => segment.SegmentId));
+    }
+
+    [Fact]
+    public async Task CompactionMergesCleanSegmentsOnlyWhenOutputCountDrops()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentDocumentCount = 100,
+            TargetSegmentContentBytes = 10
+        });
+        await index.Build(new InMemoryDocumentSource([]));
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "abc")]), []);
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "def")]), []);
+        await index.Update(new InMemoryDocumentSource([("src/c.txt", "ghi")]), []);
+
+        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+
+        Assert.Equal(3, compact.InputSegments);
+        Assert.Equal(1, compact.OutputSegments);
+        Assert.Single(index.Storage.ReadManifest().Segments);
     }
 
     [Fact]

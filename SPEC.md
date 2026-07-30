@@ -484,9 +484,10 @@ callers do not run a separate cleanup phase.
 To bound physical growth, another replacement build or compaction is refused
 while a previously retired generation remains leased. Compaction requires
 temporary headroom for its output before reclamation can occur. Each pass limits
-selected source content through `CompactOptions.MaxInputContentBytes`; one segment
-may exceed the limit so that an oversized segment does not become permanently
-ineligible.
+selected physical pack bytes through `CompactOptions.MaxInputSegmentBytes`; one
+debt-bearing segment may exceed the limit so that an oversized segment does not
+become permanently ineligible. Segment-count compaction requires at least two
+clean inputs whose documents and content fit within one target output.
 
 ---
 

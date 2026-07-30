@@ -195,10 +195,12 @@ snapshot does not create files or take the writer lock.
 
 To keep disk growth bounded, `Build(...)` and a compaction that would replace
 segments are refused while an earlier retired generation is still leased. Dispose
-the old snapshot and retry. A compaction pass rewrites at most
-`CompactOptions.MaxInputContentBytes` of source content by default, except that one
-larger segment remains eligible. Compaction still needs temporary disk headroom for
-the selected segments' new packs before the replaced packs can be deleted.
+the old snapshot and retry. A compaction pass selects at most
+`CompactOptions.MaxInputSegmentBytes` of physical packs by default, except that one
+larger debt-bearing segment remains eligible. Count-driven maintenance only merges
+clean segments when at least two fit into one target segment. Compaction still needs
+temporary disk headroom for the selected segments' new packs before the replaced
+packs can be deleted.
 
 ## What Sift is for
 
