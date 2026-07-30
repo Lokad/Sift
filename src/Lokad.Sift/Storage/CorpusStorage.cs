@@ -144,6 +144,8 @@ public sealed class CorpusStorage : ISiftStorage
 
         Directory.CreateDirectory(finalSegmentDirectory);
         File.Move(tempSegmentPath, finalSegmentPath);
+        FlushDirectoryEntry(finalSegmentDirectory);
+        FlushDirectoryEntry(SegmentsPath);
         _validatedSegmentIds.TryAdd(segmentId, 0);
         Directory.Delete(tempSegmentDirectory, recursive: true);
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, []);
@@ -457,6 +459,11 @@ public sealed class CorpusStorage : ISiftStorage
                 }
             }
 
+            if (abandonedSegments.Count > 0)
+            {
+                FlushDirectoryEntry(SegmentsPath);
+            }
+
             if (failedCount > 0)
             {
                 throw new IOException(
@@ -556,6 +563,7 @@ public sealed class CorpusStorage : ISiftStorage
             File.Move(tempPath, ManifestPath, overwrite: true);
         }
 
+        FlushDirectoryEntry(_rootPath);
         TryReclaimAfterPublication();
     }
 
@@ -623,6 +631,7 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         File.Move(tempPath, ManifestPath, overwrite: true);
+        FlushDirectoryEntry(_rootPath);
     }
 
     private void RecoverGenerationLeaseTempFiles()
@@ -735,6 +744,7 @@ public sealed class CorpusStorage : ISiftStorage
             }
 
             File.Move(tempPath, leasePath);
+            FlushDirectoryEntry(GenerationLeasesPath);
         }
         finally
         {
@@ -1013,6 +1023,11 @@ public sealed class CorpusStorage : ISiftStorage
             }
         }
 
+        if (reclaimedSegmentCount > 0)
+        {
+            FlushDirectoryEntry(SegmentsPath);
+        }
+
         return CompleteReclamation(new SegmentReclamationStats(
             reclaimedSegmentCount,
             reclaimedSegmentBytes,
@@ -1114,11 +1129,27 @@ public sealed class CorpusStorage : ISiftStorage
                 FileShare.ReadWrite);
             stream.SetLength(1);
             stream.WriteByte(isPending ? (byte)1 : (byte)0);
-            stream.Flush(flushToDisk: false);
+            stream.Flush(flushToDisk: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
         }
+    }
+
+    private static void FlushDirectoryEntry(string path)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        // File data must precede the durable rename that makes a pack or manifest discoverable.
+        using var handle = File.OpenHandle(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        RandomAccess.FlushToDisk(handle);
     }
 
     private List<PhysicalSegment> EnumeratePhysicalSegments(
