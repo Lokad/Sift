@@ -42,6 +42,7 @@ internal static class Utf8RegexEngine
         SegmentDocument document,
         Utf8RegexProgram program,
         PreparedOrderedAnchor[][]? preparedOrderedAnchorGroups,
+        int hitLimit,
         IHitCollector collector,
         ref int hitsReturned,
         ref int byteRegexInvocations,
@@ -72,6 +73,11 @@ internal static class Utf8RegexEngine
             // it should slice contentBytes or use a future byte-offset Utf8Regex API rather than a UTF-16 startAt overload.
             foreach (var match in regex.EnumerateMatches(contentBytes))
             {
+                if (hitsReturned >= hitLimit)
+                {
+                    break;
+                }
+
                 if (!match.TryGetByteRange(out var startByte, out var lengthInBytes))
                 {
                     continue;
@@ -82,13 +88,19 @@ internal static class Utf8RegexEngine
                 var endByte = startByte + lengthInBytes;
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
-                if (!collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine)))
+                var shouldContinue = collector.OnHit(
+                    new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine));
+                hitsReturned++;
+                if (!shouldContinue)
                 {
                     stopReason = SearchStopReason.Cancelled;
                     return true;
                 }
 
-                hitsReturned++;
+                if (hitsReturned >= hitLimit)
+                {
+                    break;
+                }
             }
         }
         catch (RegexMatchTimeoutException)

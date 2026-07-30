@@ -32,6 +32,7 @@ public sealed class Sift : ISift
     internal Sift(ISiftStorage storage, SiftOptions? options = null)
     {
         _options = options ?? new SiftOptions();
+        ValidateSiftOptions(_options);
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _builder = new IndexBuilder(_storage, _options);
         try
@@ -580,6 +581,50 @@ public sealed class Sift : ISift
         if (options.MaxInputSegmentBytes <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "MaxInputSegmentBytes must be positive.");
+        }
+    }
+
+    private static void ValidateSiftOptions(SiftOptions options)
+    {
+        if (options.MaxDocumentBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxDocumentBytes must be positive.");
+        }
+
+        if (options.TargetSegmentDocumentCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "TargetSegmentDocumentCount must be positive.");
+        }
+
+        if (options.TargetSegmentContentBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "TargetSegmentContentBytes must be positive.");
+        }
+
+        if (options.DirectScanScopeDocumentsThreshold < 0 ||
+            options.DirectScanScopeBytesThreshold < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "Direct-scan thresholds cannot be negative.");
+        }
+
+        if (double.IsNaN(options.DirectScanCandidateDensityThreshold) ||
+            options.DirectScanCandidateDensityThreshold < 0d)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "DirectScanCandidateDensityThreshold cannot be negative or NaN.");
+        }
+
+        if (options.MaxSelectedNgrams <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxSelectedNgrams must be positive.");
+        }
+
+        if (options.MaxMaterializedMatchBytes <= 0 ||
+            options.MaxMaterializedContextBytes < 0 ||
+            options.MaxMaterializedContextLines < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "Materialization limits are invalid.");
         }
     }
 

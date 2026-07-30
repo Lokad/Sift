@@ -24,6 +24,7 @@ internal static class RegexVerifier
         SegmentDocument document,
         in SearchQuery query,
         CaseMode resolvedCaseMode,
+        int hitLimit,
         IHitCollector collector,
         ref long decodedChars,
         ref int hitsReturned,
@@ -56,6 +57,11 @@ internal static class RegexVerifier
         {
             foreach (var match in regex.EnumerateMatches(text))
             {
+                if (hitsReturned >= hitLimit)
+                {
+                    return matched;
+                }
+
                 matched = true;
                 if (!isAscii)
                 {
@@ -70,13 +76,19 @@ internal static class RegexVerifier
                     : utf8PrefixByteOffsets![match.Index + match.Length];
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
-                if (!collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine)))
+                var shouldContinue = collector.OnHit(
+                    new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine));
+                hitsReturned++;
+                if (!shouldContinue)
                 {
                     stopReason = SearchStopReason.Cancelled;
                     return true;
                 }
 
-                hitsReturned++;
+                if (hitsReturned >= hitLimit)
+                {
+                    return true;
+                }
             }
         }
         catch (RegexMatchTimeoutException)

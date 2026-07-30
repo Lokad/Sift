@@ -1643,6 +1643,118 @@ public sealed class SearchIntegrationTests
         Assert.Equal(sequentialStats.StopReason, parallelStats.StopReason);
     }
 
+    [Theory]
+    [InlineData(PatternMode.Literal, "a", "a a a a a")]
+    [InlineData(PatternMode.Regex, "a", "a a a a a")]
+    [InlineData(PatternMode.Regex, "é", "é é é é é")]
+    public async Task SearchEnforcesMaxHitsInsideOneDocument(
+        PatternMode patternMode,
+        string pattern,
+        string content)
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", content));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery(
+                pattern,
+                patternMode,
+                CaseMode.Sensitive,
+                MaxHits: 3),
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(3, collector.Hits.Count);
+        Assert.Equal(3, stats.HitsReturned);
+        Assert.Equal(SearchStopReason.MaxHits, stats.StopReason);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task PerDocumentHitLimitContinuesWithLaterDocuments(int segmentParallelism)
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "needle needle needle"),
+            ("src/b.txt", "needle needle needle"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism));
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery(
+                "needle",
+                PatternMode.Literal,
+                CaseMode.Sensitive,
+                MaxHits: 10,
+                MaxHitsPerDocument: 1),
+            new PathFilter(),
+            collector);
+        var paths = collector.Hits
+            .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
+            .ToArray();
+
+        Assert.Equal(["src/a.txt", "src/b.txt"], paths);
+        Assert.Equal(SearchStopReason.None, stats.StopReason);
+    }
+
+    [Fact]
+    public async Task MaterializeBoundsMatchAndContextText()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "1234567890\nabcdefghij\nABCDEFGHIJ\n"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaxMaterializedMatchBytes = 5,
+            MaxMaterializedContextBytes = 4,
+            MaxMaterializedContextLines = 2
+        });
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("abcdefghij", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+
+        var hit = snapshot.Materialize(collector.Hits.Single(), 1, 1);
+
+        Assert.Equal("abcde", hit.MatchText);
+        Assert.Equal(["1234"], hit.BeforeContext);
+        Assert.Empty(hit.AfterContext);
+        Assert.True(hit.IsMatchTruncated);
+        Assert.True(hit.IsContextTruncated);
+    }
+
+    [Fact]
+    public async Task MaterializeDoesNotSplitUtf8ScalarsAtTheByteLimit()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "ééé"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaxMaterializedMatchBytes = 3
+        });
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("ééé", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+
+        var hit = snapshot.Materialize(collector.Hits.Single(), 0, 0);
+
+        Assert.Equal("é", hit.MatchText);
+        Assert.True(hit.IsMatchTruncated);
+    }
+
     [Fact]
     public async Task RegexSearchMatchesExpectedHits()
     {

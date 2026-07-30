@@ -41,7 +41,8 @@ public readonly record struct SearchQuery(
     int MaxHits = 10_000,
     int MaxDocuments = int.MaxValue,
     long MaxBytesScanned = long.MaxValue,
-    TimeoutPolicy TimeoutPolicy = TimeoutPolicy.StopSearch);
+    TimeoutPolicy TimeoutPolicy = TimeoutPolicy.StopSearch,
+    int MaxHitsPerDocument = int.MaxValue);
 
 public readonly record struct SearchOptions(
     int SegmentParallelism = 1);
@@ -76,6 +77,9 @@ public sealed class SiftOptions
     public long DirectScanScopeBytesThreshold { get; init; } = 64L * 1024 * 1024;
     public double DirectScanCandidateDensityThreshold { get; init; } = 0.85;
     public int MaxSelectedNgrams { get; init; } = 24;
+    public int MaxMaterializedMatchBytes { get; init; } = 64 * 1024;
+    public int MaxMaterializedContextBytes { get; init; } = 256 * 1024;
+    public int MaxMaterializedContextLines { get; init; } = 1000;
 }
 
 public readonly record struct SelectedNGram(string Text, int Length, int DocFreq);
@@ -277,7 +281,9 @@ public readonly record struct MaterializedHit(
     int EndColumn,
     string MatchText,
     string[] BeforeContext,
-    string[] AfterContext);
+    string[] AfterContext,
+    bool IsMatchTruncated,
+    bool IsContextTruncated);
 
 public interface IHitCollector
 {

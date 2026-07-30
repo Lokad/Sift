@@ -33,9 +33,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         Action? onDisposed = null,
         Action<Exception>? onIndexFailure = null)
     {
+        if (searchOptions.SegmentParallelism < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(searchOptions),
+                "SegmentParallelism cannot be negative.");
+        }
+
         _storage = storage;
         _options = options;
-        _searchOptions = searchOptions;
+        // default(SearchOptions) is the value supplied by the optional API argument.
+        _searchOptions = searchOptions.SegmentParallelism == 0
+            ? new SearchOptions(SegmentParallelism: 1)
+            : searchOptions;
         _onDisposed = onDisposed;
         _onIndexFailure = onIndexFailure;
         _storageSnapshot = storage.OpenReadSnapshot();
@@ -46,6 +56,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
+        ValidateQuery(query);
         using var operation = BeginOperation();
         var resolvedCaseMode = ResolveCaseMode(query);
         var matcher = new PathFilterMatcher(pathFilter);
@@ -156,6 +167,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     internal SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, IPathVisibility? pathVisibility, CancellationToken cancellationToken = default)
     {
+        ValidateQuery(query);
         using var operation = BeginOperation();
         return CanUseSegmentParallelSearch(query)
             ? SearchParallel(query, pathFilter, collector, pathVisibility, cancellationToken)
@@ -224,13 +236,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 {
                     candidateDocumentsAfterPrecheck++;
                     verifiedDocuments++;
-                    if (!collector.OnHit(new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1)))
+                    var shouldContinue = collector.OnHit(
+                        new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
+                    hitsReturned++;
+                    if (!shouldContinue)
                     {
                         stopReason = SearchStopReason.Cancelled;
                         goto Done;
                     }
 
-                    hitsReturned++;
                     hitDocuments++;
                 }
                 else
@@ -255,17 +269,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
                     candidateDocumentsAfterPrecheck++;
                     var countBefore = hitsReturned;
+                    var documentHitLimit = GetDocumentHitLimit(hitsReturned, query);
                     if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
                     {
-                        SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
+                        SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
                     }
                     else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
                     {
-                        Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
+                        Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
                     }
                     else
                     {
-                        RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                        RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
                     }
 
                     verifiedDocuments++;
@@ -331,19 +346,12 @@ Done:
         var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
         var preparedOrderedAnchorGroups = PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups);
         var watch = Stopwatch.StartNew();
-        var results = new SegmentSearchResult[_segments.Count];
         var queryCopy = query;
         var options = new ParallelOptions
         {
             CancellationToken = cancellationToken,
             MaxDegreeOfParallelism = _searchOptions.SegmentParallelism
         };
-
-        Parallel.For(0, _segments.Count, options, index =>
-        {
-            using var cache = OpenSegment(_segments[index]);
-            results[index] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, cancellationToken);
-        });
 
         var scopeDocuments = 0;
         long scopeBytes = 0;
@@ -365,70 +373,91 @@ Done:
         var hitDocuments = 0;
         var stopReason = SearchStopReason.None;
 
-        for (var i = 0; i < results.Length; i++)
+        // Consume one parallel-width batch at a time so completed segments and
+        // their buffered raw hits do not accumulate for the entire corpus.
+        var batchResults = new SegmentSearchResult[
+            Math.Min(_searchOptions.SegmentParallelism, _segments.Count)];
+        for (var batchStart = 0; batchStart < _segments.Count; batchStart += batchResults.Length)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var result = results[i];
-            scopeDocuments += result.ScopeDocuments;
-            scopeBytes += result.ScopeBytes;
-            postingsBytesRead += result.PostingsBytesRead;
-            candidateDocumentsAfterIndex += result.CandidateDocumentsAfterIndex;
-
-            for (var docIndex = 0; docIndex < result.Documents.Count; docIndex++)
+            var batchLength = Math.Min(batchResults.Length, _segments.Count - batchStart);
+            Parallel.For(0, batchLength, options, batchIndex =>
             {
-                var document = result.Documents[docIndex];
-                bytesScanned += document.BytesScanned;
-                if (bytesScanned > query.MaxBytesScanned)
-                {
-                    stopReason = SearchStopReason.MaxBytesScanned;
-                    goto Done;
-                }
+                var segmentIndex = batchStart + batchIndex;
+                using var cache = OpenSegment(_segments[segmentIndex]);
+                batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, cancellationToken);
+            });
 
-                candidateDocumentsAfterPrecheck += document.CandidateDocumentsAfterPrecheck;
-                verifiedDocuments += document.VerifiedDocuments;
-                decodedChars += document.DecodedChars;
-                regexInvocations += document.RegexInvocations;
-                byteRegexInvocations += document.Utf8RegexInvocations;
-                fallbackRegexInvocations += document.FallbackRegexInvocations;
-                nonBacktrackingRegexInvocations += document.NonBacktrackingRegexInvocations;
-                byteRegexMatchedDocuments += document.Utf8RegexMatchedDocuments;
-                byteRegexStartPositionsTried += document.Utf8RegexMatchesEnumerated;
-                byteRegexCacheHits += document.Utf8RegexCacheHits;
-                byteRegexCacheMisses += document.Utf8RegexCacheMisses;
+            for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = batchResults[batchIndex];
+                scopeDocuments += result.ScopeDocuments;
+                scopeBytes += result.ScopeBytes;
+                postingsBytesRead += result.PostingsBytesRead;
+                candidateDocumentsAfterIndex += result.CandidateDocumentsAfterIndex;
 
-                var countBefore = hitsReturned;
-                for (var hitIndex = 0; hitIndex < document.Hits.Count; hitIndex++)
+                for (var docIndex = 0; docIndex < result.Documents.Count; docIndex++)
                 {
-                    if (!collector.OnHit(document.Hits[hitIndex]))
+                    var document = result.Documents[docIndex];
+                    bytesScanned += document.BytesScanned;
+                    if (bytesScanned > query.MaxBytesScanned)
                     {
-                        stopReason = SearchStopReason.Cancelled;
+                        stopReason = SearchStopReason.MaxBytesScanned;
                         goto Done;
                     }
 
-                    hitsReturned++;
-                }
+                    candidateDocumentsAfterPrecheck += document.CandidateDocumentsAfterPrecheck;
+                    verifiedDocuments += document.VerifiedDocuments;
+                    decodedChars += document.DecodedChars;
+                    regexInvocations += document.RegexInvocations;
+                    byteRegexInvocations += document.Utf8RegexInvocations;
+                    fallbackRegexInvocations += document.FallbackRegexInvocations;
+                    nonBacktrackingRegexInvocations += document.NonBacktrackingRegexInvocations;
+                    byteRegexMatchedDocuments += document.Utf8RegexMatchedDocuments;
+                    byteRegexStartPositionsTried += document.Utf8RegexMatchesEnumerated;
+                    byteRegexCacheHits += document.Utf8RegexCacheHits;
+                    byteRegexCacheMisses += document.Utf8RegexCacheMisses;
 
-                if (hitsReturned > countBefore)
-                {
-                    hitDocuments++;
-                }
+                    var countBefore = hitsReturned;
+                    for (var hitIndex = 0; hitIndex < document.Hits.Count; hitIndex++)
+                    {
+                        var shouldContinue = collector.OnHit(document.Hits[hitIndex]);
+                        hitsReturned++;
+                        if (!shouldContinue)
+                        {
+                            stopReason = SearchStopReason.Cancelled;
+                            goto Done;
+                        }
 
-                if (document.StopReason != SearchStopReason.None)
-                {
-                    stopReason = document.StopReason;
-                    goto Done;
-                }
+                        if (hitsReturned >= query.MaxHits)
+                        {
+                            stopReason = SearchStopReason.MaxHits;
+                            goto Done;
+                        }
+                    }
 
-                if (hitDocuments >= query.MaxDocuments)
-                {
-                    stopReason = SearchStopReason.MaxDocuments;
-                    goto Done;
-                }
+                    if (hitsReturned > countBefore)
+                    {
+                        hitDocuments++;
+                    }
 
-                if (hitsReturned >= query.MaxHits)
-                {
-                    stopReason = SearchStopReason.MaxHits;
-                    goto Done;
+                    if (document.StopReason != SearchStopReason.None)
+                    {
+                        stopReason = document.StopReason;
+                        goto Done;
+                    }
+
+                    if (hitDocuments >= query.MaxDocuments)
+                    {
+                        stopReason = SearchStopReason.MaxDocuments;
+                        goto Done;
+                    }
+
+                    if (hitsReturned >= query.MaxHits)
+                    {
+                        stopReason = SearchStopReason.MaxHits;
+                        goto Done;
+                    }
                 }
             }
         }
@@ -459,6 +488,8 @@ Done:
 
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(contextBefore);
+        ArgumentOutOfRangeException.ThrowIfNegative(contextAfter);
         using var operation = BeginOperation();
         using var cache = OpenSegment(hit.SegmentId);
 
@@ -466,12 +497,55 @@ Done:
         var path = cache.Segment.GetPath(document);
         var contentBytes = cache.Segment.GetContentBytes(document);
         var encodedLineIndex = cache.Segment.GetEncodedLineIndexBytes(document);
+        if (hit.StartByte < 0 || hit.EndByte < hit.StartByte || hit.EndByte > contentBytes.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hit), "Hit byte bounds are outside the document.");
+        }
+
         var startLine = hit.StartLine > 0 ? hit.StartLine : LineMap.GetLineFromByteOffset(encodedLineIndex, hit.StartByte);
         var endLine = hit.EndLine > 0 ? hit.EndLine : LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(hit.StartByte, hit.EndByte == 0 ? hit.StartByte : hit.EndByte - 1));
         var asciiDocument = (document.Flags & (1 << 1)) != 0;
         var startColumn = GetUtf16Column(contentBytes, encodedLineIndex, hit.StartByte, startLine, asciiDocument);
         var endColumn = GetUtf16Column(contentBytes, encodedLineIndex, hit.EndByte, endLine, asciiDocument);
-        var matchText = hit.EndByte > hit.StartByte ? DecodeText(contentBytes[hit.StartByte..hit.EndByte], asciiDocument, trimLineEnd: false) : string.Empty;
+        var materializedMatchEnd = hit.StartByte +
+            Math.Min(hit.EndByte - hit.StartByte, _options.MaxMaterializedMatchBytes);
+        if (materializedMatchEnd < hit.EndByte && !asciiDocument)
+        {
+            // A byte ceiling can land inside a UTF-8 scalar; retain only complete text.
+            while (materializedMatchEnd > hit.StartByte &&
+                   (contentBytes[materializedMatchEnd] & 0xC0) == 0x80)
+            {
+                materializedMatchEnd--;
+            }
+        }
+
+        var isMatchTruncated = materializedMatchEnd < hit.EndByte;
+        var matchText = materializedMatchEnd > hit.StartByte
+            ? DecodeText(contentBytes[hit.StartByte..materializedMatchEnd], asciiDocument, trimLineEnd: false)
+            : string.Empty;
+        var contextLineBudget = _options.MaxMaterializedContextLines;
+        var contextByteBudget = _options.MaxMaterializedContextBytes;
+        var beforeStartLine = (int)Math.Max(1L, (long)startLine - contextBefore);
+        var afterStartLine = endLine == int.MaxValue ? int.MaxValue : endLine + 1;
+        var afterEndLine = (int)Math.Min(int.MaxValue, (long)endLine + contextAfter);
+        var beforeContext = CollectContext(
+            contentBytes,
+            encodedLineIndex,
+            beforeStartLine,
+            startLine - 1,
+            asciiDocument,
+            ref contextLineBudget,
+            ref contextByteBudget,
+            out var beforeContextTruncated);
+        var afterContext = CollectContext(
+            contentBytes,
+            encodedLineIndex,
+            afterStartLine,
+            afterEndLine,
+            asciiDocument,
+            ref contextLineBudget,
+            ref contextByteBudget,
+            out var afterContextTruncated);
 
         return new MaterializedHit(
             path,
@@ -480,8 +554,10 @@ Done:
             endLine,
             endColumn,
             matchText,
-            CollectContext(contentBytes, encodedLineIndex, startLine - contextBefore, startLine - 1, asciiDocument),
-            CollectContext(contentBytes, encodedLineIndex, endLine + 1, endLine + contextAfter, asciiDocument));
+            beforeContext,
+            afterContext,
+            isMatchTruncated,
+            beforeContextTruncated || afterContextTruncated);
     }
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
@@ -596,6 +672,37 @@ Done:
             this);
     }
 
+    private static void ValidateQuery(in SearchQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query.Pattern);
+        if (query.MaxHits <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "MaxHits must be positive.");
+        }
+
+        if (query.MaxDocuments <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "MaxDocuments must be positive.");
+        }
+
+        if (query.MaxBytesScanned <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "MaxBytesScanned must be positive.");
+        }
+
+        if (query.MaxHitsPerDocument <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "MaxHitsPerDocument must be positive.");
+        }
+    }
+
+    private static int GetDocumentHitLimit(int hitsReturned, in SearchQuery query)
+    {
+        return (int)Math.Min(
+            query.MaxHits,
+            Math.Min(int.MaxValue, (long)hitsReturned + query.MaxHitsPerDocument));
+    }
+
     private static bool IsDeadOrdinal(uint[] deadOrdinals, uint ordinal)
     {
         return Array.BinarySearch(deadOrdinals, ordinal) >= 0;
@@ -699,19 +806,24 @@ Done:
                 continue;
             }
 
+            var documentHitLimit = GetDocumentHitLimit(hitsReturned, query);
             if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
             {
-                SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
+                SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
             }
             else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
             {
-                Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
+                Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
             }
             else
             {
-                RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
             }
             regexInvocations = byteRegexInvocations + fallbackRegexInvocations;
+            if (stopReason == SearchStopReason.None && hitsReturned >= query.MaxHits)
+            {
+                stopReason = SearchStopReason.MaxHits;
+            }
 
             documents.Add(new DocumentSearchResult(
                 BytesScanned: document.ContentLength,
@@ -743,19 +855,20 @@ Done:
             documents);
     }
 
-    private static void SearchLiteralDocument(MappedSegment segment, SegmentDocument document, in SearchQuery query, CaseMode resolvedCaseMode, PreparedLiteralQuery? preparedLiteral, IHitCollector collector, ref long decodedChars, ref int hitsReturned, ref SearchStopReason stopReason, string? predecodedText = null, string? literalOverride = null)
+    private static void SearchLiteralDocument(MappedSegment segment, SegmentDocument document, in SearchQuery query, CaseMode resolvedCaseMode, PreparedLiteralQuery? preparedLiteral, int hitLimit, IHitCollector collector, ref long decodedChars, ref int hitsReturned, ref SearchStopReason stopReason, string? predecodedText = null, string? literalOverride = null)
     {
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         var pattern = literalOverride ?? query.Pattern;
         if (string.IsNullOrEmpty(pattern))
         {
-            if (!collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, 0, 0, 1, 1)))
+            var shouldContinue = collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
+            hitsReturned++;
+            if (!shouldContinue)
             {
                 stopReason = SearchStopReason.Cancelled;
             }
 
-            hitsReturned++;
             return;
         }
 
@@ -767,7 +880,7 @@ Done:
             asciiNeedle &&
             (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
         {
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, collector, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, hitLimit, collector, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -776,7 +889,7 @@ Done:
             (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
         {
             var loweredNeedle = preparedLiteral?.LoweredAsciiNeedle ?? LowerAscii(needle);
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, collector, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, hitLimit, collector, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -790,6 +903,11 @@ Done:
 
         while (searchIndex <= text.Length)
         {
+            if (hitsReturned >= hitLimit)
+            {
+                return;
+            }
+
             var found = text.IndexOf(pattern, searchIndex, comparison);
             if (found < 0)
             {
@@ -813,22 +931,34 @@ Done:
             var endByte = startByte + Encoding.UTF8.GetByteCount(text.AsSpan(found, pattern.Length));
             var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
-            if (!collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine)))
+            var shouldContinue = collector.OnHit(
+                new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine));
+            hitsReturned++;
+            if (!shouldContinue)
             {
                 stopReason = SearchStopReason.Cancelled;
                 return;
             }
 
-            hitsReturned++;
+            if (hitsReturned >= hitLimit)
+            {
+                return;
+            }
+
             searchIndex = found + 1;
         }
     }
 
-    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, bool wholeWord, bool wholeLine, bool caseSensitive, IHitCollector collector, ref int hitsReturned, ref SearchStopReason stopReason)
+    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, bool wholeWord, bool wholeLine, bool caseSensitive, int hitLimit, IHitCollector collector, ref int hitsReturned, ref SearchStopReason stopReason)
     {
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)
         {
+            if (hitsReturned >= hitLimit)
+            {
+                return;
+            }
+
             var relativeIndex = caseSensitive
                 ? contentBytes[offset..].IndexOf(needle)
                 : IndexOfAsciiInsensitive(contentBytes[offset..], needle);
@@ -853,13 +983,20 @@ Done:
 
             var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, start);
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(start, end - 1));
-            if (!collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, start, end, startLine, endLine)))
+            var shouldContinue = collector.OnHit(
+                new RawHit(segment.SegmentId, document.Ordinal, start, end, startLine, endLine));
+            hitsReturned++;
+            if (!shouldContinue)
             {
                 stopReason = SearchStopReason.Cancelled;
                 return;
             }
 
-            hitsReturned++;
+            if (hitsReturned >= hitLimit)
+            {
+                return;
+            }
+
             offset = start + 1;
         }
     }
@@ -1410,8 +1547,17 @@ Done:
         return Encoding.UTF8.GetCharCount(contentBytes[start..Math.Min(byteOffset, contentBytes.Length)]) + 1;
     }
 
-    private static string[] CollectContext(ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> encodedLineIndex, int startLine, int endLine, bool asciiDocument)
+    private static string[] CollectContext(
+        ReadOnlySpan<byte> contentBytes,
+        ReadOnlySpan<byte> encodedLineIndex,
+        int startLine,
+        int endLine,
+        bool asciiDocument,
+        ref int remainingLines,
+        ref int remainingBytes,
+        out bool truncated)
     {
+        truncated = false;
         var lineCount = LineMap.GetLineCount(encodedLineIndex);
         if (lineCount == 0)
         {
@@ -1425,16 +1571,39 @@ Done:
             return [];
         }
 
-        var lines = new string[endLine - startLine + 1];
-        var cursor = 0;
+        var requestedLines = endLine - startLine + 1;
+        var lines = new List<string>(Math.Min(requestedLines, remainingLines));
         for (var line = startLine; line <= endLine; line++)
         {
+            if (remainingLines == 0 || remainingBytes == 0)
+            {
+                truncated = true;
+                break;
+            }
+
             var start = LineMap.GetLineStart(encodedLineIndex, line);
             var end = LineMap.GetLineEndExclusive(encodedLineIndex, line, contentBytes.Length);
-            lines[cursor++] = DecodeText(contentBytes[start..end], asciiDocument, trimLineEnd: true);
+            var materializedEnd = Math.Min(end, start + remainingBytes);
+            if (materializedEnd < end && !asciiDocument)
+            {
+                while (materializedEnd > start &&
+                       (contentBytes[materializedEnd] & 0xC0) == 0x80)
+                {
+                    materializedEnd--;
+                }
+            }
+
+            lines.Add(DecodeText(contentBytes[start..materializedEnd], asciiDocument, trimLineEnd: true));
+            remainingLines--;
+            remainingBytes -= materializedEnd - start;
+            if (materializedEnd < end)
+            {
+                truncated = true;
+                break;
+            }
         }
 
-        return lines;
+        return [.. lines];
     }
 
     private static string DecodeText(ReadOnlySpan<byte> bytes, bool asciiDocument, bool trimLineEnd)
