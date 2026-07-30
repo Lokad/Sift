@@ -8,6 +8,17 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageLifecycleTests
 {
     [Fact]
+    public void WriterLockRetriesOnlySharingViolations()
+    {
+        Assert.True(CorpusStorage.IsWriterLockContention(
+            new IOException("sharing violation", unchecked((int)0x80070020))));
+        Assert.True(CorpusStorage.IsWriterLockContention(
+            new IOException("resource temporarily unavailable", unchecked((int)0x8007000B))));
+        Assert.False(CorpusStorage.IsWriterLockContention(
+            new IOException("disk full", unchecked((int)0x80070070))));
+    }
+
+    [Fact]
     public async Task SnapshotOpenDoesNotUseWriterLockOrCreateLeaseFiles()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));

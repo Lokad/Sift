@@ -78,9 +78,13 @@ public sealed class CorpusStorage : ISiftStorage
             {
                 stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
-            catch (IOException)
+            catch (IOException exception) when (IsWriterLockContention(exception))
             {
-                Thread.Sleep(50);
+                if (cancellationToken.WaitHandle.WaitOne(50))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 continue;
             }
 
@@ -95,6 +99,14 @@ public sealed class CorpusStorage : ISiftStorage
                 throw;
             }
         }
+    }
+
+    internal static bool IsWriterLockContention(IOException exception)
+    {
+        // FileShare.None reports a sharing violation on Windows and EAGAIN on
+        // Unix. Other I/O failures (disk, path, device) must reach the caller.
+        var errorCode = exception.HResult & 0xFFFF;
+        return errorCode is 11 or 32 or 33 or 35;
     }
 
     IDisposable ISiftStorage.AcquireWriterLock(CancellationToken cancellationToken) => AcquireWriterLock(cancellationToken);
