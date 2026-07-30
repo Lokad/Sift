@@ -764,6 +764,8 @@ Done:
         var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Length);
         var documents = new List<DocumentSearchResult>(candidates.Ordinals.Length);
         var segmentStopReason = SearchStopReason.None;
+        long segmentBytesScanned = 0;
+        var segmentHitDocuments = 0;
 
         foreach (var ordinal in candidates.Ordinals)
         {
@@ -797,9 +799,23 @@ Done:
                     Utf8RegexCacheMisses: 0,
                     StopReason: SearchStopReason.None,
                     Hits: [new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1)]));
+                segmentHitDocuments++;
+                if (segmentHitDocuments >= query.MaxDocuments)
+                {
+                    segmentStopReason = SearchStopReason.MaxDocuments;
+                    break;
+                }
+
                 continue;
             }
 
+            if (document.ContentLength > query.MaxBytesScanned - segmentBytesScanned)
+            {
+                segmentStopReason = SearchStopReason.MaxBytesScanned;
+                break;
+            }
+
+            segmentBytesScanned += document.ContentLength;
             var collector = new BufferingHitCollector();
             long decodedChars = 0;
             var regexInvocations = 0;
@@ -888,8 +904,19 @@ Done:
                 StopReason: stopReason,
                 Hits: collector.Hits));
 
+            if (collector.Hits.Count > 0)
+            {
+                segmentHitDocuments++;
+            }
+
             if (stopReason != SearchStopReason.None)
             {
+                break;
+            }
+
+            if (segmentHitDocuments >= query.MaxDocuments)
+            {
+                segmentStopReason = SearchStopReason.MaxDocuments;
                 break;
             }
         }
