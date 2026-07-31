@@ -1,3 +1,4 @@
+using System.Text;
 using Lokad.Sift;
 using Lokad.Sift.Storage;
 
@@ -541,6 +542,31 @@ public sealed class MutationIntegrationTests
         Assert.Equal(3, compact.InputSegments);
         Assert.Equal(1, compact.OutputSegments);
         Assert.Single(index.Storage.ReadManifest().Segments);
+    }
+
+    [Fact]
+    public async Task CompactionPreservesOrdinalPathOrderingAcrossUnicodePlanes()
+    {
+        const string supplementaryPath = "src/\U00010000.txt";
+        const string privateUsePath = "src/\uE000.txt";
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([(supplementaryPath, "alpha")]));
+        await index.Update(
+            new InMemoryDocumentSource([(privateUsePath, "beta")]),
+            []);
+
+        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+
+        Assert.Equal(2, compact.InputSegments);
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(
+            new DocumentKey(supplementaryPath),
+            out var supplementaryContent));
+        Assert.True(snapshot.TryGetDocumentBytes(
+            new DocumentKey(privateUsePath),
+            out var privateUseContent));
+        Assert.Equal("alpha", Encoding.UTF8.GetString(supplementaryContent.Span));
+        Assert.Equal("beta", Encoding.UTF8.GetString(privateUseContent.Span));
     }
 
     [Fact]

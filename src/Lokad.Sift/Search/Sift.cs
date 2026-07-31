@@ -938,7 +938,7 @@ public sealed class Sift : ISift
             var queue = new PriorityQueue<CompactionCursor, CompactionPriority>(CompactionPriorityComparer.Instance);
             for (var i = 0; i < cursors.Count; i++)
             {
-                queue.Enqueue(cursors[i], new CompactionPriority(cursors[i].Segment, cursors[i].Current.Document));
+                queue.Enqueue(cursors[i], new CompactionPriority(cursors[i].Current.Path));
             }
 
             var currentPartition = new List<CompactionDocument>();
@@ -971,7 +971,7 @@ public sealed class Sift : ISift
 
                 if (cursor.MoveNext())
                 {
-                    queue.Enqueue(cursor, new CompactionPriority(cursor.Segment, cursor.Current.Document));
+                    queue.Enqueue(cursor, new CompactionPriority(cursor.Current.Path));
                 }
             }
 
@@ -1156,9 +1156,7 @@ public sealed class Sift : ISift
         }
     }
 
-    private readonly record struct CompactionPriority(
-        MappedSegment Segment,
-        SegmentDocument Document);
+    private readonly record struct CompactionPriority(string Path);
 
     private sealed class CompactionPriorityComparer : IComparer<CompactionPriority>
     {
@@ -1166,7 +1164,8 @@ public sealed class Sift : ISift
 
         public int Compare(CompactionPriority left, CompactionPriority right)
         {
-            return left.Segment.GetPathBytes(left.Document).SequenceCompareTo(right.Segment.GetPathBytes(right.Document));
+            // Segment lookup uses UTF-16 ordinal ordering, which differs from UTF-8 byte order.
+            return string.CompareOrdinal(left.Path, right.Path);
         }
     }
 
@@ -1220,6 +1219,7 @@ public sealed class Sift : ISift
         {
             Segment = segment,
             Document = document,
+            Path = segment.GetPath(document),
             LineCount = document.LineCount,
             Flags = document.Flags,
             MTimeUtcTicks = document.MTimeUtcTicks,
@@ -1237,6 +1237,7 @@ internal sealed class CompactionDocument : ISegmentBuildDocument
 {
     public required MappedSegment Segment { get; init; }
     public required SegmentDocument Document { get; init; }
+    public required string Path { get; init; }
     public required int LineCount { get; init; }
     public required ushort Flags { get; init; }
     public required long MTimeUtcTicks { get; init; }
