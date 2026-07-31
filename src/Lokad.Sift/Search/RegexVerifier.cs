@@ -51,7 +51,8 @@ internal static class RegexVerifier
         }
         var matched = false;
         var isAscii = (document.Flags & (1 << 1)) != 0;
-        int[]? utf8PrefixByteOffsets = null;
+        var mappedCharIndex = 0;
+        var mappedByteOffset = 0;
 
         try
         {
@@ -72,9 +73,9 @@ internal static class RegexVerifier
                 }
                 else
                 {
-                    var prefixByteOffsets = utf8PrefixByteOffsets ??= BuildUtf8PrefixByteOffsets(text);
-                    startByte = prefixByteOffsets[match.Index];
-                    endByte = prefixByteOffsets[match.Index + match.Length];
+                    // Regex matches are ordered, so one cursor maps their UTF-16 offsets without a document-sized array.
+                    startByte = MapUtf8Offset(text, match.Index, ref mappedCharIndex, ref mappedByteOffset);
+                    endByte = MapUtf8Offset(text, match.Index + match.Length, ref mappedCharIndex, ref mappedByteOffset);
                 }
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
@@ -106,35 +107,20 @@ internal static class RegexVerifier
 
         return matched;
 
-        static int[] BuildUtf8PrefixByteOffsets(ReadOnlySpan<char> text)
+        static int MapUtf8Offset(
+            ReadOnlySpan<char> text,
+            int targetCharIndex,
+            ref int mappedCharIndex,
+            ref int mappedByteOffset)
         {
-            var offsets = GC.AllocateUninitializedArray<int>(text.Length + 1);
-            var byteOffset = 0;
-            var index = 0;
-            offsets[0] = 0;
-            while (index < text.Length)
+            if (targetCharIndex < mappedCharIndex)
             {
-                var current = text[index];
-                if (char.IsHighSurrogate(current) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
-                {
-                    offsets[index + 1] = byteOffset;
-                    byteOffset += 4;
-                    offsets[index + 2] = byteOffset;
-                    index += 2;
-                    continue;
-                }
-
-                byteOffset += current switch
-                {
-                    <= '\u007F' => 1,
-                    <= '\u07FF' => 2,
-                    _ => 3
-                };
-                offsets[index + 1] = byteOffset;
-                index++;
+                throw new InvalidOperationException("Regex matches must be returned in source order.");
             }
 
-            return offsets;
+            mappedByteOffset += Encoding.UTF8.GetByteCount(text[mappedCharIndex..targetCharIndex]);
+            mappedCharIndex = targetCharIndex;
+            return mappedByteOffset;
         }
     }
 
