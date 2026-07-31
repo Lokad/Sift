@@ -11,7 +11,16 @@ public sealed class InMemorySiftStorage : ISiftStorage
     private CorpusManifest? _manifest;
     private bool _reclamationPending;
 
-    public bool HasManifest => _manifest is not null;
+    public bool HasManifest
+    {
+        get
+        {
+            lock (_writerLock)
+            {
+                return _manifest is not null;
+            }
+        }
+    }
 
     public IDisposable AcquireWriterLock(CancellationToken cancellationToken = default)
     {
@@ -31,12 +40,15 @@ public sealed class InMemorySiftStorage : ISiftStorage
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
     {
-        _reclamationPending = true;
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);
         using var _ = new MappedSegment(bytes, validateChecksums: true);
-        if (!_segments.TryAdd(segmentId, bytes))
+        lock (_writerLock)
         {
-            throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
+            _reclamationPending = true;
+            if (!_segments.TryAdd(segmentId, bytes))
+            {
+                throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
+            }
         }
 
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
@@ -44,24 +56,34 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public void PublishManifest(CorpusManifest manifest)
     {
-        _manifest = CloneManifest(manifest);
-        _ = ReclaimUnreferencedSegmentsUnderWriterLock();
+        lock (_writerLock)
+        {
+            _manifest = CloneManifest(manifest);
+            _ = ReclaimUnreferencedSegmentsUnderWriterLock();
+        }
     }
 
     public CorpusManifest ReadManifest()
     {
-        return _manifest is not null
-            ? CloneManifest(_manifest)
-            : throw new FileNotFoundException("Sift manifest is not present in memory-backed storage.");
+        lock (_writerLock)
+        {
+            return _manifest is not null
+                ? CloneManifest(_manifest)
+                : throw new FileNotFoundException("Sift manifest is not present in memory-backed storage.");
+        }
     }
 
     public MappedSegment OpenSegment(
         ulong segmentId,
         CancellationToken cancellationToken = default)
     {
-        if (!_segments.TryGetValue(segmentId, out var bytes))
+        byte[] bytes;
+        lock (_writerLock)
         {
-            throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+            if (!_segments.TryGetValue(segmentId, out bytes!))
+            {
+                throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+            }
         }
 
         // Published in-memory packs were checksummed immediately before insertion.
@@ -82,9 +104,12 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public long GetSegmentBytes(ulong segmentId)
     {
-        return _segments.TryGetValue(segmentId, out var bytes)
-            ? bytes.Length
-            : throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+        lock (_writerLock)
+        {
+            return _segments.TryGetValue(segmentId, out var bytes)
+                ? bytes.Length
+                : throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+        }
     }
 
     public long? GetAvailableBytes()

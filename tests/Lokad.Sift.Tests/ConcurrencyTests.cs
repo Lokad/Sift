@@ -27,6 +27,38 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task ConcurrentReadersCanSearchInMemoryCorpusDuringUpdates()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            for (var iteration = 0; iteration < 100; iteration++)
+            {
+                using var snapshot = index.OpenSnapshot();
+                var collector = new HitBuffer();
+                snapshot.Search(
+                    new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                    new PathFilter(),
+                    collector);
+            }
+        }));
+        var writer = Task.Run(async () =>
+        {
+            for (var iteration = 0; iteration < 25; iteration++)
+            {
+                await index.Update(
+                    new InMemoryDocumentSource([
+                        ("src/a.txt", $"alpha {iteration}\n")
+                    ]),
+                    []);
+            }
+        });
+
+        await Task.WhenAll(readers.Append(writer));
+    }
+
+    [Fact]
     public async Task ActivityStatsExposeRunningBuild()
     {
         using var fixture = new CorpusFixture();
