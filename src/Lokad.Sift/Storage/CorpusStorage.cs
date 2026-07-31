@@ -22,6 +22,7 @@ public sealed class CorpusStorage : ISiftStorage
     private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
+    private bool _reclamationIntentKnownDurable;
     private long _segmentOpenCount;
     private long _reclamationFailureCount;
     private string? _lastReclamationFailure;
@@ -670,7 +671,7 @@ public sealed class CorpusStorage : ISiftStorage
 
         if (!canDeleteAttemptedPacks)
         {
-            SetReclamationPending(isPending: true);
+            TrySetReclamationPending();
             return;
         }
 
@@ -681,6 +682,7 @@ public sealed class CorpusStorage : ISiftStorage
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             // Keep the retry marker set when normal reachability cleanup cannot finish.
+            RecordReclamationFailure(exception);
         }
     }
 
@@ -1516,7 +1518,8 @@ public sealed class CorpusStorage : ISiftStorage
     {
         try
         {
-            // This advisory byte avoids directory scans on every snapshot disposal.
+            // This byte is the crash-recovery intent that makes later reachability
+            // cleanup mandatory before publication can safely proceed again.
             using var stream = new FileStream(
                 ReclamationStatePath,
                 FileMode.OpenOrCreate,
@@ -1525,17 +1528,61 @@ public sealed class CorpusStorage : ISiftStorage
             var marker = isPending ? (byte)1 : (byte)0;
             if (stream.Length == 1 && stream.ReadByte() == marker)
             {
-                // Avoid turning a read-only maintenance hint into a synchronous metadata flush.
+                if (!isPending)
+                {
+                    _reclamationIntentKnownDurable = false;
+                    return;
+                }
+
+                if (_reclamationIntentKnownDurable)
+                {
+                    return;
+                }
+
+                FaultInjector?.ThrowIfRequested(PublicationStage.BeforeReclamationIntentFlush);
+                // An existing marker is not assumed durable until this instance
+                // has flushed both its contents and containing directory.
+                stream.Flush(flushToDisk: true);
+                FlushDirectoryEntry(LockPath);
+                _reclamationIntentKnownDurable = true;
                 return;
+            }
+
+            if (isPending)
+            {
+                FaultInjector?.ThrowIfRequested(PublicationStage.BeforeReclamationIntentFlush);
             }
 
             stream.Position = 0;
             stream.SetLength(1);
             stream.WriteByte(marker);
             stream.Flush(flushToDisk: true);
+            FlushDirectoryEntry(LockPath);
+            _reclamationIntentKnownDurable = isPending;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            if (isPending)
+            {
+                // Publishing without durable cleanup intent could strand an
+                // unreachable pack forever after a crash.
+                _reclamationIntentKnownDurable = false;
+                throw;
+            }
+
+            RecordReclamationFailure(exception);
+        }
+    }
+
+    private void TrySetReclamationPending()
+    {
+        try
+        {
+            SetReclamationPending(isPending: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Failed-mutation cleanup must preserve the initiating exception.
             RecordReclamationFailure(exception);
         }
     }
@@ -1769,6 +1816,7 @@ public sealed class CorpusStorage : ISiftStorage
 
 internal enum PublicationStage
 {
+    BeforeReclamationIntentFlush,
     AfterSegmentFlushBeforePublish,
     AfterManifestFlushBeforeSwap
 }

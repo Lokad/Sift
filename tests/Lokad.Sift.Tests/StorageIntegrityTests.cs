@@ -834,6 +834,56 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public void SegmentPublicationRequiresDurableReclamationIntent()
+    {
+        using var fixture = new CorpusFixture();
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        storage.EnsureLayout();
+        storage.FaultInjector = new PublicationFaultInjector
+        {
+            ThrowOnStage = PublicationStage.BeforeReclamationIntentFlush
+        };
+
+        Assert.Throws<IOException>(() => storage.PublishSegment(
+            [CreateStoredDocument("src/a.txt", "alpha\n")],
+            0x1234UL,
+            minimumFreeBytesAfterPublication: 0,
+            CancellationToken.None));
+
+        Assert.Empty(Directory.EnumerateDirectories(storage.SegmentsPath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(storage.TempPath));
+        Assert.Equal(
+            (byte)0,
+            File.ReadAllBytes(Path.Combine(fixture.CorpusPath, "lock", "reclamation.state")).Single());
+    }
+
+    [Fact]
+    public async Task ManifestPublicationRequiresDurableReclamationIntent()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        var original = storage.ReadManifest();
+        Assert.Equal(
+            (byte)0,
+            File.ReadAllBytes(Path.Combine(fixture.CorpusPath, "lock", "reclamation.state")).Single());
+        storage.FaultInjector = new PublicationFaultInjector
+        {
+            ThrowOnStage = PublicationStage.BeforeReclamationIntentFlush
+        };
+
+        var next = new CorpusManifest(original.CorpusId, original.Generation + 1, original.Segments);
+        Assert.Throws<IOException>(() => storage.PublishManifest(next));
+
+        Assert.Equal(original.Generation, storage.ReadManifest().Generation);
+        Assert.False(File.Exists(storage.ManifestPath + ".tmp"));
+    }
+
+    [Fact]
     public async Task CrashAfterManifestFlushWithExistingManifestPreservesPreviousManifest()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
