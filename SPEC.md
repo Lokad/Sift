@@ -452,6 +452,7 @@ Updated document:
 
 * old document ordinal becomes dead in manifest
 * new version is written into a new segment
+* if the replacement is rejected by ingestion policy, the old ordinal remains live
 
 Deleted document:
 

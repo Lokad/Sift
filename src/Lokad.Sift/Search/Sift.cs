@@ -300,7 +300,7 @@ public sealed class Sift : ISift
                     publishedSegments.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
                 });
 
-            var affectedPaths = new HashSet<string>(upsertLoad.SubmittedPaths, StringComparer.Ordinal);
+            var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
             affectedPaths.UnionWith(deletionSet);
             var liveDocumentKeys = FindLiveDocumentKeys(
                 existingManifest,
@@ -316,9 +316,9 @@ public sealed class Sift : ISift
                 static segment => segment.DeadContentBytes,
                 EqualityComparer<ulong>.Default);
 
-            // Every submitted upsert supersedes its old version, including rejected
-            // replacements that the source will checkpoint and never submit again.
-            foreach (var path in upsertLoad.SubmittedPaths)
+            // A rejected replacement never became durable, so keep the prior
+            // searchable version until a valid upsert or explicit deletion arrives.
+            foreach (var path in upsertLoad.AcceptedPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (liveDocumentKeys.TryGetValue(path, out var current))

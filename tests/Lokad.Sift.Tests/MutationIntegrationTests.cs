@@ -181,7 +181,7 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task RejectedUpsertHidesPreviouslyIndexedContent()
+    public async Task RejectedUpsertPreservesPreviouslyIndexedContent()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -204,7 +204,7 @@ public sealed class MutationIntegrationTests
             new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter(),
             oldContent);
-        Assert.Empty(oldContent.Hits);
+        Assert.Single(oldContent.Hits);
 
         var replacement = new HitBuffer();
         snapshot.Search(

@@ -95,6 +95,7 @@ internal sealed class IndexBuilder
         var rejected = 0;
         long rejectedBytes = 0;
         var submittedPaths = new HashSet<string>(StringComparer.Ordinal);
+        var acceptedPaths = new HashSet<string>(StringComparer.Ordinal);
         var partition = new List<StoredDocument>();
         long partitionBytes = 0;
 
@@ -152,6 +153,7 @@ internal sealed class IndexBuilder
 
             partition.Add(document);
             partitionBytes += document.Content.Length;
+            acceptedPaths.Add(normalizedPath);
             accepted++;
             acceptedBytes = checked(acceptedBytes + document.Content.Length);
         }
@@ -164,7 +166,7 @@ internal sealed class IndexBuilder
             submittedBytes,
             acceptedBytes,
             rejectedBytes,
-            submittedPaths);
+            acceptedPaths);
     }
 
     public static LoadedDocuments LoadDocuments(IDocumentSource source, CancellationToken cancellationToken, SiftOptions? options = null)
@@ -376,5 +378,5 @@ internal readonly record struct StreamedDocuments(
     long SubmittedBytes,
     long AcceptedBytes,
     long RejectedBytes,
-    HashSet<string> SubmittedPaths);
+    HashSet<string> AcceptedPaths);
 
