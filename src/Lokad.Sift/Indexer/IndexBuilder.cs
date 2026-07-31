@@ -154,6 +154,7 @@ internal sealed class IndexBuilder
             var document = Normalize(
                 submittedDocument,
                 options,
+                retainContentBeyondOperation: false,
                 out var normalizedPath,
                 out var rejectionReason);
             if (!submittedPaths.Add(normalizedPath))
@@ -216,7 +217,8 @@ internal sealed class IndexBuilder
         IDocumentSource source,
         CancellationToken cancellationToken,
         SiftOptions options,
-        RejectedUpsertPolicy rejectedUpsertPolicy)
+        RejectedUpsertPolicy rejectedUpsertPolicy,
+        bool retainContentBeyondOperation)
     {
         var submitted = 0;
         long submittedBytes = 0;
@@ -235,6 +237,7 @@ internal sealed class IndexBuilder
             var storedDocument = Normalize(
                 submittedDocument,
                 options,
+                retainContentBeyondOperation,
                 out var normalizedPath,
                 out var rejectionReason);
             if (!seenPaths.Add(normalizedPath))
@@ -318,6 +321,7 @@ internal sealed class IndexBuilder
     private static StoredDocument? Normalize(
         SubmittedDocument document,
         SiftOptions options,
+        bool retainContentBeyondOperation,
         out string normalizedPath,
         out DocumentRejectionReason rejectionReason)
     {
@@ -365,9 +369,10 @@ internal sealed class IndexBuilder
             flags |= 1 << 2;
         }
 
-        // Borrowed buffers must be detached before the source advances. Stable
-        // buffers can flow through unchanged detection without a body-sized copy.
-        var ownedContent = document.ContentLifetime == DocumentContentLifetime.UntilOperationCompletes
+        // Buffers borrowed until the next read always require a copy. Whole-operation
+        // buffers can flow through unless the caller will retain them afterward.
+        var ownedContent = document.ContentLifetime == DocumentContentLifetime.UntilOperationCompletes &&
+            !retainContentBeyondOperation
             ? content
             : content.ToArray();
         // Index-only metadata stays empty until unchanged update candidates are removed.

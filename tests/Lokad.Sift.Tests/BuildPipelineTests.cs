@@ -161,7 +161,8 @@ public sealed class BuildPipelineTests
             source,
             CancellationToken.None,
             new SiftOptions(),
-            RejectedUpsertPolicy.FailUpdate);
+            RejectedUpsertPolicy.FailUpdate,
+            retainContentBeyondOperation: false);
 
         Assert.True(MemoryMarshal.TryGetArray(load.Documents.Single().Content, out var stored));
         Assert.Same(content, stored.Array);

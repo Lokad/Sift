@@ -73,7 +73,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             upserts,
             cancellationToken,
             _options,
-            _options.RejectedUpsertPolicy);
+            _options.RejectedUpsertPolicy,
+            retainContentBeyondOperation: true);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {

@@ -370,6 +370,32 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayDetachesOperationScopedBodiesBeforeApplyReturns()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        var sourceContent = "alpha"u8.ToArray();
+        var source = new SubmittedDocumentSource([
+            new SubmittedDocument(
+                "src/a.txt",
+                sourceContent,
+                lastModifiedUtc: null,
+                contentLifetime: DocumentContentLifetime.UntilOperationCompletes)
+        ]);
+
+        await overlay.Apply(source, []);
+        sourceContent.AsSpan().Fill((byte)'x');
+
+        using var target = SiftIndex.CreateInMemory();
+        await target.Build(new InMemoryDocumentSource([]));
+        await overlay.ApplyTo(target);
+        using var snapshot = target.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var content));
+        Assert.Equal("alpha"u8.ToArray(), content.ToArray());
+    }
+
+    [Fact]
     public async Task ExplainUsesPathIndexForPathRegexWithMandatoryFragment()
     {
         var documents = Enumerable.Range(0, 9000)
