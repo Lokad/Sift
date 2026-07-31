@@ -190,6 +190,11 @@ public sealed class InMemorySiftStorage : ISiftStorage
         EnsureReplacementAllowedUnderWriterLock();
     }
 
+    bool ISiftStorage.CanReplaceSegmentsUnderWriterLock()
+    {
+        return ReclaimUnreferencedSegmentsUnderWriterLock().DeferredSegmentCount == 0;
+    }
+
     void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
     {
         if (!discardCorruptState)

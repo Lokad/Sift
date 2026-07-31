@@ -7,6 +7,8 @@
 - Added `ISift.ShouldCompact(CompactOptions)` as the authoritative hint for
   actionable compaction work, avoiding false recommendations based on aggregate
   segment count alone.
+- Made compaction hints account for replacement eligibility and quota capacity,
+  including `CompactStats.HasMoreWork` after a retained snapshot defers cleanup.
 - Exposed total corpus usage, quota headroom, and exceptional reclamation
   failures through `StorageStats`.
 - Added asynchronous full-index validation with progress and readiness telemetry

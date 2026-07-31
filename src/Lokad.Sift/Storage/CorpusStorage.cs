@@ -585,6 +585,19 @@ public sealed class CorpusStorage : ISiftStorage
         EnsureReplacementAllowedUnderWriterLock();
     }
 
+    bool ISiftStorage.CanReplaceSegmentsUnderWriterLock()
+    {
+        if (!HasManifest)
+        {
+            return true;
+        }
+
+        var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+        return !reclamation.IsBlocked &&
+               reclamation.FailedSegmentCount == 0 &&
+               reclamation.DeferredSegmentCount == 0;
+    }
+
     void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
     {
         if (!discardCorruptState)

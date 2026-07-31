@@ -22,6 +22,8 @@ public interface ISiftStorage
     StorageReadSnapshot OpenReadSnapshot();
     StorageStats GetStorageStats();
     void ReclaimUnreferencedSegments(CancellationToken cancellationToken);
+    // Caller holds the writer lock; returns false when another replacement would exceed the retained-generation bound.
+    bool CanReplaceSegmentsUnderWriterLock();
     // Caller holds the writer lock; this enforces the retained-generation disk bound.
     void EnsureReplacementAllowedUnderWriterLock();
     // Caller holds the writer lock; an explicit rebuild may discard corrupt index artifacts.

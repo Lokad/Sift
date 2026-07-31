@@ -415,24 +415,17 @@ public sealed class Sift : ISift
         ValidateCompactOptions(options);
         try
         {
-            bool shouldCompact;
-            using (var snapshot = _storage.OpenReadSnapshot())
+            using var writerLock = _storage.AcquireWriterLock();
+            if (!_storage.HasManifest ||
+                !_storage.CanReplaceSegmentsUnderWriterLock())
             {
-                var selectedSegmentIds = SelectSegmentsForCompaction(
-                    snapshot.Manifest,
-                    options,
-                    CancellationToken.None);
-                shouldCompact = selectedSegmentIds.Count > 0 &&
-                    HasEstimatedCompactionCapacity(
-                        snapshot.Manifest,
-                        selectedSegmentIds,
-                        options,
-                        CancellationToken.None);
+                return false;
             }
 
-            // A concurrent publication may have retired the briefly leased generation.
-            ScheduleReclamationIfPending();
-            return shouldCompact;
+            return HasActionableCompactionWorkUnderWriterLock(
+                _storage.ReadManifest(),
+                options,
+                CancellationToken.None);
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
@@ -758,10 +751,28 @@ public sealed class Sift : ISift
             ContentBytes: publication.ContentBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds,
             PeakManagedBytes: 0,
-            HasMoreWork: SelectSegmentsForCompaction(
-                manifest,
-                options,
-                CancellationToken.None).Count > 0);
+            HasMoreWork: _storage.CanReplaceSegmentsUnderWriterLock() &&
+                HasActionableCompactionWorkUnderWriterLock(
+                    manifest,
+                    options,
+                    CancellationToken.None));
+    }
+
+    private bool HasActionableCompactionWorkUnderWriterLock(
+        CorpusManifest manifest,
+        CompactOptions options,
+        CancellationToken cancellationToken)
+    {
+        var selectedSegmentIds = SelectSegmentsForCompaction(
+            manifest,
+            options,
+            cancellationToken);
+        return selectedSegmentIds.Count > 0 &&
+               HasEstimatedCompactionCapacity(
+                   manifest,
+                   selectedSegmentIds,
+                   options,
+                   cancellationToken);
     }
 
     public void Dispose()

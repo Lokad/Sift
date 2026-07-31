@@ -200,7 +200,8 @@ if (index.ShouldCompact(options))
 }
 ```
 
-`ShouldCompact(...)` uses the same per-segment selection as `Compact(...)`; it
+`ShouldCompact(...)` uses the same replacement eligibility, capacity check, and
+per-segment selection as `Compact(...)`; it
 does not recommend work merely because a healthy corpus exceeds
 `SmallSegmentMergeThreshold` with target-sized segments, or when current quota
 and filesystem headroom cannot hold the estimated replacements. The result is a

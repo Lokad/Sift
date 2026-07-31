@@ -527,6 +527,38 @@ public sealed class StorageLifecycleTests
         Assert.False(third.HasMoreWork);
     }
 
+    [Fact]
+    public async Task CompactionHintStopsWhilePriorGenerationIsLeased()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentContentBytes = 10
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "0123456789"),
+            ("src/b.txt", "0123456789"),
+            ("src/c.txt", "0123456789")
+        ]));
+        await index.Update(
+            new InMemoryDocumentSource([]),
+            [
+                new DocumentKey("src/a.txt"),
+                new DocumentKey("src/b.txt"),
+                new DocumentKey("src/c.txt")
+            ]);
+        using var oldSnapshot = index.OpenSnapshot();
+        var options = new CompactOptions { MaxMergedSegments = 1 };
+
+        var first = await index.Compact(options);
+
+        Assert.False(first.HasMoreWork);
+        Assert.False(index.ShouldCompact(options));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => index.Compact(options));
+
+        oldSnapshot.Dispose();
+        Assert.True(index.ShouldCompact(options));
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = Stopwatch.GetTimestamp() + (long)(timeout.TotalSeconds * Stopwatch.Frequency);
