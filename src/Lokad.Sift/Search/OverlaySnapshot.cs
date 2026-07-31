@@ -545,7 +545,11 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
 
             var next = _documents[_index++];
-            document = new SubmittedDocument(next.Path, next.Content, new DateTimeOffset(next.MTimeUtcTicks, TimeSpan.Zero));
+            document = new SubmittedDocument(
+                next.Path,
+                next.Content,
+                new DateTimeOffset(next.MTimeUtcTicks, TimeSpan.Zero),
+                DocumentContentLifetime.UntilOperationCompletes);
             return true;
         }
     }

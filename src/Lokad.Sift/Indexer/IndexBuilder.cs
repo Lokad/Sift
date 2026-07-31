@@ -365,7 +365,11 @@ internal sealed class IndexBuilder
             flags |= 1 << 2;
         }
 
-        var ownedContent = content.ToArray();
+        // Borrowed buffers must be detached before the source advances. Stable
+        // buffers can flow through unchanged detection without a body-sized copy.
+        var ownedContent = document.ContentLifetime == DocumentContentLifetime.UntilOperationCompletes
+            ? content
+            : content.ToArray();
         // Index-only metadata stays empty until unchanged update candidates are removed.
         return new StoredDocument
         {

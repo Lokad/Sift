@@ -44,6 +44,14 @@ public enum DocumentRejectionReason
     InvalidUtf8
 }
 
+public enum DocumentContentLifetime
+{
+    // The source may reuse or mutate the buffer on its next TryReadNext call.
+    UntilNextRead,
+    // The bytes remain immutable until the Build, Update, or Apply operation completes.
+    UntilOperationCompletes
+}
+
 public readonly record struct SearchQuery
 {
     public SearchQuery(string pattern)
@@ -184,15 +192,30 @@ public readonly record struct SubmittedDocument
         string path,
         ReadOnlyMemory<byte> content,
         DateTimeOffset? lastModifiedUtc)
+        : this(
+            path,
+            content,
+            lastModifiedUtc,
+            DocumentContentLifetime.UntilNextRead)
+    {
+    }
+
+    public SubmittedDocument(
+        string path,
+        ReadOnlyMemory<byte> content,
+        DateTimeOffset? lastModifiedUtc,
+        DocumentContentLifetime contentLifetime)
     {
         Path = path;
         Content = content;
         LastModifiedUtc = lastModifiedUtc;
+        ContentLifetime = contentLifetime;
     }
 
     public string Path { get; init; }
     public ReadOnlyMemory<byte> Content { get; init; }
     public DateTimeOffset? LastModifiedUtc { get; init; }
+    public DocumentContentLifetime ContentLifetime { get; init; }
 }
 
 public sealed class SiftOptions

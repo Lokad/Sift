@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Lokad.Sift;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.Search;
@@ -142,6 +143,28 @@ public sealed class BuildPipelineTests
         Assert.Equal("alpha"u8.ToArray(), first.ToArray());
         Assert.Equal("bravo"u8.ToArray(), second.ToArray());
         Assert.Equal(2, stats.IndexedDocuments);
+    }
+
+    [Fact]
+    public void StableContentAvoidsAnIntermediateBodyCopy()
+    {
+        var content = "alpha"u8.ToArray();
+        var source = new SubmittedDocumentSource([
+            new SubmittedDocument(
+                "src/a.txt",
+                content,
+                lastModifiedUtc: null,
+                contentLifetime: DocumentContentLifetime.UntilOperationCompletes)
+        ]);
+
+        var load = IndexBuilder.LoadDocuments(
+            source,
+            CancellationToken.None,
+            new SiftOptions(),
+            RejectedUpsertPolicy.FailUpdate);
+
+        Assert.True(MemoryMarshal.TryGetArray(load.Documents.Single().Content, out var stored));
+        Assert.Same(content, stored.Array);
     }
 
     [Fact]

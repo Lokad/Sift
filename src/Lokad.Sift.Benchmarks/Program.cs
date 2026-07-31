@@ -3519,7 +3519,11 @@ internal sealed class BenchmarkSource : IDocumentSource
 
         var i = _index++;
         var text = $"alpha beta gamma needle {i}\nalpha beta gamma delta\nALPHA beta gamma NEEDLE {i}\n";
-        document = new SubmittedDocument($"src/{i:D6}.txt", Encoding.UTF8.GetBytes(text));
+        document = new SubmittedDocument(
+            $"src/{i:D6}.txt",
+            Encoding.UTF8.GetBytes(text),
+            lastModifiedUtc: null,
+            contentLifetime: DocumentContentLifetime.UntilOperationCompletes);
         return true;
     }
 }
@@ -3564,7 +3568,11 @@ internal sealed class FileSystemDocumentSource : IDocumentSource
                 var path = _pendingFiles.Dequeue();
                 var relative = Path.GetRelativePath(_rootPath, path).Replace('\\', '/');
                 _emittedFiles++;
-                document = new SubmittedDocument(relative, File.ReadAllBytes(path), new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero));
+                document = new SubmittedDocument(
+                    relative,
+                    File.ReadAllBytes(path),
+                    new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero),
+                    DocumentContentLifetime.UntilOperationCompletes);
                 return true;
             }
 
@@ -3609,7 +3617,10 @@ internal sealed class MemoryDocumentSource : IDocumentSource
             return false;
         }
 
-        document = _documents[_index++];
+        document = _documents[_index++] with
+        {
+            ContentLifetime = DocumentContentLifetime.UntilOperationCompletes
+        };
         return true;
     }
 }

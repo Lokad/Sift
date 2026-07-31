@@ -13,6 +13,8 @@
   failures through `StorageStats`.
 - Added asynchronous full-index validation with progress and readiness telemetry
   so applications can warm checksum verification before serving queries.
+- Added `DocumentContentLifetime.UntilOperationCompletes` so sources with stable
+  buffers can avoid an intermediate body copy during build and update.
 
 ### Changed
 

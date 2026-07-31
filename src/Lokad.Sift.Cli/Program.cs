@@ -285,7 +285,8 @@ internal sealed class FileSystemDocumentSource : IDocumentSource
         document = new SubmittedDocument(
             Path.GetRelativePath(_root, file).Replace('\\', '/'),
             File.ReadAllBytes(file),
-            File.GetLastWriteTimeUtc(file));
+            File.GetLastWriteTimeUtc(file),
+            DocumentContentLifetime.UntilOperationCompletes);
         return true;
     }
 }

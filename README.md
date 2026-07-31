@@ -158,6 +158,11 @@ Console.WriteLine(
 ```
 
 The example assumes a small in-memory `IDocumentSource` implementation for the submitted documents and a simple `IHitCollector` that stores `RawHit` values in a list.
+Document bodies are conservatively treated as borrowed until the next
+`TryReadNext` call. A source that keeps each body immutable for the whole
+operation can set `ContentLifetime` to
+`DocumentContentLifetime.UntilOperationCompletes`; Sift then avoids copying the
+body before unchanged-update detection and segment publication.
 
 For transient overlay workspaces, open an overlay snapshot on top of the shared base index:
 
