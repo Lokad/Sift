@@ -23,6 +23,8 @@
 - Kept normal search and update opens to structural validation instead of
   synchronously checksumming every byte of each segment after process restart;
   `Validate()` remains the explicit full-integrity pass.
+- Kept clean `ShouldCompact()` and storage-stat calls from sweeping retired
+  generation leases or durably rewriting the unchanged reclamation marker.
 - Reduced update, indexing, and compaction memory pressure by avoiding decoded
   path copies, streaming compacted documents, and moving fixed index workspaces
   off the managed heap.

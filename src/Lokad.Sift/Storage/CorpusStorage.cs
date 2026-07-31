@@ -457,17 +457,7 @@ public sealed class CorpusStorage : ISiftStorage
 
     bool ISiftStorage.IsReclamationPending
     {
-        get
-        {
-            if (!File.Exists(ReclamationStatePath))
-            {
-                // A pre-marker corpus may contain legacy orphans, so absence is conservatively pending.
-                return HasManifest;
-            }
-
-            using var stream = new FileStream(ReclamationStatePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            return stream.ReadByte() != 0;
-        }
+        get => IsReclamationPending();
     }
 
     void ISiftStorage.EnsureSnapshotMetadata()
@@ -573,7 +563,22 @@ public sealed class CorpusStorage : ISiftStorage
     StorageStats ISiftStorage.GetStorageStats()
     {
         using var writerLock = AcquireWriterLock();
-        var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+        SegmentReclamationStats reclamation;
+        if (IsReclamationPending())
+        {
+            reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+        }
+        else
+        {
+            // A clear marker avoids the retired-generation sweep, but the current
+            // lease remains the fail-closed authority for the live manifest.
+            reclamation = default;
+            if (HasManifest && !IsCurrentGenerationLeaseValid(ReadManifest()))
+            {
+                reclamation = reclamation with { IsBlocked = true };
+            }
+        }
+
         return GetStorageStatsUnderWriterLock(reclamation);
     }
 
@@ -602,6 +607,12 @@ public sealed class CorpusStorage : ISiftStorage
         if (!HasManifest)
         {
             return true;
+        }
+
+        // Publication leaves the marker clear only after every retired pack is gone.
+        if (!IsReclamationPending())
+        {
+            return IsCurrentGenerationLeaseValid(ReadManifest());
         }
 
         var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
@@ -1487,6 +1498,41 @@ public sealed class CorpusStorage : ISiftStorage
         return reclamation;
     }
 
+    private bool IsReclamationPending()
+    {
+        if (!File.Exists(ReclamationStatePath))
+        {
+            // A pre-marker corpus may contain legacy orphans, so absence is conservatively pending.
+            return HasManifest;
+        }
+
+        using var stream = new FileStream(
+            ReclamationStatePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite);
+        return stream.ReadByte() != 0;
+    }
+
+    private bool IsCurrentGenerationLeaseValid(CorpusManifest manifest)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                GetGenerationLeasePath(manifest.Generation),
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            ValidateGenerationLease(stream, manifest);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     private void SetReclamationPending(bool isPending)
     {
         try
@@ -1495,10 +1541,18 @@ public sealed class CorpusStorage : ISiftStorage
             using var stream = new FileStream(
                 ReclamationStatePath,
                 FileMode.OpenOrCreate,
-                FileAccess.Write,
+                FileAccess.ReadWrite,
                 FileShare.ReadWrite);
+            var marker = isPending ? (byte)1 : (byte)0;
+            if (stream.Length == 1 && stream.ReadByte() == marker)
+            {
+                // Avoid turning a read-only maintenance hint into a synchronous metadata flush.
+                return;
+            }
+
+            stream.Position = 0;
             stream.SetLength(1);
-            stream.WriteByte(isPending ? (byte)1 : (byte)0);
+            stream.WriteByte(marker);
             stream.Flush(flushToDisk: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

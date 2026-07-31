@@ -1510,7 +1510,6 @@ public sealed class Sift : ISift
             .Select(entry => new
             {
                 Entry = entry,
-                SegmentBytes = _storage.GetSegmentBytes(entry.SegmentId),
                 DeadFraction = entry.DocumentCount == 0 ? 0d : (double)entry.DeadOrdinals.Length / entry.DocumentCount,
                 DeadContentFraction = entry.ContentBytes == 0
                     ? 0d
@@ -1539,14 +1538,15 @@ public sealed class Sift : ISift
                 break;
             }
 
+            var segmentBytes = _storage.GetSegmentBytes(item.Entry.SegmentId);
             if (selected.Count > 0 &&
-                item.SegmentBytes > options.MaxInputSegmentBytes - selectedSegmentBytes)
+                segmentBytes > options.MaxInputSegmentBytes - selectedSegmentBytes)
             {
                 continue;
             }
 
             selected.Add(item.Entry.SegmentId);
-            selectedSegmentBytes += item.SegmentBytes;
+            selectedSegmentBytes += segmentBytes;
         }
 
         if (selected.Count > 0 || manifest.Segments.Count <= options.SmallSegmentMergeThreshold)
@@ -1562,15 +1562,20 @@ public sealed class Sift : ISift
         {
             if (selected.Count >= options.MaxMergedSegments ||
                 item.Entry.LiveDocumentCount == 0 ||
-                item.SegmentBytes > options.MaxInputSegmentBytes - selectedSegmentBytes ||
                 item.Entry.ContentBytes > _options.TargetSegmentContentBytes - mergedContentBytes ||
                 item.Entry.LiveDocumentCount > _options.TargetSegmentDocumentCount - mergedDocuments)
             {
                 continue;
             }
 
+            var segmentBytes = _storage.GetSegmentBytes(item.Entry.SegmentId);
+            if (segmentBytes > options.MaxInputSegmentBytes - selectedSegmentBytes)
+            {
+                continue;
+            }
+
             selected.Add(item.Entry.SegmentId);
-            selectedSegmentBytes += item.SegmentBytes;
+            selectedSegmentBytes += segmentBytes;
             mergedContentBytes += item.Entry.ContentBytes;
             mergedDocuments += item.Entry.LiveDocumentCount;
         }

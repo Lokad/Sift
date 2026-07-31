@@ -498,6 +498,24 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public async Task CleanMaintenanceChecksLeaveReclamationMarkerUntouched()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var markerPath = Path.Combine(fixture.CorpusPath, "lock", "reclamation.state");
+        var oldWriteTime = DateTime.UtcNow.AddHours(-1);
+        File.SetLastWriteTimeUtc(markerPath, oldWriteTime);
+        var expectedWriteTime = File.GetLastWriteTimeUtc(markerPath);
+
+        Assert.False(index.ShouldCompact(new CompactOptions()));
+        _ = index.GetStorageStats();
+
+        Assert.Equal(0, File.ReadAllBytes(markerPath).Single());
+        Assert.Equal(expectedWriteTime, File.GetLastWriteTimeUtc(markerPath));
+    }
+
+    [Fact]
     public async Task CompactionReportsRemainingBoundedWork()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions
