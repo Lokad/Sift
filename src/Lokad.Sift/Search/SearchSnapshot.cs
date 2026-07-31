@@ -65,6 +65,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
+        try
+        {
+            return ExplainCore(query, pathFilter);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    private SearchPlan ExplainCore(in SearchQuery query, in PathFilter pathFilter)
+    {
         using var operation = BeginOperation();
         var resolvedCaseMode = ResolveCaseMode(query);
         var matcher = new PathFilterMatcher(pathFilter);
@@ -207,6 +220,36 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
+        ArgumentNullException.ThrowIfNull(collector);
+        var guardedCollector = new GuardedHitCollector(collector);
+        try
+        {
+            return SearchCore(
+                query,
+                pathFilter,
+                guardedCollector,
+                pathVisibility,
+                cancellationToken);
+        }
+        catch (CollectorFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    private SearchStats SearchCore(
+        in SearchQuery query,
+        in PathFilter pathFilter,
+        IHitCollector collector,
+        IPathVisibility? pathVisibility,
+        CancellationToken cancellationToken)
+    {
         using var operation = BeginOperation();
         var watch = Stopwatch.StartNew();
         using var deadlineCancellation = CreateDeadlineCancellation(
@@ -671,6 +714,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ArgumentOutOfRangeException.ThrowIfNegative(contextBefore);
         ArgumentOutOfRangeException.ThrowIfNegative(contextAfter);
+        try
+        {
+            return MaterializeCore(hit, contextBefore, contextAfter);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    private MaterializedHit MaterializeCore(in RawHit hit, int contextBefore, int contextAfter)
+    {
         using var operation = BeginOperation();
         var cache = OpenSegment(hit.SegmentId);
 
@@ -743,6 +799,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
+        try
+        {
+            return TryGetDocumentBytesCore(key, out content);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    private bool TryGetDocumentBytesCore(DocumentKey key, out ReadOnlyMemory<byte> content)
+    {
         using var operation = BeginOperation();
         var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
 
@@ -766,6 +835,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     internal string GetPath(in RawHit hit)
+    {
+        try
+        {
+            return GetPathCore(hit);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    private string GetPathCore(in RawHit hit)
     {
         using var operation = BeginOperation();
         var cache = OpenSegment(hit.SegmentId);
@@ -856,12 +938,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 return cache;
             }
         }
-        catch (Exception exception) when (
-            exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException)
-        {
-            _onIndexFailure?.Invoke(exception);
-            throw;
-        }
         finally
         {
             // A concurrent operation may have populated the cache while this pack was being opened.
@@ -912,6 +988,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
+    }
+
+    private void ReportIndexFailure(Exception exception)
+    {
+        _onIndexFailure?.Invoke(exception);
+    }
+
+    private static bool IsIndexCorruption(Exception exception)
+    {
+        return exception is InvalidDataException or
+            FileNotFoundException or
+            DirectoryNotFoundException or
+            EndOfStreamException;
     }
 
     private void ValidateQuery(in SearchQuery query)
@@ -2221,6 +2310,38 @@ internal sealed class BoundedHitCollector : IHitCollector
             return false;
         }
     }
+}
+
+internal sealed class GuardedHitCollector : IHitCollector
+{
+    private readonly IHitCollector _inner;
+
+    public GuardedHitCollector(IHitCollector inner)
+    {
+        _inner = inner;
+    }
+
+    public bool OnHit(in RawHit hit)
+    {
+        try
+        {
+            return _inner.OnHit(hit);
+        }
+        catch (Exception exception)
+        {
+            throw new CollectorFailureException(ExceptionDispatchInfo.Capture(exception));
+        }
+    }
+}
+
+internal sealed class CollectorFailureException : Exception
+{
+    public CollectorFailureException(ExceptionDispatchInfo dispatchInfo)
+    {
+        DispatchInfo = dispatchInfo;
+    }
+
+    public ExceptionDispatchInfo DispatchInfo { get; }
 }
 
 internal readonly record struct SegmentSearchResult(

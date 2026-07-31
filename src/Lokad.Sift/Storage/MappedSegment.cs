@@ -147,6 +147,7 @@ public sealed unsafe class MappedSegment : IDisposable
     public ReadOnlySpan<byte> GetPathBytes(SegmentDocument document)
     {
         var region = GetRegion(SegmentRegionId.PathBlob);
+        ValidateDocumentSlice(document.PathOffset, document.PathLength, region.Length, "path");
         return new ReadOnlySpan<byte>(BasePointer + region.Offset + (long)document.PathOffset, document.PathLength);
     }
 
@@ -180,12 +181,14 @@ public sealed unsafe class MappedSegment : IDisposable
     public ReadOnlySpan<byte> GetContentBytes(SegmentDocument document)
     {
         var region = GetRegion(SegmentRegionId.ContentBlob);
+        ValidateDocumentSlice(document.ContentOffset, document.ContentLength, region.Length, "content");
         return new ReadOnlySpan<byte>(BasePointer + region.Offset + (long)document.ContentOffset, document.ContentLength);
     }
 
     public ReadOnlyMemory<byte> GetContentMemory(SegmentDocument document)
     {
         var region = GetRegion(SegmentRegionId.ContentBlob);
+        ValidateDocumentSlice(document.ContentOffset, document.ContentLength, region.Length, "content");
         var offset = checked((int)(region.Offset + (long)document.ContentOffset));
         return _mappedFile is null
             ? _backingMemory.Slice(offset, document.ContentLength)
@@ -310,6 +313,7 @@ public sealed unsafe class MappedSegment : IDisposable
     public ReadOnlySpan<byte> GetEncodedLineIndexBytes(SegmentDocument document)
     {
         var region = GetRegion(SegmentRegionId.LineIndexBlob);
+        ValidateDocumentSlice(document.LineIndexOffset, document.LineIndexLength, region.Length, "line index");
         return new ReadOnlySpan<byte>(BasePointer + region.Offset + (long)document.LineIndexOffset, document.LineIndexLength);
     }
 
@@ -352,6 +356,7 @@ public sealed unsafe class MappedSegment : IDisposable
                 }
 
                 docFreq = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4));
+                ValidateDocumentFrequency(docFreq);
                 postings = new ReadOnlySpan<byte>(BasePointer + postingsRegion.Offset + postingsOffset, postingsBytes);
                 return true;
             }
@@ -394,6 +399,12 @@ public sealed unsafe class MappedSegment : IDisposable
             var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
             var postingsBytes = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4));
             var docFreq = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4));
+            if (postingsBytes < 0)
+            {
+                throw new InvalidDataException("Invalid Sift postings length.");
+            }
+
+            ValidateDocumentFrequency(docFreq);
             results[i] = new PostingsMetadata(docFreq, postingsBytes);
         }
 
@@ -426,6 +437,7 @@ public sealed unsafe class MappedSegment : IDisposable
             var postingsOffset = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize, 4));
             var postingsBytes = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4));
             var docFreq = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4));
+            ValidateDocumentFrequency(docFreq);
             if (postingsOffset < 0 || postingsBytes < 0 || postingsOffset > postingsRegion.Length || postingsBytes > postingsRegion.Length - postingsOffset)
             {
                 throw new InvalidDataException($"Invalid postings bounds in region '{pair.Postings}'.");
@@ -775,6 +787,14 @@ public sealed unsafe class MappedSegment : IDisposable
             (ulong)length > (ulong)regionLength - offset)
         {
             throw new InvalidDataException($"Invalid Sift document {name} bounds.");
+        }
+    }
+
+    private void ValidateDocumentFrequency(int documentFrequency)
+    {
+        if (documentFrequency < 0 || documentFrequency > DocumentCount)
+        {
+            throw new InvalidDataException("Invalid Sift postings document frequency.");
         }
     }
 }

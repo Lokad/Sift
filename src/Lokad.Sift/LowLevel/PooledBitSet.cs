@@ -7,9 +7,11 @@ internal sealed class PooledBitSet : IDisposable
 {
     private readonly uint[] _words;
     private readonly int _count;
+    public int BitCount { get; }
 
     public PooledBitSet(int bitCount)
     {
+        BitCount = bitCount;
         _count = (bitCount + 31) >> 5;
         _words = ArrayPool<uint>.Shared.Rent(_count);
         Array.Clear(_words, 0, _count);

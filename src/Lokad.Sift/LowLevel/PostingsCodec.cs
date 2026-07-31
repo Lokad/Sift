@@ -91,6 +91,11 @@ public static class PostingsCodec
         while (offset < view.Data.Length)
         {
             current += VarInt.ReadUInt32(view.Data, ref offset);
+            if (current >= (uint)bitSet.BitCount)
+            {
+                throw new InvalidDataException("Sift postings contain an out-of-range document ordinal.");
+            }
+
             bitSet.Set((int)current);
         }
     }

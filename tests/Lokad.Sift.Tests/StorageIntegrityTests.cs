@@ -118,6 +118,42 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task OnlineDocumentAccessRejectsInvalidContentBoundsAndRequiresRebuild()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        CorruptFirstDocumentContentOffset(segmentPath);
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        using var snapshot = reopened.OpenSnapshot();
+        Assert.Throws<InvalidDataException>(() =>
+            snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        Assert.True(reopened.RequiresRebuild);
+    }
+
+    [Fact]
+    public async Task CollectorFailureDoesNotRequireRebuild()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+        using var snapshot = index.OpenSnapshot();
+
+        Assert.Throws<InvalidDataException>(() => snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            new FailingCollector()));
+        Assert.False(index.RequiresRebuild);
+    }
+
+    [Fact]
     public async Task OnlineUpdateDefersFullChecksumValidation()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
@@ -865,6 +901,26 @@ public sealed class StorageIntegrityTests
         var current = stream.ReadByte();
         stream.Position--;
         stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
+    }
+
+    private static void CorruptFirstDocumentContentOffset(string segmentPath)
+    {
+        var bytes = File.ReadAllBytes(segmentPath);
+        var regionDirectoryOffset = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(44, sizeof(long)));
+        var documentTableOffset = BinaryPrimitives.ReadInt64LittleEndian(
+            bytes.AsSpan(checked((int)regionDirectoryOffset) + sizeof(int), sizeof(long)));
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(checked((int)documentTableOffset) + 12, sizeof(ulong)),
+            ulong.MaxValue);
+        File.WriteAllBytes(segmentPath, bytes);
+    }
+
+    private sealed class FailingCollector : IHitCollector
+    {
+        public bool OnHit(in RawHit hit)
+        {
+            throw new InvalidDataException("Caller failure.");
+        }
     }
 
     private static void RewriteManifestAsLegacyV2(string manifestPath)
