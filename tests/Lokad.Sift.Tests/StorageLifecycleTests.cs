@@ -466,6 +466,36 @@ public sealed class StorageLifecycleTests
         Assert.Equal(1, compact.InputSegments);
     }
 
+    [Fact]
+    public async Task CompactionReportsRemainingBoundedWork()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentContentBytes = 10
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "0123456789"),
+            ("src/b.txt", "0123456789"),
+            ("src/c.txt", "0123456789")
+        ]));
+        await index.Update(
+            new InMemoryDocumentSource([]),
+            [
+                new DocumentKey("src/a.txt"),
+                new DocumentKey("src/b.txt"),
+                new DocumentKey("src/c.txt")
+            ]);
+        var options = new CompactOptions(MaxMergedSegments: 1);
+
+        var first = await index.Compact(options);
+        var second = await index.Compact(options);
+        var third = await index.Compact(options);
+
+        Assert.True(first.HasMoreWork);
+        Assert.True(second.HasMoreWork);
+        Assert.False(third.HasMoreWork);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = Stopwatch.GetTimestamp() + (long)(timeout.TotalSeconds * Stopwatch.Frequency);

@@ -420,7 +420,8 @@ public sealed class Sift : ISift
                 MergedDocuments: 0,
                 ContentBytes: 0,
                 ElapsedMilliseconds: watch.ElapsedMilliseconds,
-                PeakManagedBytes: 0);
+                PeakManagedBytes: 0,
+                HasMoreWork: false);
         }
 
         _storage.EnsureReplacementAllowedUnderWriterLock();
@@ -453,6 +454,7 @@ public sealed class Sift : ISift
 
             var newManifest = new CorpusManifest(manifest.CorpusId, manifest.Generation + 1UL, mergedSegments);
             _storage.PublishManifest(newManifest);
+            manifest = newManifest;
         }
         catch
         {
@@ -467,7 +469,8 @@ public sealed class Sift : ISift
             MergedDocuments: publication.MergedDocuments,
             ContentBytes: publication.ContentBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds,
-            PeakManagedBytes: 0);
+            PeakManagedBytes: 0,
+            HasMoreWork: SelectSegmentsForCompaction(manifest, options).Count > 0);
     }
 
     public void Dispose()

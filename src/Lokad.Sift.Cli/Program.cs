@@ -48,7 +48,7 @@ switch (command)
         {
             var compact = await index.Compact(new CompactOptions());
             var storage = index.GetStorageStats();
-            Console.WriteLine($"inputSegments={compact.InputSegments} outputSegments={compact.OutputSegments} mergedDocuments={compact.MergedDocuments} bytes={compact.ContentBytes} physicalSegmentBytes={storage.PhysicalSegmentBytes} retiredSegmentBytes={storage.RetiredSegmentBytes} ms={compact.ElapsedMilliseconds}");
+            Console.WriteLine($"inputSegments={compact.InputSegments} outputSegments={compact.OutputSegments} mergedDocuments={compact.MergedDocuments} bytes={compact.ContentBytes} hasMoreWork={compact.HasMoreWork} physicalSegmentBytes={storage.PhysicalSegmentBytes} retiredSegmentBytes={storage.RetiredSegmentBytes} ms={compact.ElapsedMilliseconds}");
             return 0;
         }
     case "stats":

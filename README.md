@@ -126,8 +126,13 @@ var updatedStats = updatedSnapshot.Search(
 Console.WriteLine($"Updated search returned {updatedStats.HitsReturned} hit(s).");
 
 // 5. Optional: compact delta segments back into fewer immutable segments.
-var compact = await index.Compact(new CompactOptions());
-Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents in {compact.ElapsedMilliseconds} ms.");
+CompactStats compact;
+do
+{
+    compact = await index.Compact(new CompactOptions());
+    Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents in {compact.ElapsedMilliseconds} ms.");
+}
+while (compact.HasMoreWork);
 
 var storage = index.GetStorageStats();
 Console.WriteLine(

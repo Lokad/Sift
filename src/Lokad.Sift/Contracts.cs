@@ -228,7 +228,9 @@ public readonly record struct CompactStats(
     int MergedDocuments,
     long ContentBytes,
     long ElapsedMilliseconds,
-    long PeakManagedBytes);
+    long PeakManagedBytes,
+    // True when the same policy can make progress in another bounded pass.
+    bool HasMoreWork);
 
 public enum SiftActivity
 {
