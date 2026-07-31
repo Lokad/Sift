@@ -217,6 +217,8 @@ public sealed class SiftOptions
     public int MaxPatternNesting { get; init; } = 64;
     // Bounds aggregate include/exclude matcher construction per search.
     public int MaxPathFilterPatterns { get; init; } = 256;
+    // Bounds aggregate prefix, glob, and path-regex preparation per search.
+    public int MaxPathFilterCharacters { get; init; } = 16 * 1024;
     // Prevents consumers from checkpointing an event whose replacement was not indexed.
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; } = RejectedUpsertPolicy.FailUpdate;
 }

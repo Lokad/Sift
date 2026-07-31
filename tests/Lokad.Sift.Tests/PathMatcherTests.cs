@@ -33,6 +33,15 @@ public sealed class PathMatcherTests
     }
 
     [Fact]
+    public async Task RegexGlobEscapesMetacharacters()
+    {
+        var matcher = GlobMatcher.Create("src/[draft]?+*.txt");
+
+        Assert.True(matcher.IsMatch("src/[draft]1+notes.txt"));
+        Assert.False(matcher.IsMatch("src/draft1+notes.txt"));
+    }
+
+    [Fact]
     public async Task PathRegexAccelerationPrunesContainedMandatoryFragments()
     {
         var matcher = new PathFilterMatcher(new Lokad.Sift.PathFilter { PathRegex = "special-file" });

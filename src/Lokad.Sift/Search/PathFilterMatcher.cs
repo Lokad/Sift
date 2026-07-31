@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using Lokad.Sift;
 
@@ -177,7 +178,7 @@ internal sealed class PathFilterMatcher
 
     internal static Regex CreateRegex(string pattern)
     {
-        const RegexOptions baseOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant;
+        const RegexOptions baseOptions = RegexOptions.CultureInvariant;
         var timeout = TimeSpan.FromSeconds(1);
         try
         {
@@ -189,16 +190,17 @@ internal sealed class PathFilterMatcher
         }
     }
 
-    private static string GlobToRegex(string glob)
+    internal static string GlobToRegex(string glob)
     {
-        var builder = "^";
+        var builder = new StringBuilder(glob.Length + 2);
+        builder.Append('^');
         for (var i = 0; i < glob.Length; i++)
         {
             var current = glob[i];
             if (current == '*')
             {
                 var isDouble = i + 1 < glob.Length && glob[i + 1] == '*';
-                builder += isDouble ? ".*" : "[^/]*";
+                builder.Append(isDouble ? ".*" : "[^/]*");
                 if (isDouble)
                 {
                     i++;
@@ -207,10 +209,23 @@ internal sealed class PathFilterMatcher
                 continue;
             }
 
-            builder += current == '?' ? "[^/]" : Regex.Escape(current.ToString());
+            if (current == '?')
+            {
+                builder.Append("[^/]");
+            }
+            else
+            {
+                if (current is '\\' or '.' or '$' or '^' or '{' or '[' or '(' or '|' or ')' or '+' or ']')
+                {
+                    builder.Append('\\');
+                }
+
+                builder.Append(current);
+            }
         }
 
-        return builder + "$";
+        builder.Append('$');
+        return builder.ToString();
     }
 
     private static string[] BuildAccelerationFragments(in PathFilter filter)
@@ -476,33 +491,10 @@ internal sealed class GlobMatcher
         return new GlobMatcher(
             string.Empty,
             string.Empty,
-            PathFilterMatcher.CreateRegex(PathFilterMatcherGlobToRegex(glob)),
+            PathFilterMatcher.CreateRegex(PathFilterMatcher.GlobToRegex(glob)),
             GlobMatcherKind.Regex);
     }
 
-    private static string PathFilterMatcherGlobToRegex(string glob)
-    {
-        var builder = "^";
-        for (var i = 0; i < glob.Length; i++)
-        {
-            var current = glob[i];
-            if (current == '*')
-            {
-                var isDouble = i + 1 < glob.Length && glob[i + 1] == '*';
-                builder += isDouble ? ".*" : "[^/]*";
-                if (isDouble)
-                {
-                    i++;
-                }
-
-                continue;
-            }
-
-            builder += current == '?' ? "[^/]" : Regex.Escape(current.ToString());
-        }
-
-        return builder + "$";
-    }
 }
 
 internal enum GlobMatcherKind

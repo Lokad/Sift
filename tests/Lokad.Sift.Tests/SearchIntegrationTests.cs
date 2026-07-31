@@ -53,6 +53,22 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task SearchRejectsOversizedAggregatePathFilter()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            MaxPatternCharacters = 8,
+            MaxPathFilterCharacters = 10
+        });
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var snapshot = index.OpenSnapshot();
+
+        Assert.Throws<ArgumentException>(() => snapshot.Explain(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter { IncludeGlobs = ["src/**", "doc/**"] }));
+    }
+
+    [Fact]
     public async Task LiteralSearchMatchesBruteForceBaseline()
     {
         using var fixture = new CorpusFixture(

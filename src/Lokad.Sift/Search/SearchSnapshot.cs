@@ -915,6 +915,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private void ValidatePathFilter(in PathFilter pathFilter)
     {
+        long totalCharacters = 0;
         ValidatePathPattern(pathFilter.PathPrefix);
         ValidatePathPattern(pathFilter.PathRegex);
         if (pathFilter.PathRegex is { } pathRegex &&
@@ -950,9 +951,22 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
         }
 
+        if (totalCharacters > _options.MaxPathFilterCharacters)
+        {
+            throw new ArgumentException(
+                $"Path filter exceeds the {_options.MaxPathFilterCharacters}-character aggregate limit.",
+                nameof(pathFilter));
+        }
+
         void ValidatePathPattern(string? pattern)
         {
-            if (pattern is not null && pattern.Length > _options.MaxPatternCharacters)
+            if (pattern is null)
+            {
+                return;
+            }
+
+            totalCharacters += pattern.Length;
+            if (pattern.Length > _options.MaxPatternCharacters)
             {
                 throw new ArgumentException(
                     $"Path pattern exceeds the {_options.MaxPatternCharacters}-character limit.",

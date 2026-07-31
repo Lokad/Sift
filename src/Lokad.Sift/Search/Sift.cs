@@ -1002,7 +1002,8 @@ public sealed class Sift : ISift
 
         if (options.MaxPatternCharacters <= 0 ||
             options.MaxPatternNesting <= 0 ||
-            options.MaxPathFilterPatterns <= 0)
+            options.MaxPathFilterPatterns <= 0 ||
+            options.MaxPathFilterCharacters <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Pattern limits must be positive.");
         }

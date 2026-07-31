@@ -29,7 +29,8 @@ using var index = new Sift(indexPath, new SiftOptions
     MaximumPhysicalBytes = 128L * 1024 * 1024 * 1024, // Optional corpus quota, including lifecycle metadata.
     MinimumFreeBytesAfterMutation = 1536L * 1024 * 1024, // Preserve room for one default compaction pass.
     MaxPatternCharacters = 2 * 1024, // Bound query and path-filter compilation work.
-    MaxPatternNesting = 64 // Bound recursive regex analysis.
+    MaxPatternNesting = 64, // Bound recursive regex analysis.
+    MaxPathFilterCharacters = 16 * 1024 // Bound aggregate path-filter preparation.
 });
 // Alternative in-memory form:
 // using var index = Sift.CreateInMemory();
