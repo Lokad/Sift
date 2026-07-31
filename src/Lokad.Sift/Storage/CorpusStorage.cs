@@ -23,6 +23,8 @@ public sealed class CorpusStorage : ISiftStorage
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
     private long _segmentOpenCount;
+    private long _reclamationFailureCount;
+    private string? _lastReclamationFailure;
 
     public CorpusStorage(string rootPath)
         : this(rootPath, long.MaxValue)
@@ -371,7 +373,12 @@ public sealed class CorpusStorage : ISiftStorage
 
     public long? GetAvailableBytes()
     {
-        var corpusAvailableBytes = Math.Max(0, _maximumPhysicalBytes - GetCorpusPhysicalBytes());
+        return GetAvailableBytes(GetCorpusPhysicalBytes());
+    }
+
+    private long? GetAvailableBytes(long corpusPhysicalBytes)
+    {
+        var corpusAvailableBytes = Math.Max(0, _maximumPhysicalBytes - corpusPhysicalBytes);
         var filesystemAvailableBytes = GetFilesystemAvailableBytes();
         return filesystemAvailableBytes is null
             ? corpusAvailableBytes
@@ -560,8 +567,17 @@ public sealed class CorpusStorage : ISiftStorage
 
     void ISiftStorage.ReclaimUnreferencedSegments(CancellationToken cancellationToken)
     {
-        using var writerLock = AcquireWriterLock(cancellationToken);
-        _ = ReclaimUnreferencedSegmentsUnderWriterLock(cancellationToken);
+        try
+        {
+            using var writerLock = AcquireWriterLock(cancellationToken);
+            _ = ReclaimUnreferencedSegmentsUnderWriterLock(cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            RecordReclamationFailure(exception);
+            throw;
+        }
     }
 
     void ISiftStorage.EnsureReplacementAllowedUnderWriterLock()
@@ -1397,6 +1413,8 @@ public sealed class CorpusStorage : ISiftStorage
         var blockedSegmentBytes = Math.Min(
             retiredSegmentBytes - deferredSegmentBytes,
             reclamation.BlockedSegmentBytes);
+        var temporaryBytes = GetTemporaryBytes();
+        var corpusPhysicalBytes = GetCorpusPhysicalBytes();
         return new StorageStats(
             ManifestSegmentCount: manifestSegmentCount,
             ManifestSegmentBytes: manifestSegmentBytes,
@@ -1404,7 +1422,10 @@ public sealed class CorpusStorage : ISiftStorage
             PhysicalSegmentBytes: physicalSegmentBytes,
             RetiredSegmentCount: retiredSegmentCount,
             RetiredSegmentBytes: retiredSegmentBytes,
-            TemporaryBytes: GetTemporaryBytes(),
+            TemporaryBytes: temporaryBytes,
+            CorpusPhysicalBytes: corpusPhysicalBytes,
+            MaximumPhysicalBytes: _maximumPhysicalBytes,
+            AvailableBytes: GetAvailableBytes(corpusPhysicalBytes),
             LeasedGenerationCount: reclamation.LeasedGenerationCount,
             OldestLeasedGeneration: reclamation.OldestLeasedGeneration,
             SnapshotDeferredSegmentCount: deferredSegmentCount,
@@ -1413,7 +1434,9 @@ public sealed class CorpusStorage : ISiftStorage
             PendingDeletionSegmentBytes: retiredSegmentBytes - deferredSegmentBytes - blockedSegmentBytes,
             BlockedReclamationSegmentCount: blockedSegmentCount,
             BlockedReclamationSegmentBytes: blockedSegmentBytes,
-            IsReclamationBlocked: reclamation.IsBlocked);
+            IsReclamationBlocked: reclamation.IsBlocked,
+            ReclamationFailureCount: Interlocked.Read(ref _reclamationFailureCount),
+            LastReclamationFailure: Volatile.Read(ref _lastReclamationFailure));
     }
 
     private void TryReclaimAfterPublication()
@@ -1425,6 +1448,7 @@ public sealed class CorpusStorage : ISiftStorage
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             // The manifest is already committed; the persistent marker makes cleanup retryable.
+            RecordReclamationFailure(exception);
         }
     }
 
@@ -1454,7 +1478,14 @@ public sealed class CorpusStorage : ISiftStorage
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            RecordReclamationFailure(exception);
         }
+    }
+
+    private void RecordReclamationFailure(Exception exception)
+    {
+        Interlocked.Increment(ref _reclamationFailureCount);
+        Volatile.Write(ref _lastReclamationFailure, exception.Message);
     }
 
     private static bool TryDeleteDirectory(string path)

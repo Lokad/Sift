@@ -7,6 +7,8 @@
 - Added `ISift.ShouldCompact(CompactOptions)` as the authoritative hint for
   actionable compaction work, avoiding false recommendations based on aggregate
   segment count alone.
+- Exposed total corpus usage, quota headroom, and exceptional reclamation
+  failures through `StorageStats`.
 
 ### Changed
 
@@ -20,6 +22,8 @@
   incrementally.
 - Made small updates choose adaptively between indexed path lookups and segment
   scans instead of scanning the entire corpus unconditionally.
+- Increased the default post-mutation reserve to preserve enough space for one
+  default compaction pass.
 
 ### Fixed
 

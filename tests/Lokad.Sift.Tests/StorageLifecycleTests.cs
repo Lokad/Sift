@@ -413,6 +413,7 @@ public sealed class StorageLifecycleTests
         Assert.Equal(16, options.SmallSegmentMergeThreshold);
         Assert.Equal(1024, options.MetadataBloatDeadOrdinalsThreshold);
         Assert.Equal(1L * 1024 * 1024 * 1024, options.MaxInputSegmentBytes);
+        Assert.Equal(512L * 1024 * 1024, options.MinimumFreeBytesAfterCompaction);
 
         using var index = SiftIndex.CreateInMemory();
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -447,6 +448,16 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public void MutationReserveCoversOneDefaultCompactionPass()
+    {
+        var sift = new SiftOptions();
+        var compact = new CompactOptions();
+
+        Assert.True(sift.MinimumFreeBytesAfterMutation >=
+                    compact.MaxInputSegmentBytes + compact.MinimumFreeBytesAfterCompaction);
+    }
+
+    [Fact]
     public async Task CompactionInputBudgetLimitsEachMaintenancePass()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions
@@ -462,6 +473,28 @@ public sealed class StorageLifecycleTests
         var compact = await index.Compact(new CompactOptions { DeadFractionThreshold = 0, MaxInputSegmentBytes = 1 });
 
         Assert.Equal(1, compact.InputSegments);
+    }
+
+    [Fact]
+    public async Task CompactionHintRequiresRoomForReplacementAndReserve()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", new string('a', 1024)));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaximumPhysicalBytes = 8L * 1024 * 1024,
+            MinimumFreeBytesAfterMutation = 0
+        });
+        await index.Build(fixture.CreateSource());
+
+        var storage = index.GetStorageStats();
+        var options = new CompactOptions
+        {
+            DeadFractionThreshold = 0,
+            MinimumFreeBytesAfterCompaction = storage.AvailableBytes!.Value
+        };
+
+        Assert.False(index.ShouldCompact(options));
+        await Assert.ThrowsAsync<IOException>(() => index.Compact(options));
     }
 
     [Fact]

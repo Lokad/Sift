@@ -10,6 +10,7 @@ namespace Lokad.Sift;
 
 public sealed class Sift : ISift
 {
+    private const long EstimatedReplacementPackOverheadBytes = 64L * 1024;
     private readonly ISiftStorage _storage;
     private readonly IndexBuilder _builder;
     private readonly SiftOptions _options;
@@ -279,10 +280,16 @@ public sealed class Sift : ISift
             bool shouldCompact;
             using (var snapshot = _storage.OpenReadSnapshot())
             {
-                shouldCompact = SelectSegmentsForCompaction(
+                var selectedSegmentIds = SelectSegmentsForCompaction(
                     snapshot.Manifest,
                     options,
-                    CancellationToken.None).Count > 0;
+                    CancellationToken.None);
+                shouldCompact = selectedSegmentIds.Count > 0 &&
+                    HasEstimatedCompactionCapacity(
+                        snapshot.Manifest,
+                        selectedSegmentIds,
+                        options,
+                        CancellationToken.None);
             }
 
             // A concurrent publication may have retired the briefly leased generation.
@@ -1242,6 +1249,49 @@ public sealed class Sift : ISift
         }
 
         return selected;
+    }
+
+    private bool HasEstimatedCompactionCapacity(
+        CorpusManifest manifest,
+        IReadOnlySet<ulong> selectedSegmentIds,
+        CompactOptions options,
+        CancellationToken cancellationToken)
+    {
+        var availableBytes = _storage.GetAvailableBytes();
+        if (availableBytes is null)
+        {
+            return true;
+        }
+
+        long estimatedReplacementBytes = 0;
+        foreach (var entry in manifest.Segments)
+        {
+            if (!selectedSegmentIds.Contains(entry.SegmentId) || entry.LiveDocumentCount == 0)
+            {
+                continue;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var segmentBytes = _storage.GetSegmentBytes(entry.SegmentId);
+            var liveContentBytes = entry.ContentBytes - GetDeadContentBytes(
+                entry,
+                currentLegacyKeys: null,
+                cancellationToken);
+            var proportionalBytes = entry.ContentBytes == 0
+                ? segmentBytes
+                : (long)Math.Ceiling((double)segmentBytes * liveContentBytes / entry.ContentBytes);
+            estimatedReplacementBytes = SaturatingAdd(
+                estimatedReplacementBytes,
+                SaturatingAdd(proportionalBytes, EstimatedReplacementPackOverheadBytes));
+        }
+
+        return estimatedReplacementBytes <=
+            availableBytes.Value - Math.Min(availableBytes.Value, options.MinimumFreeBytesAfterCompaction);
+
+        static long SaturatingAdd(long left, long right)
+        {
+            return right > long.MaxValue - left ? long.MaxValue : left + right;
+        }
     }
 
     private long GetDeadContentBytes(

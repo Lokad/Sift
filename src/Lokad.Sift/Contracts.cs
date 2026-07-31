@@ -189,8 +189,8 @@ public sealed class SiftOptions
     public long TargetSegmentContentBytes { get; init; } = 64L * 1024 * 1024;
     // Caps new-file admission against the total corpus-root footprint.
     public long MaximumPhysicalBytes { get; init; } = long.MaxValue;
-    // Remains writable after each exact segment-pack preallocation.
-    public long MinimumFreeBytesAfterMutation { get; init; } = 512L * 1024 * 1024;
+    // Keeps enough room for one default 1 GiB compaction pass plus its 512 MiB reserve.
+    public long MinimumFreeBytesAfterMutation { get; init; } = 1536L * 1024 * 1024;
     public int DirectScanScopeDocumentsThreshold { get; init; } = 256;
     public long DirectScanScopeBytesThreshold { get; init; } = 1L * 1024 * 1024;
     public double DirectScanCandidateDensityThreshold { get; init; } = 0.85;
@@ -401,6 +401,12 @@ public readonly record struct StorageStats(
     long RetiredSegmentBytes,
     // Incomplete publication files, not retired packs awaiting reclamation.
     long TemporaryBytes,
+    // Complete corpus-root footprint used for quota admission, including lifecycle metadata.
+    long CorpusPhysicalBytes,
+    // Configured corpus-root quota; long.MaxValue means only filesystem capacity is relevant.
+    long MaximumPhysicalBytes,
+    // Bytes currently admissible under both the corpus quota and filesystem capacity, when known.
+    long? AvailableBytes,
     // Non-current generations held open by at least one reader.
     int LeasedGenerationCount,
     // Lowest held generation, or null when no superseded snapshot remains.
@@ -418,7 +424,11 @@ public readonly record struct StorageStats(
     // On-disk lengths withheld from deletion because reachability is uncertain.
     long BlockedReclamationSegmentBytes,
     // True when metadata uncertainty prevents destructive reclamation.
-    bool IsReclamationBlocked);
+    bool IsReclamationBlocked,
+    // Number of reclamation sweeps that failed before producing structured sweep statistics.
+    long ReclamationFailureCount,
+    // Most recent exceptional reclamation failure, or null when no sweep has failed.
+    string? LastReclamationFailure);
 
 public readonly record struct MaterializedHit(
     string Path,

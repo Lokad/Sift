@@ -244,6 +244,9 @@ public sealed class InMemorySiftStorage : ISiftStorage
             RetiredSegmentCount: _segments.Count - manifestSegmentCount,
             RetiredSegmentBytes: physicalSegmentBytes - manifestSegmentBytes,
             TemporaryBytes: 0,
+            CorpusPhysicalBytes: physicalSegmentBytes,
+            MaximumPhysicalBytes: long.MaxValue,
+            AvailableBytes: null,
             LeasedGenerationCount: reclamation.LeasedGenerationCount,
             OldestLeasedGeneration: reclamation.OldestLeasedGeneration,
             SnapshotDeferredSegmentCount: reclamation.DeferredSegmentCount,
@@ -252,7 +255,9 @@ public sealed class InMemorySiftStorage : ISiftStorage
             PendingDeletionSegmentBytes: reclamation.FailedSegmentBytes,
             BlockedReclamationSegmentCount: reclamation.BlockedSegmentCount,
             BlockedReclamationSegmentBytes: reclamation.BlockedSegmentBytes,
-            IsReclamationBlocked: reclamation.IsBlocked);
+            IsReclamationBlocked: reclamation.IsBlocked,
+            ReclamationFailureCount: 0,
+            LastReclamationFailure: null);
     }
 
     private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock()

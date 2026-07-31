@@ -27,7 +27,7 @@ using var index = new Sift(indexPath, new SiftOptions
     TargetSegmentDocumentCount = 50_000, // Start a new segment once about 50k documents accumulate.
     TargetSegmentContentBytes = 64L * 1024 * 1024, // Or once a segment reaches about 64 MiB of content.
     MaximumPhysicalBytes = 128L * 1024 * 1024 * 1024, // Optional corpus quota, including lifecycle metadata.
-    MinimumFreeBytesAfterMutation = 512L * 1024 * 1024 // Keep emergency headroom after publishing a pack.
+    MinimumFreeBytesAfterMutation = 1536L * 1024 * 1024 // Preserve room for one default compaction pass.
 });
 // Alternative in-memory form:
 // using var index = Sift.CreateInMemory();
@@ -195,7 +195,8 @@ if (index.ShouldCompact(options))
 
 `ShouldCompact(...)` uses the same per-segment selection as `Compact(...)`; it
 does not recommend work merely because a healthy corpus exceeds
-`SmallSegmentMergeThreshold` with target-sized segments. The result is a
+`SmallSegmentMergeThreshold` with target-sized segments, or when current quota
+and filesystem headroom cannot hold the estimated replacements. The result is a
 snapshot-based hint: a concurrent mutation may change the answer before
 `Compact(...)` starts, and a resulting no-op is harmless.
 `GetMaintenanceStats()` remains available for telemetry and diagnostics, but
@@ -226,7 +227,8 @@ clean segments when at least two fit into one target segment. Before creating ea
 replacement pack, Sift checks its exact prepared size against both filesystem free
 space and `SiftOptions.MaximumPhysicalBytes`, then retains
 `CompactOptions.MinimumFreeBytesAfterCompaction` (512 MiB by default). Builds and
-updates similarly retain `SiftOptions.MinimumFreeBytesAfterMutation`. Set
+updates similarly retain `SiftOptions.MinimumFreeBytesAfterMutation`, whose
+1.5 GiB default preserves room for one default compaction pass. Set
 `MaximumPhysicalBytes` when filesystem free-space reporting does not reflect a
 container or tenant quota.
 
