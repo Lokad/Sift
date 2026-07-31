@@ -16,6 +16,8 @@
 
 - Reduced allocation and segment-handle churn in broad, sequential, and
   parallel searches, including repeated hit materialization from one snapshot.
+- Avoided rescanning lexicons and legacy document tables whenever a previously
+  validated segment is mapped by a new snapshot.
 - Reduced update, indexing, and compaction memory pressure by avoiding decoded
   path copies, streaming compacted documents, and moving fixed index workspaces
   off the managed heap.

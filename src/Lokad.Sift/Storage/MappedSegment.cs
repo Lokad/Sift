@@ -444,6 +444,7 @@ public sealed unsafe class MappedSegment : IDisposable
 
     private void ValidateLexiconRegion(
         SegmentRegionId regionId,
+        bool validateEntries,
         CancellationToken cancellationToken)
     {
         var region = GetRegion(regionId);
@@ -472,6 +473,13 @@ public sealed unsafe class MappedSegment : IDisposable
             }
 
             previous = current;
+        }
+
+        // Checksums make the variable-length entry payload immutable after its first
+        // successful open; later mappings only need the fixed-size shape checks above.
+        if (!validateEntries)
+        {
+            return;
         }
 
         var previousSuffix = -1;
@@ -538,22 +546,9 @@ public sealed unsafe class MappedSegment : IDisposable
             return new NonAsciiDocumentStats(documentCount, contentBytes);
         }
 
-        // Segments written before these counters were appended remain readable.
-        var legacyDocumentCount = 0;
-        long legacyContentBytes = 0;
-        for (uint ordinal = 0; ordinal < DocumentCount; ordinal++)
-        {
-            var document = GetDocument(ordinal);
-            if ((document.Flags & (1 << 1)) != 0)
-            {
-                continue;
-            }
-
-            legacyDocumentCount++;
-            legacyContentBytes += document.ContentLength;
-        }
-
-        return new NonAsciiDocumentStats(legacyDocumentCount, legacyContentBytes);
+        // Legacy packs lack these planner-only counters. Treating every document as
+        // Unicode is conservative and avoids rescanning the document table per query.
+        return new NonAsciiDocumentStats(DocumentCount, ContentBytes);
     }
 
     public void Dispose()
@@ -738,12 +733,12 @@ public sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException("Invalid Sift content length.");
         }
 
-        ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex, cancellationToken);
-        ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex, cancellationToken);
-        ValidateLexiconRegion(SegmentRegionId.ContentBiCsLex, cancellationToken);
-        ValidateLexiconRegion(SegmentRegionId.ContentBiIcLex, cancellationToken);
-        ValidateLexiconRegion(SegmentRegionId.PathTriCsLex, cancellationToken);
-        ValidateLexiconRegion(SegmentRegionId.PathTriIcLex, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex, validateChecksums, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex, validateChecksums, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentBiCsLex, validateChecksums, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentBiIcLex, validateChecksums, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.PathTriCsLex, validateChecksums, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.PathTriIcLex, validateChecksums, cancellationToken);
         if (validateChecksums)
         {
             ValidateDocuments(cancellationToken);

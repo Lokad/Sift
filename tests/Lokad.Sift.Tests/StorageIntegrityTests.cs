@@ -686,6 +686,32 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task LegacyStatsUseConservativeNonAsciiDensityWithoutScanningDocuments()
+    {
+        var documents = new[]
+        {
+            CreateStoredDocument("src/ascii.txt", "alpha"),
+            CreateStoredDocument("src/unicode.txt", "café")
+        };
+        var (current, _) = SegmentWriter.WriteToBytes(0x1234UL, documents, CancellationToken.None);
+        var currentChecksumOffset = BinaryPrimitives.ReadInt64LittleEndian(current.AsSpan(52));
+        var removedBytes = SegmentFormat.StatsLength - SegmentFormat.LegacyStatsLength;
+        var legacy = new byte[current.Length - removedBytes];
+        current.AsSpan(0, checked((int)currentChecksumOffset - removedBytes)).CopyTo(legacy);
+        current.AsSpan(checked((int)currentChecksumOffset)).CopyTo(legacy.AsSpan(checked((int)currentChecksumOffset - removedBytes)));
+        BinaryPrimitives.WriteInt64LittleEndian(legacy.AsSpan(52), currentChecksumOffset - removedBytes);
+        var statsDirectoryLengthOffset = SegmentFormat.HeaderSize +
+            ((int)SegmentRegionId.Stats - 1) * SegmentFormat.RegionDirectoryEntrySize + 12;
+        BinaryPrimitives.WriteInt64LittleEndian(legacy.AsSpan(statsDirectoryLengthOffset), SegmentFormat.LegacyStatsLength);
+
+        using var segment = new MappedSegment(legacy, validateChecksums: false);
+        var stats = segment.GetNonAsciiDocumentStats();
+
+        Assert.Equal(segment.DocumentCount, stats.DocumentCount);
+        Assert.Equal(segment.ContentBytes, stats.ContentBytes);
+    }
+
+    [Fact]
     public async Task SegmentFormatReservesFutureSidecarRegionIds()
     {
         Assert.Equal(17, SegmentFormat.RegionCount);
