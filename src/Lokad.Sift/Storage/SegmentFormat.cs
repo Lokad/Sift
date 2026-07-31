@@ -50,6 +50,10 @@ internal static class SegmentFormat
     public const int LegacyManifestEntryHeaderSize = 28;
     public const int LexiconBucketCount = 257;
     public const int LexiconHeaderSize = 4 + (LexiconBucketCount * 4);
+    public const int LegacyStatsLength = 8 + 256 * 4;
+    public const int NonAsciiDocumentCountOffset = LegacyStatsLength;
+    public const int NonAsciiContentBytesOffset = NonAsciiDocumentCountOffset + 4;
+    public const int StatsLength = NonAsciiContentBytesOffset + 8;
 
     public static int GetLexiconSuffixSize(SegmentRegionId regionId)
     {

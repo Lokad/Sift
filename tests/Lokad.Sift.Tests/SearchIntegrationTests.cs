@@ -1209,6 +1209,37 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task UnicodeDenseInsensitiveRegexUsesHonestDirectPlan()
+    {
+        var documents = Enumerable.Range(0, 1000)
+            .Select(static index => index < 900
+                ? ($"src/{index:D4}.txt", $"café filler {index:D4}\n")
+                : ($"src/{index:D4}.txt", $"ascii filler {index:D4}\n"))
+            .ToArray();
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0
+        });
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery("ZZZ+", PatternMode.Regex, CaseMode.Insensitive);
+        var plan = snapshot.Explain(query, new PathFilter());
+        var collector = new HitBuffer();
+        var stats = snapshot.Search(query, new PathFilter(), collector);
+
+        Assert.False(plan.UsesIndex);
+        Assert.Equal("DirectScan", plan.CandidateKind);
+        Assert.Equal("Utf8RegexWithUnicodeFallback", plan.VerifierKind);
+        Assert.True(plan.NeedsUnicodeDecode);
+        Assert.Equal(900, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Empty(collector.Hits);
+    }
+
+    [Fact]
     public async Task RegexVerifierExposesCacheHitAndMissCounters()
     {
         using var fixture = new CorpusFixture(

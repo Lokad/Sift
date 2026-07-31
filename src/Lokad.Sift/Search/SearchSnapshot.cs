@@ -72,6 +72,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         long scopeBytes = 0;
         var selected = new List<SelectedNGram>(4);
         var usesIndex = false;
+        var usesUnicodeFallback = false;
         SearchPlanCandidate? explainedPlan = null;
         long explainedScopeBytes = -1;
         var explainedPathCost = 0d;
@@ -91,6 +92,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 CancellationToken.None);
             scopeDocuments += segmentPlan.Scope.Count;
             scopeBytes += segmentPlan.Scope.Bytes;
+            usesUnicodeFallback |=
+                segmentPlan.ContentPlan.ChosenPlan.VerifierKind ==
+                SearchVerifierKind.Utf8RegexWithUnicodeFallback;
             if (explainedPlan is null || segmentPlan.Scope.Bytes > explainedScopeBytes)
             {
                 explainedPlan = segmentPlan.ContentPlan.ChosenPlan;
@@ -121,11 +125,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var patternKind = query.PatternMode == PatternMode.Regex ? regexPlan.PatternKind : "Literal";
         var canUseLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
         var canUseNonBacktracking = query.PatternMode == PatternMode.Regex && regexPlan.CanUseNonBacktracking;
-        var needsUnicodeDecode = RegexExecutionPlanner.NeedsUnicodeDecode(query, mandatoryFragments, resolvedCaseMode, regexPlan);
+        var needsUnicodeDecode =
+            RegexExecutionPlanner.NeedsUnicodeDecode(query, mandatoryFragments, resolvedCaseMode, regexPlan) ||
+            usesUnicodeFallback;
         var mayRequireWholeDocumentVerification = query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral || query.WholeLine || query.Multiline;
         var candidateKind = explainedPlan?.CandidateKind ?? RegexExecutionPlanner.GetCandidateKind(query, usesIndex, selected, regexPlan);
         var planFamily = explainedPlan?.PlanFamily ?? RegexExecutionPlanner.GetPlanFamily(query, usesIndex, selected, mandatoryFragments.Length > 0, regexPlan);
-        var verifierKind = explainedPlan?.VerifierKind ?? SearchPlanKinds.GetVerifierKind(query, regexPlan, usesIndex);
+        var verifierKind = usesUnicodeFallback
+            ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
+            : explainedPlan?.VerifierKind ?? SearchPlanKinds.GetVerifierKind(query, regexPlan, usesIndex);
         var plannerAlternatives = alternativeSums
             .Select(static pair => pair.Value.ToPlannerAlternative(pair.Key.PlanFamily, pair.Key.CandidateKind, pair.Key.VerifierKind, pair.Key.UsesIndex))
             .OrderBy(static alternative => alternative.EstimatedCost)
@@ -800,10 +808,25 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         static SegmentCache CreateCache(MappedSegment segment, SegmentManifestEntry manifestEntry)
         {
+            var nonAscii = segment.GetNonAsciiDocumentStats();
+            var liveNonAsciiDocuments = nonAscii.DocumentCount;
+            var liveNonAsciiBytes = nonAscii.ContentBytes;
+            foreach (var deadOrdinal in manifestEntry.DeadOrdinals)
+            {
+                var deadDocument = segment.GetDocument(deadOrdinal);
+                if ((deadDocument.Flags & (1 << 1)) == 0)
+                {
+                    liveNonAsciiDocuments--;
+                    liveNonAsciiBytes -= deadDocument.ContentLength;
+                }
+            }
+
             return new SegmentCache(
                 segment,
                 manifestEntry.DeadOrdinals,
-                manifestEntry.ContentBytes - manifestEntry.DeadContentBytes);
+                manifestEntry.ContentBytes - manifestEntry.DeadContentBytes,
+                liveNonAsciiDocuments,
+                liveNonAsciiBytes);
         }
     }
 
@@ -1917,7 +1940,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
 internal readonly record struct SegmentScope(
     OrdinalSet Ordinals,
-    long Bytes)
+    long Bytes,
+    int NonAsciiDocuments,
+    long NonAsciiBytes)
 {
     public int Count => Ordinals.Count;
 }
@@ -1929,17 +1954,26 @@ internal interface IPathVisibility
 
 internal readonly struct SegmentCache
 {
-    public SegmentCache(MappedSegment segment, uint[] deadOrdinals, long liveContentBytes)
+    public SegmentCache(
+        MappedSegment segment,
+        uint[] deadOrdinals,
+        long liveContentBytes,
+        int liveNonAsciiDocuments,
+        long liveNonAsciiBytes)
     {
         Segment = segment;
         DeadOrdinals = deadOrdinals;
         LiveContentBytes = liveContentBytes;
+        LiveNonAsciiDocuments = liveNonAsciiDocuments;
+        LiveNonAsciiBytes = liveNonAsciiBytes;
     }
 
     public MappedSegment Segment { get; }
     public uint[] DeadOrdinals { get; }
 
     public long LiveContentBytes { get; }
+    public int LiveNonAsciiDocuments { get; }
+    public long LiveNonAsciiBytes { get; }
 }
 
 internal readonly struct SnapshotOperation : IDisposable

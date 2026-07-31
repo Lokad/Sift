@@ -126,7 +126,7 @@ internal static class SearchPlanCandidateBuilder
             LiteralPlan.Direct(features.Query.CaseMode, scope.Count, scope.Bytes),
             features.RegexPlan.GetDirectScanPlanFamily(features.HasMandatoryFragments),
             SearchCandidateKind.DirectScan,
-            SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan, usesIndex: false),
+            GetVerifierKind(features, scope, usesIndex: false),
             SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan),
             null,
             scope.Count,
@@ -137,6 +137,18 @@ internal static class SearchPlanCandidateBuilder
     private static SearchPlanCandidate CreateRegexIndexedCandidate(in SearchQueryFeatures features, SegmentScope scope, in LiteralPlan literalPlan, double estimatedCandidates, SiftOptions options)
     {
         var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
+        var includesUnicodeFallback =
+            features.Query.PatternMode == PatternMode.Regex &&
+            features.ResolvedCaseMode == CaseMode.Insensitive &&
+            features.RegexPlan.UsesUtf8Regex &&
+            scope.NonAsciiDocuments > 0;
+        if (includesUnicodeFallback)
+        {
+            estimatedCandidates = Math.Min(
+                scope.Count,
+                estimatedCandidates + scope.NonAsciiDocuments);
+        }
+
         var minimumPatternBytes = literalPlan.MandatoryFragment.Length;
         if (minimumPatternBytes == 0 && selected.Length > 0)
         {
@@ -144,24 +156,53 @@ internal static class SearchPlanCandidateBuilder
         }
 
         var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) * features.RegexPlan.DirectScanCostMultiplier;
-        double? estimatedIndexedCost = literalPlan.IsMissingGram
+        var indexCanRejectEntireScope = literalPlan.IsMissingGram && !includesUnicodeFallback;
+        double? estimatedIndexedCost = indexCanRejectEntireScope
             ? 0d
-            : SearchPlanner.EstimateIndexedCost(minimumPatternBytes, estimatedCandidates, literalPlan.SelectedGrams, features.RegexPlan);
-        var estimatedCost = literalPlan.IsMissingGram
+            : SearchPlanner.EstimateIndexedCost(
+                minimumPatternBytes,
+                estimatedCandidates,
+                literalPlan.SelectedGrams,
+                features.RegexPlan) +
+              (includesUnicodeFallback
+                  ? scope.NonAsciiBytes * features.RegexPlan.DirectScanCostMultiplier
+                  : 0d);
+        var estimatedCost = indexCanRejectEntireScope
             ? 0d
-            : SearchPlanner.ShouldPreferRegexDirectScan(scope, literalPlan.SelectedGrams, estimatedCandidates, directScanCost, estimatedIndexedCost ?? 0d, options)
+            : SearchPlanner.ShouldPreferRegexDirectScan(
+                scope,
+                literalPlan.SelectedGrams,
+                estimatedCandidates,
+                directScanCost,
+                estimatedIndexedCost ?? 0d,
+                includesUnicodeFallback,
+                options)
                 ? directScanCost + 1d
                 : estimatedIndexedCost ?? 0d;
         return new SearchPlanCandidate(
             literalPlan,
             SearchPlanner.GetPlanFamily(features.Query, selected, features.HasMandatoryFragments, features.RegexPlan, usesIndex: true, literalPlan.UnionCandidates, literalPlan.UnionGroupLengths is not null),
             SearchPlanner.GetCandidateKind(features.Query, selected, features.RegexPlan, usesIndex: true, literalPlan.UnionCandidates, literalPlan.UnionGroupLengths is not null),
-            SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan, usesIndex: true),
+            GetVerifierKind(features, scope, usesIndex: true),
             directScanCost,
             estimatedIndexedCost,
             estimatedCandidates,
             selected,
             estimatedCost);
+    }
+
+    private static SearchVerifierKind GetVerifierKind(
+        in SearchQueryFeatures features,
+        SegmentScope scope,
+        bool usesIndex)
+    {
+        var verifier = SearchPlanKinds.GetVerifierKind(
+            features.Query,
+            features.RegexPlan,
+            usesIndex);
+        return verifier == SearchVerifierKind.Utf8Regex && scope.NonAsciiDocuments > 0
+            ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
+            : verifier;
     }
 
     private static LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans, CaseMode resolvedCaseMode, SegmentScope scope, in RegexExecutionPlan regexPlan)

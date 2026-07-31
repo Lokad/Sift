@@ -74,6 +74,7 @@ internal enum SearchVerifierKind
     IndexedLiteral,
     Utf8RegexLiteral,
     Utf8Regex,
+    Utf8RegexWithUnicodeFallback,
     RegexFallback
 }
 
@@ -161,6 +162,7 @@ internal static class SearchPlanKinds
             SearchVerifierKind.IndexedLiteral => "IndexedLiteral",
             SearchVerifierKind.Utf8RegexLiteral => "Utf8RegexLiteral",
             SearchVerifierKind.Utf8Regex => "Utf8Regex",
+            SearchVerifierKind.Utf8RegexWithUnicodeFallback => "Utf8RegexWithUnicodeFallback",
             SearchVerifierKind.RegexFallback => "RegexFallback",
             _ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
         };

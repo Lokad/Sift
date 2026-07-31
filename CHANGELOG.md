@@ -33,6 +33,8 @@
   redundant manifest generations while preserving legacy-manifest migration.
 - Avoided publishing replacement segments for byte-identical upserts and
   reported skipped documents and bytes in `UpdateStats`.
+- Made regex planning account for Unicode fallback document and byte density,
+  and report mixed UTF-8/.NET verification accurately through `Explain`.
 
 ### Breaking changes
 

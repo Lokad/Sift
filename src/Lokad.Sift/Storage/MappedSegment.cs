@@ -521,6 +521,41 @@ public sealed unsafe class MappedSegment : IDisposable
         return LittleEndianCodec.ReadInt32(stats.Slice(bucketOffset, 4));
     }
 
+    internal NonAsciiDocumentStats GetNonAsciiDocumentStats()
+    {
+        var region = GetRegion(SegmentRegionId.Stats);
+        if (region.Length >= SegmentFormat.StatsLength)
+        {
+            var stats = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
+            var documentCount = LittleEndianCodec.ReadInt32(stats[SegmentFormat.NonAsciiDocumentCountOffset..]);
+            var contentBytes = LittleEndianCodec.ReadInt64(stats[SegmentFormat.NonAsciiContentBytesOffset..]);
+            if (documentCount < 0 || documentCount > DocumentCount ||
+                contentBytes < 0 || contentBytes > ContentBytes)
+            {
+                throw new InvalidDataException("Invalid non-ASCII Sift document statistics.");
+            }
+
+            return new NonAsciiDocumentStats(documentCount, contentBytes);
+        }
+
+        // Segments written before these counters were appended remain readable.
+        var legacyDocumentCount = 0;
+        long legacyContentBytes = 0;
+        for (uint ordinal = 0; ordinal < DocumentCount; ordinal++)
+        {
+            var document = GetDocument(ordinal);
+            if ((document.Flags & (1 << 1)) != 0)
+            {
+                continue;
+            }
+
+            legacyDocumentCount++;
+            legacyContentBytes += document.ContentLength;
+        }
+
+        return new NonAsciiDocumentStats(legacyDocumentCount, legacyContentBytes);
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -754,6 +789,10 @@ public delegate void PostingsVisitor(ReadOnlySpan<byte> payload, int docFreq);
 public readonly record struct PostingsMetadata(
     int DocumentFrequency,
     int EncodedBytes);
+
+internal readonly record struct NonAsciiDocumentStats(
+    int DocumentCount,
+    long ContentBytes);
 
 public readonly record struct IndexRegionPair(
     SegmentRegionId Lexicon,

@@ -142,7 +142,14 @@ internal static class SearchPlanner
         return indexedCost >= directScanCost;
     }
 
-    internal static bool ShouldPreferRegexDirectScan(SegmentScope scope, SelectedGram[] selected, double estimatedCandidates, double directScanCost, double indexedCost, SiftOptions options)
+    internal static bool ShouldPreferRegexDirectScan(
+        SegmentScope scope,
+        SelectedGram[] selected,
+        double estimatedCandidates,
+        double directScanCost,
+        double indexedCost,
+        bool includesUnicodeFallback,
+        SiftOptions options)
     {
         if (selected.Length == 0)
         {
@@ -156,6 +163,13 @@ internal static class SearchPlanner
 
         if (options.DirectScanCandidateDensityThreshold > 0 &&
             estimatedCandidates >= Math.Ceiling(scope.Count * options.DirectScanCandidateDensityThreshold))
+        {
+            return true;
+        }
+
+        if (includesUnicodeFallback &&
+            options.DirectScanCandidateDensityThreshold > 0 &&
+            scope.NonAsciiBytes >= Math.Ceiling(scope.Bytes * options.DirectScanCandidateDensityThreshold))
         {
             return true;
         }
@@ -218,14 +232,28 @@ internal static class SearchPlanner
                 prefixRange.StartInclusive,
                 prefixRange.EndExclusive,
                 cache.DeadOrdinals);
-            var contentBytes = prefixRange.StartInclusive == 0 && prefixRange.EndExclusive == (uint)cache.Segment.DocumentCount
-                ? cache.LiveContentBytes
-                : SumContentBytes(cache, ordinals, cancellationToken);
-            return new SegmentScope(ordinals, contentBytes);
+            if (prefixRange.StartInclusive == 0 &&
+                prefixRange.EndExclusive == (uint)cache.Segment.DocumentCount)
+            {
+                return new SegmentScope(
+                    ordinals,
+                    cache.LiveContentBytes,
+                    cache.LiveNonAsciiDocuments,
+                    cache.LiveNonAsciiBytes);
+            }
+
+            var metrics = GetScopeMetrics(cache, ordinals, cancellationToken);
+            return new SegmentScope(
+                ordinals,
+                metrics.ContentBytes,
+                metrics.NonAsciiDocuments,
+                metrics.NonAsciiBytes);
         }
 
         var acceptedOrdinals = new List<uint>(scopedOrdinals.Count);
         long bytes = 0;
+        var nonAsciiDocuments = 0;
+        long nonAsciiBytes = 0;
         var deadIndex = 0;
         var scanned = 0;
         foreach (var ordinal in scopedOrdinals)
@@ -258,13 +286,27 @@ internal static class SearchPlanner
 
             acceptedOrdinals.Add(ordinal);
             bytes += document.ContentLength;
+            if ((document.Flags & (1 << 1)) == 0)
+            {
+                nonAsciiDocuments++;
+                nonAsciiBytes += document.ContentLength;
+            }
         }
 
-        return new SegmentScope(OrdinalSet.FromSorted([.. acceptedOrdinals]), bytes);
+        return new SegmentScope(
+            OrdinalSet.FromSorted([.. acceptedOrdinals]),
+            bytes,
+            nonAsciiDocuments,
+            nonAsciiBytes);
 
-        static long SumContentBytes(SegmentCache cache, OrdinalSet ordinals, CancellationToken cancellationToken)
+        static ScopeMetrics GetScopeMetrics(
+            SegmentCache cache,
+            OrdinalSet ordinals,
+            CancellationToken cancellationToken)
         {
             long bytes = 0;
+            var nonAsciiDocuments = 0;
+            long nonAsciiBytes = 0;
             var scanned = 0;
             foreach (var ordinal in ordinals)
             {
@@ -273,10 +315,16 @@ internal static class SearchPlanner
                     cancellationToken.ThrowIfCancellationRequested();
                 }
 
-                bytes += cache.Segment.GetDocument(ordinal).ContentLength;
+                var document = cache.Segment.GetDocument(ordinal);
+                bytes += document.ContentLength;
+                if ((document.Flags & (1 << 1)) == 0)
+                {
+                    nonAsciiDocuments++;
+                    nonAsciiBytes += document.ContentLength;
+                }
             }
 
-            return bytes;
+            return new ScopeMetrics(bytes, nonAsciiDocuments, nonAsciiBytes);
         }
     }
 
@@ -298,6 +346,11 @@ internal static class SearchPlanner
         return cost;
     }
 }
+
+internal readonly record struct ScopeMetrics(
+    long ContentBytes,
+    int NonAsciiDocuments,
+    long NonAsciiBytes);
 
 internal readonly record struct SearchQueryFeatures(
     SearchQuery Query,

@@ -121,7 +121,7 @@ internal static unsafe class SegmentWriter
 
             totalLength = checked(
                 totalLength +
-                PreparedSegment.StatsLength +
+                SegmentFormat.StatsLength +
                 SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize);
             return new PreparedSegment(
                 rows,
@@ -177,7 +177,7 @@ internal static unsafe class SegmentWriter
         var pathTriIcLexOffset = checked(pathTriCsPostOffset + indexes[4].Postings.Length);
         var pathTriIcPostOffset = checked(pathTriIcLexOffset + indexes[5].Lexicon.Length);
         var statsOffset = checked(pathTriIcPostOffset + indexes[5].Postings.Length);
-        var checksumTableOffset = checked(statsOffset + PreparedSegment.StatsLength);
+        var checksumTableOffset = checked(statsOffset + SegmentFormat.StatsLength);
 
         var header = bytes[..SegmentFormat.HeaderSize];
         LittleEndianCodec.WriteUInt64(header, SegmentFormat.SegmentMagic);
@@ -211,7 +211,7 @@ internal static unsafe class SegmentWriter
                 pathTriCsPostOffset, indexes[4].Postings.Length,
                 pathTriIcLexOffset, indexes[5].Lexicon.Length,
                 pathTriIcPostOffset, indexes[5].Postings.Length,
-                statsOffset, PreparedSegment.StatsLength
+                statsOffset, SegmentFormat.StatsLength
             ]);
 
         var documentTable = bytes.Slice(documentTableOffset, rows.Length * SegmentFormat.DocumentRowSize);
@@ -234,10 +234,25 @@ internal static unsafe class SegmentWriter
         var pathBlob = bytes.Slice(pathBlobOffset, prepared.PathBlobLength);
         var contentBlob = bytes.Slice(contentBlobOffset, prepared.ContentBlobLength);
         var lineIndexBlob = bytes.Slice(lineIndexBlobOffset, prepared.LineIndexBlobLength);
-        var stats = bytes.Slice(statsOffset, PreparedSegment.StatsLength);
+        var stats = bytes.Slice(statsOffset, SegmentFormat.StatsLength);
         stats.Clear();
         LittleEndianCodec.WriteInt32(stats, rows.Length);
         LittleEndianCodec.WriteInt32(stats[4..], prepared.ContentBlobLength);
+        var nonAsciiDocumentCount = 0;
+        long nonAsciiContentBytes = 0;
+        for (var i = 0; i < rows.Length; i++)
+        {
+            if ((rows[i].Flags & (1 << 1)) != 0)
+            {
+                continue;
+            }
+
+            nonAsciiDocumentCount++;
+            nonAsciiContentBytes += rows[i].ContentLength;
+        }
+
+        LittleEndianCodec.WriteInt32(stats[SegmentFormat.NonAsciiDocumentCountOffset..], nonAsciiDocumentCount);
+        LittleEndianCodec.WriteInt64(stats[SegmentFormat.NonAsciiContentBytesOffset..], nonAsciiContentBytes);
 
         var pathOffsetCursor = 0;
         var contentOffsetCursor = 0;
@@ -376,8 +391,6 @@ internal static unsafe class SegmentWriter
         BuiltIndex[] Indexes,
         int TotalLength) : IDisposable
     {
-        public const int StatsLength = 8 + 256 * 4;
-
         public void Dispose()
         {
             foreach (var index in Indexes)

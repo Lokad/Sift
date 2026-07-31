@@ -597,6 +597,25 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task StatsRegionStoresNonAsciiDocumentDensity()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/ascii.txt", "alpha"),
+            ("src/unicode.txt", "café"),
+            ("src/empty.txt", string.Empty));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        var manifest = storage.ReadManifest();
+        using var segment = storage.OpenSegment(manifest.Segments[0].SegmentId);
+
+        var stats = segment.GetNonAsciiDocumentStats();
+        Assert.Equal(1, stats.DocumentCount);
+        Assert.Equal("café"u8.Length, stats.ContentBytes);
+    }
+
+    [Fact]
     public async Task SegmentFormatReservesFutureSidecarRegionIds()
     {
         Assert.Equal(17, SegmentFormat.RegionCount);
