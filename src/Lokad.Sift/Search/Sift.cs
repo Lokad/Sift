@@ -14,6 +14,7 @@ public sealed class Sift : ISift
     private readonly ISiftStorage _storage;
     private readonly IndexBuilder _builder;
     private readonly SiftOptions _options;
+    private readonly IDisposable _indexingWorkspaceLease;
     private readonly CancellationTokenSource _writerCancellation = new();
     private readonly ManualResetEventSlim _writersIdle = new(initialState: true);
     private readonly CancellationTokenSource _reclamationCancellation = new();
@@ -60,6 +61,7 @@ public sealed class Sift : ISift
     {
         _options = options;
         ValidateSiftOptions(_options);
+        _indexingWorkspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
         _storage = storage;
         _builder = new IndexBuilder(_storage, _options);
         try
@@ -70,6 +72,11 @@ public sealed class Sift : ISift
         {
             _rebuildCause = exception;
             return;
+        }
+        catch
+        {
+            _indexingWorkspaceLease.Dispose();
+            throw;
         }
 
         ScheduleReclamationIfPending();
@@ -779,6 +786,7 @@ public sealed class Sift : ISift
         }
 
         _reclamationIdle.Wait();
+        _indexingWorkspaceLease.Dispose();
         _writerCancellation.Dispose();
         _writersIdle.Dispose();
         _validationCancellation.Dispose();

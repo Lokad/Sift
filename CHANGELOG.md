@@ -19,6 +19,8 @@
 - Reduced update, indexing, and compaction memory pressure by avoiding decoded
   path copies, streaming compacted documents, and moving fixed index workspaces
   off the managed heap.
+- Released pooled native indexing workspaces when the last `Sift` instance is
+  disposed and exposed their current footprint through process metrics.
 - Reduced regex-search overhead by preparing verifiers once per query,
   coalescing concurrent cache creation, and mapping Unicode offsets
   incrementally.

@@ -8,6 +8,13 @@ internal static class SegmentIndexBuilder
 {
     private static DirectIndexedGramBuilder? s_bigramBuilder;
     private static DirectIndexedGramBuilder? s_trigramBuilder;
+    private static int s_workspaceLeaseCount;
+
+    internal static IDisposable AcquireWorkspaceLease()
+    {
+        Interlocked.Increment(ref s_workspaceLeaseCount);
+        return new WorkspaceLease();
+    }
 
     public static BuiltIndex BuildContentIndex<TDocument>(
         IReadOnlyList<TDocument> documents,
@@ -654,11 +661,37 @@ internal static class SegmentIndexBuilder
         }
     }
 
+    private static void ReleaseWorkspaceLease()
+    {
+        if (Interlocked.Decrement(ref s_workspaceLeaseCount) != 0)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref s_bigramBuilder, null)?.Dispose();
+        Interlocked.Exchange(ref s_trigramBuilder, null)?.Dispose();
+    }
+
+    private sealed class WorkspaceLease : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                ReleaseWorkspaceLease();
+            }
+        }
+    }
+
 }
 
 internal sealed unsafe class DirectIndexedGramBuilder : IDisposable
 {
+    private static long s_currentNativeWorkspaceBytes;
     private readonly int _domainSize;
+    private readonly long _workspaceBytes;
     private void* _workspace;
     private ushort* _counts;
     private ushort* _seen;
@@ -678,11 +711,14 @@ internal sealed unsafe class DirectIndexedGramBuilder : IDisposable
         GramLength = gramLength;
         var domainSize = gramLength == 2 ? 1 << 16 : 1 << 24;
         _domainSize = domainSize;
-        _workspace = NativeMemory.AllocZeroed(checked((nuint)domainSize * 8));
+        _workspaceBytes = checked((long)domainSize * 8);
+        _workspace = NativeMemory.AllocZeroed((nuint)_workspaceBytes);
         if (_workspace == null)
         {
             throw new OutOfMemoryException();
         }
+
+        Interlocked.Add(ref s_currentNativeWorkspaceBytes, _workspaceBytes);
 
         // These domain-sized primitive tables are reused across segment indexes.
         // Native storage keeps the fixed workspace out of the managed heap
@@ -692,6 +728,9 @@ internal sealed unsafe class DirectIndexedGramBuilder : IDisposable
         _gramIndexes = (int*)(_seen + domainSize);
         _touched = ArrayPool<int>.Shared.Rent(1024);
     }
+
+    internal static long CurrentNativeWorkspaceBytes =>
+        Interlocked.Read(ref s_currentNativeWorkspaceBytes);
 
     public void StartDocument()
     {
@@ -982,6 +1021,7 @@ internal sealed unsafe class DirectIndexedGramBuilder : IDisposable
 
         NativeMemory.Free(_workspace);
         _workspace = null;
+        Interlocked.Add(ref s_currentNativeWorkspaceBytes, -_workspaceBytes);
         _counts = null;
         _seen = null;
         _gramIndexes = null;
