@@ -101,6 +101,16 @@ public sealed class RegexAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzerTreatsOversizedQuantifiersAndSurrogatesAsUnsupported()
+    {
+        const string oversized = "a{999999999999999999999999999999}";
+
+        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral(oversized, out _));
+        Assert.Empty(RegexFragmentAnalyzer.ExtractMandatoryFragments(oversized));
+        Assert.Empty(RegexFragmentAnalyzer.ExtractMandatoryFragments("\\uD800"));
+    }
+
+    [Fact]
     public async Task NegativeLookaroundsDoNotContributeMandatoryFragments()
     {
         var lookahead = RegexFragmentAnalyzer.ExtractMandatoryFragments("foo(?!bar)");

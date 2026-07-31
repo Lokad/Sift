@@ -50,6 +50,8 @@
 
 ### Fixed
 
+- Prevented oversized regex quantifiers and lone surrogate escapes from crashing
+  Sift's advisory analyzers with implementation exceptions.
 - Treated supplementary-plane Unicode letters and digits as single word
   characters for whole-word literal boundaries.
 - Failed rejected updates at the first invalid document and included its

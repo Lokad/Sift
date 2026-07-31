@@ -714,7 +714,18 @@ internal static class Utf8RegexEngine
             var start = _index;
             while (_index < _pattern.Length && char.IsDigit(_pattern[_index]))
             {
-                value = checked(value * 10 + (_pattern[_index++] - '0'));
+                var digit = _pattern[_index++] - '0';
+                if (value > (int.MaxValue - digit) / 10)
+                {
+                    while (_index < _pattern.Length && char.IsDigit(_pattern[_index]))
+                    {
+                        _index++;
+                    }
+
+                    return false;
+                }
+
+                value = value * 10 + digit;
             }
 
             return _index > start;

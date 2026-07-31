@@ -654,6 +654,13 @@ internal static class RegexFragmentAnalyzer
                 value = (value << 4) | hex;
             }
 
+            if (!Rune.IsValid(value))
+            {
+                // Lone UTF-16 surrogates are legal regex input but not Unicode scalars.
+                _unsupported = true;
+                return NodeResult.None;
+            }
+
             return NodeResult.Literal(char.ConvertFromUtf32(value));
         }
 
@@ -694,7 +701,15 @@ internal static class RegexFragmentAnalyzer
             var min = 0;
             while (_index < _pattern.Length && char.IsDigit(_pattern[_index]))
             {
-                min = checked(min * 10 + (_pattern[_index++] - '0'));
+                var digit = _pattern[_index++] - '0';
+                if (min > (int.MaxValue - digit) / 10)
+                {
+                    // Planning is advisory; oversized quantifiers belong to the verifier.
+                    _unsupported = true;
+                    return NodeResult.None;
+                }
+
+                min = min * 10 + digit;
             }
 
             var max = min;
@@ -706,7 +721,14 @@ internal static class RegexFragmentAnalyzer
                 while (_index < _pattern.Length && char.IsDigit(_pattern[_index]))
                 {
                     hasMaximum = true;
-                    max = checked(max * 10 + (_pattern[_index++] - '0'));
+                    var digit = _pattern[_index++] - '0';
+                    if (max > (int.MaxValue - digit) / 10)
+                    {
+                        _unsupported = true;
+                        return NodeResult.None;
+                    }
+
+                    max = max * 10 + digit;
                 }
 
                 max = hasMaximum ? max : int.MaxValue;

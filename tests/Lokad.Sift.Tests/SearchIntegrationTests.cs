@@ -53,6 +53,25 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task InvalidLargeQuantifierDoesNotEscapeAsArithmeticOverflow()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var snapshot = index.OpenSnapshot();
+
+        var exception = Record.Exception(() => snapshot.Search(
+            new SearchQuery(
+                "a{999999999999999999999999999999}",
+                PatternMode.Regex,
+                CaseMode.Sensitive),
+            new PathFilter(),
+            new HitBuffer()));
+
+        Assert.IsAssignableFrom<ArgumentException>(exception);
+        Assert.IsNotType<OverflowException>(exception);
+    }
+
+    [Fact]
     public async Task SearchRejectsOversizedAggregatePathFilter()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions
