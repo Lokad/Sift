@@ -2574,6 +2574,25 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task WholeWordFallbackRegexUsesUnicodeScalarBoundaries()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "\U00010400alpha alpha\U00010400 alpha"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive) { WholeWord = true },
+            new PathFilter(),
+            collector);
+
+        Assert.Single(collector.Hits);
+        Assert.Equal(1, stats.FallbackRegexInvocations);
+    }
+
+    [Fact]
     public async Task AsciiWholeWordLiteralSearchAvoidsUtf16Decode()
     {
         using var fixture = new CorpusFixture(

@@ -1263,7 +1263,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
 
             var end = found + pattern.Length;
-            if (query.WholeWord && !IsWholeWord(text, found, end))
+            if (query.WholeWord && !WordBoundary.IsWholeWord(text, found, end))
             {
                 searchIndex = found + 1;
                 continue;
@@ -1847,40 +1847,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         };
     }
 
-    private static bool IsWholeWord(string text, int start, int end)
-    {
-        return IsBoundaryBefore(text, start) && IsBoundaryAfter(text, end);
-    }
-
     private static bool IsWholeWordAscii(ReadOnlySpan<byte> contentBytes, int start, int end)
     {
         return IsBoundaryAscii(contentBytes, start - 1) && IsBoundaryAscii(contentBytes, end);
-    }
-
-    private static bool IsBoundaryBefore(string text, int index)
-    {
-        if (index <= 0)
-        {
-            return true;
-        }
-
-        var runeStart = index - 1;
-        if (char.IsLowSurrogate(text[runeStart]))
-        {
-            runeStart--;
-        }
-
-        return !IsWordRune(Rune.GetRuneAt(text, runeStart));
-    }
-
-    private static bool IsBoundaryAfter(string text, int index)
-    {
-        return index >= text.Length || !IsWordRune(Rune.GetRuneAt(text, index));
-    }
-
-    private static bool IsWordRune(Rune rune)
-    {
-        return Rune.IsLetterOrDigit(rune) || rune.Value == '_';
     }
 
     private static bool IsBoundaryAscii(ReadOnlySpan<byte> contentBytes, int index)

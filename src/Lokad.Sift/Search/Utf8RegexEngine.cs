@@ -27,7 +27,7 @@ internal static class Utf8RegexEngine
         [NotNullWhen(true)] out Utf8RegexProgram? program)
     {
         program = null;
-        var pattern = RegexVerifier.BuildPattern(query);
+        var pattern = RegexVerifier.BuildUtf8Pattern(query);
         if (query.PatternMode != PatternMode.Regex ||
             resolvedCaseMode == CaseMode.Smart ||
             !IsAscii(pattern) ||

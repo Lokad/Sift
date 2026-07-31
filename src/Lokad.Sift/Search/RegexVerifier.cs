@@ -64,6 +64,12 @@ internal static class RegexVerifier
                     return matched;
                 }
 
+                if (prepared.WholeWord &&
+                    !WordBoundary.IsWholeWord(text, match.Index, match.Index + match.Length))
+                {
+                    continue;
+                }
+
                 matched = true;
                 int startByte;
                 int endByte;
@@ -111,8 +117,18 @@ internal static class RegexVerifier
 
     public static string BuildPattern(in SearchQuery query)
     {
+        return BuildPattern(query, includeWholeWord: false);
+    }
+
+    public static string BuildUtf8Pattern(in SearchQuery query)
+    {
+        return BuildPattern(query, includeWholeWord: true);
+    }
+
+    private static string BuildPattern(in SearchQuery query, bool includeWholeWord)
+    {
         var pattern = query.Pattern;
-        if (query.WholeWord)
+        if (includeWholeWord && query.WholeWord)
         {
             pattern = $@"\b(?:{pattern})\b";
         }
@@ -128,7 +144,11 @@ internal static class RegexVerifier
     public static PreparedRegexVerifier Prepare(in SearchQuery query, CaseMode resolvedCaseMode)
     {
         var entry = GetRegexEntry(query, resolvedCaseMode);
-        return new PreparedRegexVerifier(entry.Regex, entry.UsesNonBacktracking, query.TimeoutPolicy);
+        return new PreparedRegexVerifier(
+            entry.Regex,
+            entry.UsesNonBacktracking,
+            query.WholeWord,
+            query.TimeoutPolicy);
     }
 
     public static Regex GetRegex(in SearchQuery query, CaseMode resolvedCaseMode)
@@ -227,4 +247,5 @@ internal static class RegexVerifier
 internal sealed record PreparedRegexVerifier(
     Regex Regex,
     bool UsesNonBacktracking,
+    bool WholeWord,
     TimeoutPolicy TimeoutPolicy);
