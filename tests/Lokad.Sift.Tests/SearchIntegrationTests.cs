@@ -8,6 +8,32 @@ namespace Lokad.Sift.Tests;
 public sealed class SearchIntegrationTests
 {
     [Fact]
+    public async Task SearchRejectsOversizedQueryAndPathPatterns()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            MaxPatternCharacters = 8,
+            MaxPathFilterPatterns = 2
+        });
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var snapshot = index.OpenSnapshot();
+
+        Assert.Throws<ArgumentException>(() => snapshot.Explain(
+            new SearchQuery("123456789", PatternMode.Regex, CaseMode.Sensitive),
+            new PathFilter()));
+        Assert.Throws<ArgumentException>(() => snapshot.Explain(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter { PathRegex = "123456789" }));
+        Assert.Throws<ArgumentException>(() => snapshot.Explain(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter
+            {
+                IncludeGlobs = ["src/**", "test/**"],
+                ExcludeGlobs = ["obj/**"]
+            }));
+    }
+
+    [Fact]
     public async Task LiteralSearchMatchesBruteForceBaseline()
     {
         using var fixture = new CorpusFixture(

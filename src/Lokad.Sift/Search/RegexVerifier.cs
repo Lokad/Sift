@@ -10,7 +10,11 @@ namespace Lokad.Sift.Search;
 internal static class RegexVerifier
 {
     internal const int CacheCapacity = 256;
-    private static readonly BoundedLruCache<RegexCacheKey, RegexEntry> Cache = new(CacheCapacity);
+    internal const int CachePatternCharacterCapacity = 256 * 1024;
+    private static readonly BoundedLruCache<RegexCacheKey, RegexEntry> Cache = new(
+        CacheCapacity,
+        CachePatternCharacterCapacity,
+        static key => key.Pattern.Length);
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
     private static long _cacheHits;
     private static long _cacheMisses;
@@ -18,6 +22,7 @@ internal static class RegexVerifier
     public static long CacheHits => Interlocked.Read(ref _cacheHits);
     public static long CacheMisses => Interlocked.Read(ref _cacheMisses);
     public static int CacheCount => Cache.Count;
+    public static int CachePatternCharacters => Cache.Weight;
 
     public static bool TrySearchDocument(
         MappedSegment segment,

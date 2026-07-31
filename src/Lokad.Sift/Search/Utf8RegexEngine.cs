@@ -12,9 +12,14 @@ namespace Lokad.Sift.Search;
 internal static class Utf8RegexEngine
 {
     internal const int CacheCapacity = 256;
-    private static readonly BoundedLruCache<Utf8RegexCacheKey, CompiledUtf8Regex> Cache = new(CacheCapacity);
+    internal const int CachePatternCharacterCapacity = 256 * 1024;
+    private static readonly BoundedLruCache<Utf8RegexCacheKey, CompiledUtf8Regex> Cache = new(
+        CacheCapacity,
+        CachePatternCharacterCapacity,
+        static key => key.Pattern.Length);
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
     internal static int CacheCount => Cache.Count;
+    internal static int CachePatternCharacters => Cache.Weight;
 
     public static bool TryCompile(
         in SearchQuery query,

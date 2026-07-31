@@ -27,7 +27,8 @@ using var index = new Sift(indexPath, new SiftOptions
     TargetSegmentDocumentCount = 50_000, // Start a new segment once about 50k documents accumulate.
     TargetSegmentContentBytes = 64L * 1024 * 1024, // Or once a segment reaches about 64 MiB of content.
     MaximumPhysicalBytes = 128L * 1024 * 1024 * 1024, // Optional corpus quota, including lifecycle metadata.
-    MinimumFreeBytesAfterMutation = 1536L * 1024 * 1024 // Preserve room for one default compaction pass.
+    MinimumFreeBytesAfterMutation = 1536L * 1024 * 1024, // Preserve room for one default compaction pass.
+    MaxPatternCharacters = 16 * 1024 // Bound query and path-filter compilation work.
 });
 // Alternative in-memory form:
 // using var index = Sift.CreateInMemory();

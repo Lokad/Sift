@@ -988,6 +988,11 @@ public sealed class Sift : ISift
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Materialization limits are invalid.");
         }
+
+        if (options.MaxPatternCharacters <= 0 || options.MaxPathFilterPatterns <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "Pattern limits must be positive.");
+        }
     }
 
     private IDisposable BeginActivity(SiftActivity activity)

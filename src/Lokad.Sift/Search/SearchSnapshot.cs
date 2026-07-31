@@ -61,6 +61,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
         ValidateQuery(query);
+        ValidatePathFilter(pathFilter);
         using var operation = BeginOperation();
         var resolvedCaseMode = ResolveCaseMode(query);
         var matcher = new PathFilterMatcher(pathFilter);
@@ -202,7 +203,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken cancellationToken)
     {
         ValidateQuery(query);
+        ValidatePathFilter(pathFilter);
         using var operation = BeginOperation();
+        var watch = Stopwatch.StartNew();
         using var deadlineCancellation = CreateDeadlineCancellation(
             query.MaxElapsedMilliseconds,
             cancellationToken);
@@ -214,14 +217,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 collector,
                 pathVisibility,
                 effectiveCancellationToken,
-                cancellationToken)
+                cancellationToken,
+                watch)
             : SearchSequential(
                 query,
                 pathFilter,
                 collector,
                 pathVisibility,
                 effectiveCancellationToken,
-                cancellationToken);
+                cancellationToken,
+                watch);
     }
 
     private SearchStats SearchSequential(
@@ -230,7 +235,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken,
-        CancellationToken callerCancellationToken)
+        CancellationToken callerCancellationToken,
+        Stopwatch watch)
     {
         ArgumentNullException.ThrowIfNull(collector);
 
@@ -243,7 +249,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
         var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
         var preparedOrderedAnchorGroups = PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups);
-        var watch = Stopwatch.StartNew();
         var scopeDocuments = 0;
         long scopeBytes = 0;
         long postingsBytesRead = 0;
@@ -266,6 +271,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         try
         {
+            if (HasElapsed(query, watch))
+            {
+                stopReason = SearchStopReason.MaxElapsedTime;
+                goto Done;
+            }
+
             foreach (var entry in _segments)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -447,7 +458,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken,
-        CancellationToken callerCancellationToken)
+        CancellationToken callerCancellationToken,
+        Stopwatch watch)
     {
         ArgumentNullException.ThrowIfNull(collector);
 
@@ -459,7 +471,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
         var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
         var preparedOrderedAnchorGroups = PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups);
-        var watch = Stopwatch.StartNew();
         var queryCopy = query;
         var options = new ParallelOptions
         {
@@ -485,6 +496,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         long byteRegexCacheMisses = preparedRegex.Utf8Regex?.CacheHit == false ? 1 : 0;
         var hitsReturned = 0;
         var stopReason = SearchStopReason.None;
+
+        if (HasElapsed(query, watch))
+        {
+            stopReason = SearchStopReason.MaxElapsedTime;
+            goto Done;
+        }
 
         // Consume one parallel-width batch at a time so completed segments and
         // their buffered raw hits do not accumulate for the entire corpus.
@@ -852,9 +869,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             this);
     }
 
-    private static void ValidateQuery(in SearchQuery query)
+    private void ValidateQuery(in SearchQuery query)
     {
         ArgumentNullException.ThrowIfNull(query.Pattern);
+        if (query.Pattern.Length > _options.MaxPatternCharacters)
+        {
+            throw new ArgumentException(
+                $"Search pattern exceeds the {_options.MaxPatternCharacters}-character limit.",
+                nameof(query));
+        }
+
         if (query.MaxHits <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(query), "MaxHits must be positive.");
@@ -878,6 +902,47 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         if (query.MaxElapsedMilliseconds <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(query), "MaxElapsedMilliseconds must be positive.");
+        }
+    }
+
+    private void ValidatePathFilter(in PathFilter pathFilter)
+    {
+        ValidatePathPattern(pathFilter.PathPrefix);
+        ValidatePathPattern(pathFilter.PathRegex);
+
+        var includeCount = pathFilter.IncludeGlobs?.Length ?? 0;
+        var excludeCount = pathFilter.ExcludeGlobs?.Length ?? 0;
+        if ((long)includeCount + excludeCount > _options.MaxPathFilterPatterns)
+        {
+            throw new ArgumentException(
+                $"Path filter exceeds the {_options.MaxPathFilterPatterns}-pattern limit.",
+                nameof(pathFilter));
+        }
+
+        if (pathFilter.IncludeGlobs is { } includes)
+        {
+            for (var i = 0; i < includes.Length; i++)
+            {
+                ValidatePathPattern(includes[i]);
+            }
+        }
+
+        if (pathFilter.ExcludeGlobs is { } excludes)
+        {
+            for (var i = 0; i < excludes.Length; i++)
+            {
+                ValidatePathPattern(excludes[i]);
+            }
+        }
+
+        void ValidatePathPattern(string? pattern)
+        {
+            if (pattern is not null && pattern.Length > _options.MaxPatternCharacters)
+            {
+                throw new ArgumentException(
+                    $"Path pattern exceeds the {_options.MaxPatternCharacters}-character limit.",
+                    nameof(pathFilter));
+            }
         }
     }
 

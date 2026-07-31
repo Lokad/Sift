@@ -64,6 +64,22 @@ public sealed class CacheTests
     }
 
     [Fact]
+    public void BoundedLruCacheEvictsByAggregateWeight()
+    {
+        var cache = new BoundedLruCache<int, string>(
+            capacity: 10,
+            maximumWeight: 5,
+            static key => key);
+
+        _ = cache.GetOrAdd(2, static _ => "two", out _);
+        _ = cache.GetOrAdd(3, static _ => "three", out _);
+        _ = cache.GetOrAdd(4, static _ => "four", out _);
+
+        Assert.Equal(1, cache.Count);
+        Assert.Equal(4, cache.Weight);
+    }
+
+    [Fact]
     public void UserRegexCacheIsBounded()
     {
         for (var i = 0; i < RegexVerifier.CacheCapacity + 32; i++)
@@ -73,5 +89,6 @@ public sealed class CacheTests
         }
 
         Assert.True(RegexVerifier.CacheCount <= RegexVerifier.CacheCapacity);
+        Assert.True(RegexVerifier.CachePatternCharacters <= RegexVerifier.CachePatternCharacterCapacity);
     }
 }
