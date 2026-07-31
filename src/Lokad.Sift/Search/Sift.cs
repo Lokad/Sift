@@ -268,6 +268,33 @@ public sealed class Sift : ISift
         }
     }
 
+    public bool ShouldCompact(CompactOptions options)
+    {
+        ThrowIfDisposed();
+        ThrowIfRebuildRequired();
+        ValidateCompactOptions(options);
+        try
+        {
+            bool shouldCompact;
+            using (var snapshot = _storage.OpenReadSnapshot())
+            {
+                shouldCompact = SelectSegmentsForCompaction(
+                    snapshot.Manifest,
+                    options,
+                    CancellationToken.None).Count > 0;
+            }
+
+            // A concurrent publication may have retired the briefly leased generation.
+            ScheduleReclamationIfPending();
+            return shouldCompact;
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
+    }
+
     public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
     {
         return Update(upserts, deletions, CancellationToken.None);
@@ -668,9 +695,9 @@ public sealed class Sift : ISift
                 "DeadContentFractionThreshold must be between zero and one.");
         }
 
-        if (options.SegmentCountTrigger < 1)
+        if (options.SmallSegmentMergeThreshold < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "SegmentCountTrigger must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(options), "SmallSegmentMergeThreshold must be positive.");
         }
 
         if (options.MetadataBloatDeadOrdinalsThreshold < 1)
@@ -1082,7 +1109,7 @@ public sealed class Sift : ISift
             selectedSegmentBytes += item.SegmentBytes;
         }
 
-        if (selected.Count > 0 || manifest.Segments.Count <= options.SegmentCountTrigger)
+        if (selected.Count > 0 || manifest.Segments.Count <= options.SmallSegmentMergeThreshold)
         {
             return selected;
         }

@@ -519,7 +519,7 @@ public sealed class StorageIntegrityTests
         var storage = TestHelpers.GetStorage(index);
         Assert.Equal(3, storage.ValidatedSegmentCount);
 
-        await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
+        await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
 
         Assert.Single(storage.ReadManifest().Segments);
         Assert.Equal(1, storage.ValidatedSegmentCount);

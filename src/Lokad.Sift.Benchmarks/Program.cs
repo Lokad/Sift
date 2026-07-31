@@ -1689,7 +1689,7 @@ static CompactScenarioResult RunCompactScenarioIsolated(
             {
                 MaxMergedSegments = 16,
                 DeadFractionThreshold = 0.0,
-                SegmentCountTrigger = 1,
+                SmallSegmentMergeThreshold = 1,
                 MetadataBloatDeadOrdinalsThreshold = 1
             }).GetAwaiter().GetResult());
             var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
@@ -1771,7 +1771,7 @@ static CompactScenarioResult RunCompactScenarioSteadyState(
             {
                 MaxMergedSegments = 16,
                 DeadFractionThreshold = 0.0,
-                SegmentCountTrigger = 1,
+                SmallSegmentMergeThreshold = 1,
                 MetadataBloatDeadOrdinalsThreshold = 1
             }).GetAwaiter().GetResult());
             var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;

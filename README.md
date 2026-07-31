@@ -124,14 +124,18 @@ var updatedStats = updatedSnapshot.Search(
 
 Console.WriteLine($"Updated search returned {updatedStats.HitsReturned} hit(s).");
 
-// 5. Optional: compact delta segments back into fewer immutable segments.
-CompactStats compact;
-do
+// 5. Optional: compact only when Sift's policy finds actionable debt.
+var compactOptions = new CompactOptions();
+if (index.ShouldCompact(compactOptions))
 {
-    compact = await index.Compact(new CompactOptions());
-    Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents in {compact.ElapsedMilliseconds} ms.");
+    CompactStats compact;
+    do
+    {
+        compact = await index.Compact(compactOptions);
+        Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents in {compact.ElapsedMilliseconds} ms.");
+    }
+    while (compact.HasMoreWork);
 }
-while (compact.HasMoreWork);
 
 var storage = index.GetStorageStats();
 Console.WriteLine(
@@ -169,28 +173,33 @@ overlay.Search(
 var foldBack = await overlay.ApplyTo(index);
 ```
 
-To decide explicitly whether compaction is worth doing, inspect the maintenance stats first:
+Use the same policy for the recommendation and the maintenance operation:
 
 ```csharp
-var maintenance = index.GetMaintenanceStats();
-
-Console.WriteLine(
-    $"segments={maintenance.SegmentCount} " +
-    $"deadDocs={maintenance.DeadDocuments} " +
-    $"deadFraction={maintenance.DeadDocumentFraction:F3} " +
-    $"reclaimableBytes={maintenance.EstimatedReclaimableContentBytes}");
-
-if (maintenance.SegmentCount > 16 || maintenance.DeadDocumentFraction >= 0.20)
+var options = new CompactOptions
 {
-    var compact = await index.Compact(new CompactOptions
-    {
-        SegmentCountTrigger = 16,
-        DeadFractionThreshold = 0.20
-    });
+    SmallSegmentMergeThreshold = 16,
+    DeadFractionThreshold = 0.20
+};
 
-    Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents.");
+if (index.ShouldCompact(options))
+{
+    CompactStats compact;
+    do
+    {
+        compact = await index.Compact(options);
+    }
+    while (compact.HasMoreWork);
 }
 ```
+
+`ShouldCompact(...)` uses the same per-segment selection as `Compact(...)`; it
+does not recommend work merely because a healthy corpus exceeds
+`SmallSegmentMergeThreshold` with target-sized segments. The result is a
+snapshot-based hint: a concurrent mutation may change the answer before
+`Compact(...)` starts, and a resulting no-op is harmless.
+`GetMaintenanceStats()` remains available for telemetry and diagnostics, but
+aggregate segment count is not itself a reliable compaction predicate.
 
 `Build(...)` and `Compact(...)` publish replacement segments and reclaim the packs
 that the new manifest no longer references. A pack remains in `RetiredSegmentBytes`
@@ -257,6 +266,7 @@ For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a fi
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
 - A rejected upsert leaves the previously indexed version searchable; inspect `RejectedUpserts` before checkpointing the source.
+- Use `ShouldCompact(...)` with the same options passed to `Compact(...)`; do not trigger on aggregate segment count alone.
 - `Compact(...)` is optional but useful after many updates, and owns cleanup of the segments it replaces.
 
 ## Related docs

@@ -471,12 +471,17 @@ Update batch rules:
 
 Compaction merges active live documents from selected segments into new segments.
 
-Trigger compaction when any is true:
+`ShouldCompact(options)` exposes the authoritative hint for the current
+generation. With the default policy, compaction is actionable when any is true:
 
-* segment count > `16`
+* enough mergeable small segments exist after segment count exceeds `16`
 * dead fraction in any segment > `20%`
-* many tiny delta segments exist
 * manifest dead-ordinal metadata becomes materially large
+
+Aggregate segment count is not a trigger by itself: a corpus may legitimately
+need more than 16 target-sized segments. The hint and `Compact(options)` use the
+same segment-selection policy. Because another mutation can publish between the
+two calls, callers must tolerate a subsequent no-op compaction.
 
 Compaction must not block queries.
 Compaction owns reclamation of the segments it replaces. A replaced pack is
@@ -812,6 +817,7 @@ public interface ISift : IDisposable
     IIndexSnapshot OpenSnapshot(SearchOptions options = default);
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default);
     StorageStats GetStorageStats();
+    bool ShouldCompact(CompactOptions options);
     BuildStats Build(IDocumentSource documents, CancellationToken cancellationToken = default);
     UpdateStats Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default);
     CompactStats Compact(CompactOptions options, CancellationToken cancellationToken = default);

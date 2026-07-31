@@ -87,7 +87,7 @@ public sealed class StorageLifecycleTests
         using var oldSnapshot = firstIndex.OpenSnapshot();
 
         using var secondIndex = new SiftIndex(fixture.CorpusPath);
-        await secondIndex.Compact(new CompactOptions { SegmentCountTrigger = 1 });
+        await secondIndex.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
 
         var whileLeased = secondIndex.GetStorageStats();
         Assert.True(whileLeased.RetiredSegmentCount > 0);
@@ -125,7 +125,7 @@ public sealed class StorageLifecycleTests
         {
             await WaitUntilAsync(() => File.Exists(readyPath), TimeSpan.FromSeconds(10));
 
-            await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
+            await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
             var whileLeased = index.GetStorageStats();
             Assert.True(whileLeased.LeasedGenerationCount > 0);
             Assert.True(whileLeased.SnapshotDeferredSegmentBytes > 0);
@@ -270,7 +270,7 @@ public sealed class StorageLifecycleTests
         };
 
         await Assert.ThrowsAsync<IOException>(
-            async () => await index.Compact(new CompactOptions { SegmentCountTrigger = 1 }));
+            async () => await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 }));
         storage.FaultInjector = null;
 
         var manifestBeforeRestart = storage.ReadManifest();
@@ -410,7 +410,7 @@ public sealed class StorageLifecycleTests
         Assert.Equal(16, options.MaxMergedSegments);
         Assert.Equal(0.20, options.DeadFractionThreshold);
         Assert.Equal(0.20, options.DeadContentFractionThreshold);
-        Assert.Equal(16, options.SegmentCountTrigger);
+        Assert.Equal(16, options.SmallSegmentMergeThreshold);
         Assert.Equal(1024, options.MetadataBloatDeadOrdinalsThreshold);
         Assert.Equal(1L * 1024 * 1024 * 1024, options.MaxInputSegmentBytes);
 

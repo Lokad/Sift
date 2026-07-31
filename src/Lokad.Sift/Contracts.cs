@@ -296,7 +296,7 @@ public sealed record CompactOptions
             maxMergedSegments: 16,
             deadFractionThreshold: 0.20,
             deadContentFractionThreshold: 0.20,
-            segmentCountTrigger: 16,
+            smallSegmentMergeThreshold: 16,
             metadataBloatDeadOrdinalsThreshold: 1024,
             maxInputSegmentBytes: 1L * 1024 * 1024 * 1024,
             minimumFreeBytesAfterCompaction: 512L * 1024 * 1024)
@@ -307,7 +307,7 @@ public sealed record CompactOptions
         int maxMergedSegments,
         double deadFractionThreshold,
         double deadContentFractionThreshold,
-        int segmentCountTrigger,
+        int smallSegmentMergeThreshold,
         int metadataBloatDeadOrdinalsThreshold,
         long maxInputSegmentBytes,
         long minimumFreeBytesAfterCompaction)
@@ -315,7 +315,7 @@ public sealed record CompactOptions
         MaxMergedSegments = maxMergedSegments;
         DeadFractionThreshold = deadFractionThreshold;
         DeadContentFractionThreshold = deadContentFractionThreshold;
-        SegmentCountTrigger = segmentCountTrigger;
+        SmallSegmentMergeThreshold = smallSegmentMergeThreshold;
         MetadataBloatDeadOrdinalsThreshold = metadataBloatDeadOrdinalsThreshold;
         MaxInputSegmentBytes = maxInputSegmentBytes;
         MinimumFreeBytesAfterCompaction = minimumFreeBytesAfterCompaction;
@@ -326,7 +326,8 @@ public sealed record CompactOptions
     public double DeadFractionThreshold { get; init; }
     // Selects segments whose deleted bodies account for this share of content bytes.
     public double DeadContentFractionThreshold { get; init; }
-    public int SegmentCountTrigger { get; init; }
+    // Delays clean small-segment merging until the corpus exceeds this pack count.
+    public int SmallSegmentMergeThreshold { get; init; }
     public int MetadataBloatDeadOrdinalsThreshold { get; init; }
     // Applies to physical packs; one larger debt-bearing segment remains reclaimable.
     public long MaxInputSegmentBytes { get; init; }
@@ -381,7 +382,7 @@ public readonly record struct MaintenanceStats(
     long DeadOrdinalEntries,
     // Packs containing at least one dead row.
     int SegmentsWithDeletions,
-    // Live packs below both configured segment targets.
+    // Live packs below both targets; diagnostic only, because they may not fit together.
     int SmallSegmentCount);
 
 public readonly record struct StorageStats(
@@ -467,6 +468,8 @@ public interface ISift : IDisposable
     ActivityStats GetActivityStats();
     MaintenanceStats GetMaintenanceStats();
     StorageStats GetStorageStats();
+    // Reports whether the current generation contains work selectable by this policy.
+    bool ShouldCompact(CompactOptions options);
     Task<BuildStats> Build(IDocumentSource documents);
     Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
