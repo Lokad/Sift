@@ -86,7 +86,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 regexPlan,
                 _options,
                 CancellationToken.None);
-            scopeDocuments += segmentPlan.Scope.Ordinals.Length;
+            scopeDocuments += segmentPlan.Scope.Count;
             scopeBytes += segmentPlan.Scope.Bytes;
             if (explainedPlan is null || segmentPlan.Scope.Bytes > explainedScopeBytes)
             {
@@ -273,7 +273,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     regexPlan,
                     _options,
                     cancellationToken);
-                scopeDocuments += segmentPlan.Scope.Ordinals.Length;
+                scopeDocuments += segmentPlan.Scope.Count;
                 scopeBytes += segmentPlan.Scope.Bytes;
 
                 var candidates = CandidateGenerator.Generate(cache.Segment, segmentPlan.Scope.Ordinals, segmentPlan.ContentPlan.ChosenPlan.CandidatePlan);
@@ -282,8 +282,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     ? preparedOrderedAnchorGroups
                     : [];
                 postingsBytesRead += candidates.PostingsBytesRead;
-                candidateDocumentsAfterIndex += candidates.Ordinals.Length;
-                var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Length);
+                candidateDocumentsAfterIndex += candidates.Ordinals.Count;
+                var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Count);
 
                 foreach (var ordinal in candidates.Ordinals)
                 {
@@ -780,7 +780,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             return new SegmentCache(
                 _storage.OpenSegment(entry.SegmentId, cancellationToken),
-                entry.DeadOrdinals);
+                entry.DeadOrdinals,
+                entry.ContentBytes - entry.DeadContentBytes);
         }
         catch (Exception exception) when (
             exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException)
@@ -899,9 +900,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             ? preparedOrderedAnchorGroups
             : [];
         postingsBytesRead = candidates.PostingsBytesRead;
-        candidateDocumentsAfterIndex = candidates.Ordinals.Length;
-        var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Length);
-        var documents = new List<DocumentSearchResult>(candidates.Ordinals.Length);
+        candidateDocumentsAfterIndex = candidates.Ordinals.Count;
+        var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Count);
+        var documents = new List<DocumentSearchResult>(candidates.Ordinals.Count);
         var segmentStopReason = SearchStopReason.None;
         long segmentBytesScanned = 0;
         var segmentHitDocuments = 0;
@@ -1061,7 +1062,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
 
         return new SegmentSearchResult(
-            scope.Ordinals.Length,
+            scope.Count,
             scope.Bytes,
             postingsBytesRead,
             candidateDocumentsAfterIndex,
@@ -1865,8 +1866,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 }
 
 internal readonly record struct SegmentScope(
-    uint[] Ordinals,
-    long Bytes);
+    OrdinalSet Ordinals,
+    long Bytes)
+{
+    public int Count => Ordinals.Count;
+}
 
 internal interface IPathVisibility
 {
@@ -1875,14 +1879,17 @@ internal interface IPathVisibility
 
 internal sealed class SegmentCache : IDisposable
 {
-    public SegmentCache(MappedSegment segment, uint[] deadOrdinals)
+    public SegmentCache(MappedSegment segment, uint[] deadOrdinals, long liveContentBytes)
     {
         Segment = segment;
         DeadOrdinals = deadOrdinals;
+        LiveContentBytes = liveContentBytes;
     }
 
     public MappedSegment Segment { get; }
     public uint[] DeadOrdinals { get; }
+
+    public long LiveContentBytes { get; }
 
     public void Dispose()
     {

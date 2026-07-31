@@ -29,7 +29,7 @@ internal static class SearchPlanner
             prefixDocuments,
             pathIndexCandidates,
             pathVerificationKind,
-            EstimatePathFilterCost(prefixDocuments, pathIndexCandidates, scope.Ordinals.Length, matcher.UsesPathIndex, pathVerificationKind));
+            EstimatePathFilterCost(prefixDocuments, pathIndexCandidates, scope.Count, matcher.UsesPathIndex, pathVerificationKind));
     }
 
     public static SearchPlannerDecision CreatePlan(MappedSegment segment, SegmentScope scope, in SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan, SiftOptions options)
@@ -149,13 +149,13 @@ internal static class SearchPlanner
             return true;
         }
 
-        if (scope.Ordinals.Length <= options.DirectScanScopeDocumentsThreshold && scope.Bytes <= options.DirectScanScopeBytesThreshold)
+        if (scope.Count <= options.DirectScanScopeDocumentsThreshold && scope.Bytes <= options.DirectScanScopeBytesThreshold)
         {
             return true;
         }
 
         if (options.DirectScanCandidateDensityThreshold > 0 &&
-            estimatedCandidates >= Math.Ceiling(scope.Ordinals.Length * options.DirectScanCandidateDensityThreshold))
+            estimatedCandidates >= Math.Ceiling(scope.Count * options.DirectScanCandidateDensityThreshold))
         {
             return true;
         }
@@ -165,7 +165,7 @@ internal static class SearchPlanner
 
     internal static double EstimateDirectScanCost(SegmentScope scope, in RegexExecutionPlan regexPlan)
     {
-        return Math.Max(scope.Bytes, scope.Ordinals.Length) * regexPlan.DirectScanCostMultiplier;
+        return Math.Max(scope.Bytes, scope.Count) * regexPlan.DirectScanCostMultiplier;
     }
 
     internal static double EstimateIndexedCost(int patternBytes, double estimatedCandidates, ReadOnlySpan<SelectedGram> selected, in RegexExecutionPlan regexPlan)
@@ -193,56 +193,47 @@ internal static class SearchPlanner
             : cache.Segment.FindPathPrefixRange(matcher.PathPrefix);
         prefixDocuments = (int)(prefixRange.EndExclusive - prefixRange.StartInclusive);
 
-        uint[] scopedOrdinals;
+        OrdinalSet scopedOrdinals;
         if (matcher.UsesPathIndex)
         {
-            var prefixOrdinals = new uint[prefixDocuments];
-            for (var i = 0; i < prefixOrdinals.Length; i++)
-            {
-                if ((i & 0xFFF) == 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-
-                prefixOrdinals[i] = prefixRange.StartInclusive + (uint)i;
-            }
-
             scopedOrdinals = CandidateGenerator.Generate(
                 cache.Segment,
-                prefixOrdinals,
+                OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, []),
                 new IndexRegionPair(SegmentRegionId.PathTriCsLex, SegmentRegionId.PathTriCsPost),
                 matcher.GetPathTrigrams()).Ordinals;
         }
         else
         {
-            scopedOrdinals = new uint[prefixDocuments];
-            for (var i = 0; i < scopedOrdinals.Length; i++)
-            {
-                if ((i & 0xFFF) == 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-
-                scopedOrdinals[i] = prefixRange.StartInclusive + (uint)i;
-            }
+            scopedOrdinals = OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, []);
         }
 
-        pathIndexCandidates = scopedOrdinals.Length;
+        pathIndexCandidates = scopedOrdinals.Count;
         pathVerificationKind = matcher.RequiresPathVerification
             ? matcher.RequiresStringPathVerification ? PathVerificationKind.String : PathVerificationKind.Utf8
             : PathVerificationKind.None;
 
-        var ordinals = new List<uint>(scopedOrdinals.Length);
+        if (!matcher.RequiresPathVerification && !matcher.UsesPathIndex)
+        {
+            var ordinals = OrdinalSet.FromRange(
+                prefixRange.StartInclusive,
+                prefixRange.EndExclusive,
+                cache.DeadOrdinals);
+            var contentBytes = prefixRange.StartInclusive == 0 && prefixRange.EndExclusive == (uint)cache.Segment.DocumentCount
+                ? cache.LiveContentBytes
+                : SumContentBytes(cache, ordinals, cancellationToken);
+            return new SegmentScope(ordinals, contentBytes);
+        }
+
+        var acceptedOrdinals = new List<uint>(scopedOrdinals.Count);
         long bytes = 0;
         var deadIndex = 0;
-        for (var i = 0; i < scopedOrdinals.Length; i++)
+        var scanned = 0;
+        foreach (var ordinal in scopedOrdinals)
         {
-            if ((i & 0xFF) == 0)
+            if ((scanned++ & 0xFF) == 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
             }
-
-            var ordinal = scopedOrdinals[i];
             while (deadIndex < cache.DeadOrdinals.Length && cache.DeadOrdinals[deadIndex] < ordinal)
             {
                 deadIndex++;
@@ -265,11 +256,28 @@ internal static class SearchPlanner
                 }
             }
 
-            ordinals.Add(ordinal);
+            acceptedOrdinals.Add(ordinal);
             bytes += document.ContentLength;
         }
 
-        return new SegmentScope(ordinals.ToArray(), bytes);
+        return new SegmentScope(OrdinalSet.FromSorted([.. acceptedOrdinals]), bytes);
+
+        static long SumContentBytes(SegmentCache cache, OrdinalSet ordinals, CancellationToken cancellationToken)
+        {
+            long bytes = 0;
+            var scanned = 0;
+            foreach (var ordinal in ordinals)
+            {
+                if ((scanned++ & 0xFF) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                bytes += cache.Segment.GetDocument(ordinal).ContentLength;
+            }
+
+            return bytes;
+        }
     }
 
     private static double EstimatePathFilterCost(int prefixDocuments, int pathIndexCandidates, int scopedDocuments, bool usesPathIndex, PathVerificationKind pathVerificationKind)

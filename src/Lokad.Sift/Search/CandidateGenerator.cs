@@ -5,16 +5,16 @@ namespace Lokad.Sift.Search;
 
 internal static class CandidateGenerator
 {
-    public static CandidateResult Generate(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, in LiteralPlan plan)
+    public static CandidateResult Generate(MappedSegment segment, OrdinalSet scopeOrdinals, in LiteralPlan plan)
     {
         if (!plan.UsesIndex)
         {
-            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+            return new CandidateResult(scopeOrdinals, 0);
         }
 
         if (plan.IsMissingGram)
         {
-            return new CandidateResult([], 0);
+            return new CandidateResult(OrdinalSet.Empty, 0);
         }
 
         var grams = new int[plan.SelectedGrams.Length];
@@ -30,27 +30,24 @@ internal static class CandidateGenerator
             : Generate(segment, scopeOrdinals, plan.IndexPair, grams);
     }
 
-    public static CandidateResult Generate(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
+    public static CandidateResult Generate(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
     {
         var postingsBytesRead = 0L;
         if (grams.Length == 0)
         {
-            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+            return new CandidateResult(scopeOrdinals, 0);
         }
 
-        if (scopeOrdinals.Length * 4 >= segment.DocumentCount)
+        if (scopeOrdinals.Count * 4 >= segment.DocumentCount)
         {
             using var candidateBits = new PooledBitSet(segment.DocumentCount);
-            for (var i = 0; i < scopeOrdinals.Length; i++)
-            {
-                candidateBits.Set((int)scopeOrdinals[i]);
-            }
+            scopeOrdinals.CopyTo(candidateBits);
 
             for (var i = 0; i < grams.Length; i++)
             {
                 if (!segment.TryGetPostings(pair, grams[i], out var postings, out _))
                 {
-                    return new CandidateResult([], postingsBytesRead);
+                    return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
                 }
 
                 postingsBytesRead += postings.Length;
@@ -59,7 +56,7 @@ internal static class CandidateGenerator
                 candidateBits.And(postingsBits);
             }
 
-            return new CandidateResult(candidateBits.ToOrdinals(), postingsBytesRead);
+            return new CandidateResult(OrdinalSet.FromSorted(candidateBits.ToOrdinals()), postingsBytesRead);
         }
 
         var current = scopeOrdinals.ToArray();
@@ -67,14 +64,14 @@ internal static class CandidateGenerator
         {
             if (!segment.TryGetPostings(pair, grams[i], out var postings, out var docFreq))
             {
-                return new CandidateResult([], postingsBytesRead);
+                return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
             }
 
             postingsBytesRead += postings.Length;
             current = IntersectSortedWithPostings(current, postings, docFreq);
             if (current.Length == 0)
             {
-                return new CandidateResult([], postingsBytesRead);
+                return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
             }
 
             if (i + 1 < grams.Length && current.Length * 4 >= segment.DocumentCount)
@@ -89,7 +86,7 @@ internal static class CandidateGenerator
                 {
                     if (!segment.TryGetPostings(pair, grams[remainingIndex], out var remainingPostings, out _))
                     {
-                        return new CandidateResult([], postingsBytesRead);
+                        return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
                     }
 
                     postingsBytesRead += remainingPostings.Length;
@@ -98,19 +95,19 @@ internal static class CandidateGenerator
                     candidateBits.And(postingsBits);
                 }
 
-                return new CandidateResult(candidateBits.ToOrdinals(), postingsBytesRead);
+                return new CandidateResult(OrdinalSet.FromSorted(candidateBits.ToOrdinals()), postingsBytesRead);
             }
         }
 
-        return new CandidateResult(current, postingsBytesRead);
+        return new CandidateResult(OrdinalSet.FromSorted(current), postingsBytesRead);
     }
 
-    private static CandidateResult GenerateUnion(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
+    private static CandidateResult GenerateUnion(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
     {
         var postingsBytesRead = 0L;
         if (grams.Length == 0)
         {
-            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+            return new CandidateResult(scopeOrdinals, 0);
         }
 
         using var candidates = new PooledBitSet(segment.DocumentCount);
@@ -125,25 +122,22 @@ internal static class CandidateGenerator
             DecodeIntoBitSet(postings, candidates);
         }
 
-        if (scopeOrdinals.Length < segment.DocumentCount)
+        if (!scopeOrdinals.CoversWholeSegment(segment.DocumentCount))
         {
             using var scope = new PooledBitSet(segment.DocumentCount);
-            for (var i = 0; i < scopeOrdinals.Length; i++)
-            {
-                scope.Set((int)scopeOrdinals[i]);
-            }
+            scopeOrdinals.CopyTo(scope);
 
             candidates.And(scope);
         }
 
-        return new CandidateResult(candidates.ToOrdinals(), postingsBytesRead);
+        return new CandidateResult(OrdinalSet.FromSorted(candidates.ToOrdinals()), postingsBytesRead);
     }
 
-    private static CandidateResult GenerateUnionOfIntersections(MappedSegment segment, ReadOnlySpan<uint> scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams, ReadOnlySpan<int> groupLengths)
+    private static CandidateResult GenerateUnionOfIntersections(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams, ReadOnlySpan<int> groupLengths)
     {
         if (grams.Length == 0 || groupLengths.Length == 0)
         {
-            return new CandidateResult(scopeOrdinals.ToArray(), 0);
+            return new CandidateResult(scopeOrdinals, 0);
         }
 
         using var candidates = new PooledBitSet(segment.DocumentCount);
@@ -159,15 +153,15 @@ internal static class CandidateGenerator
 
             var branch = Generate(segment, scopeOrdinals, pair, grams.Slice(offset, length));
             postingsBytesRead += branch.PostingsBytesRead;
-            for (var j = 0; j < branch.Ordinals.Length; j++)
+            foreach (var ordinal in branch.Ordinals)
             {
-                candidates.Set((int)branch.Ordinals[j]);
+                candidates.Set((int)ordinal);
             }
 
             offset += length;
         }
 
-        return new CandidateResult(candidates.ToOrdinals(), postingsBytesRead);
+        return new CandidateResult(OrdinalSet.FromSorted(candidates.ToOrdinals()), postingsBytesRead);
     }
 
     private static void DecodeIntoBitSet(ReadOnlySpan<byte> postings, PooledBitSet bitSet)
@@ -283,5 +277,5 @@ internal static class CandidateGenerator
 }
 
 internal readonly record struct CandidateResult(
-    uint[] Ordinals,
+    OrdinalSet Ordinals,
     long PostingsBytesRead);

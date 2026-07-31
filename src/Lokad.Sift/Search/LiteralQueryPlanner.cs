@@ -10,19 +10,19 @@ internal static class LiteralQueryPlanner
 
     public static LiteralPlan[] Enumerate(
         MappedSegment segment,
-        ReadOnlySpan<uint> scopeOrdinals,
+        int scopeDocuments,
         long scopeBytes,
         string pattern,
         CaseMode resolvedCaseMode,
         SiftOptions options)
     {
-        var direct = LiteralPlan.Direct(resolvedCaseMode, scopeOrdinals.Length, scopeBytes);
-        if (scopeOrdinals.Length == 0 || string.IsNullOrEmpty(pattern))
+        var direct = LiteralPlan.Direct(resolvedCaseMode, scopeDocuments, scopeBytes);
+        if (scopeDocuments == 0 || string.IsNullOrEmpty(pattern))
         {
             return [direct];
         }
 
-        var indexed = TryCreateIndexedCandidate(segment, scopeOrdinals, scopeBytes, pattern, resolvedCaseMode, options);
+        var indexed = TryCreateIndexedCandidate(segment, scopeDocuments, scopeBytes, pattern, resolvedCaseMode, options);
         return indexed.HasValue
             ? [direct, indexed.Value]
             : [direct];
@@ -30,13 +30,13 @@ internal static class LiteralQueryPlanner
 
     public static LiteralPlan Create(
         MappedSegment segment,
-        ReadOnlySpan<uint> scopeOrdinals,
+        int scopeDocuments,
         long scopeBytes,
         string pattern,
         CaseMode resolvedCaseMode,
         SiftOptions options)
     {
-        var candidates = Enumerate(segment, scopeOrdinals, scopeBytes, pattern, resolvedCaseMode, options);
+        var candidates = Enumerate(segment, scopeDocuments, scopeBytes, pattern, resolvedCaseMode, options);
         if (candidates.Length == 1)
         {
             return candidates[0];
@@ -50,20 +50,20 @@ internal static class LiteralQueryPlanner
         }
 
         var patternBytes = Encoding.UTF8.GetBytes(pattern);
-        return ShouldPreferDirectScan(scopeOrdinals.Length, scopeBytes, patternBytes.Length, indexed.SelectedGrams, options)
+        return ShouldPreferDirectScan(scopeDocuments, scopeBytes, patternBytes.Length, indexed.SelectedGrams, options)
             ? direct
             : indexed;
     }
 
     private static LiteralPlan? TryCreateIndexedCandidate(
         MappedSegment segment,
-        ReadOnlySpan<uint> scopeOrdinals,
+        int scopeDocuments,
         long scopeBytes,
         string pattern,
         CaseMode resolvedCaseMode,
         SiftOptions options)
     {
-        if (scopeOrdinals.Length <= options.DirectScanScopeDocumentsThreshold && scopeBytes <= options.DirectScanScopeBytesThreshold)
+        if (scopeDocuments <= options.DirectScanScopeDocumentsThreshold && scopeBytes <= options.DirectScanScopeBytesThreshold)
         {
             return null;
         }
@@ -92,7 +92,7 @@ internal static class LiteralQueryPlanner
 
             if (!segment.TryGetPostings(pair, gram, out var postings, out var docFreq))
             {
-                return LiteralPlan.Indexed(resolvedCaseMode, scopeOrdinals.Length, scopeBytes, pattern, [], pair, gramLength, isMissing: true);
+                return LiteralPlan.Indexed(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, [], pair, gramLength, isMissing: true);
             }
 
             var seen = false;
@@ -119,8 +119,8 @@ internal static class LiteralQueryPlanner
         }
 
         grams.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        var selected = TrimSelectedGrams(grams, scopeOrdinals.Length, options);
-        return LiteralPlan.Indexed(resolvedCaseMode, scopeOrdinals.Length, scopeBytes, pattern, selected, pair, gramLength, isMissing: false);
+        var selected = TrimSelectedGrams(grams, scopeDocuments, options);
+        return LiteralPlan.Indexed(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, selected, pair, gramLength, isMissing: false);
     }
 
     private static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)

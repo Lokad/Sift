@@ -12,7 +12,7 @@ internal static class SearchPlanCandidateBuilder
         var candidates = new List<SearchPlanCandidate>(4);
         if (features.IsLiteralLike)
         {
-            foreach (var literalPlan in LiteralQueryPlanner.Enumerate(segment, scope.Ordinals, scope.Bytes, features.RegexPlan.ExactLiteral ?? features.Query.Pattern, features.ResolvedCaseMode, options))
+            foreach (var literalPlan in LiteralQueryPlanner.Enumerate(segment, scope.Count, scope.Bytes, features.RegexPlan.ExactLiteral ?? features.Query.Pattern, features.ResolvedCaseMode, options))
             {
                 candidates.Add(CreateLiteralContentPlan(in features, literalPlan, options));
             }
@@ -34,14 +34,14 @@ internal static class SearchPlanCandidateBuilder
                 var advisoryPlan = TryCreateLiteralSetPlan(segment, scope, features.Anchors.AdvisoryCaseMode, features.Anchors.GetAdvisoryTexts(), options, isAdvisory: true);
                 if (advisoryPlan.HasValue)
                 {
-                    candidates.Add(CreateRegexIndexedCandidate(in features, scope, advisoryPlan.Value, SearchPlanner.EstimateCandidateUpperBound(advisoryPlan.Value.SelectedGrams, scope.Ordinals.Length), options));
+                    candidates.Add(CreateRegexIndexedCandidate(in features, scope, advisoryPlan.Value, SearchPlanner.EstimateCandidateUpperBound(advisoryPlan.Value.SelectedGrams, scope.Count), options));
                 }
             }
 
             var alternationPlan = TryCreateLeadingLiteralSetPlan(segment, scope, features.ResolvedCaseMode, features.RegexPlan, options);
             if (alternationPlan.HasValue)
             {
-                candidates.Add(CreateRegexIndexedCandidate(in features, scope, alternationPlan.Value, SearchPlanner.EstimateCandidateUpperBound(alternationPlan.Value.SelectedGrams, scope.Ordinals.Length), options));
+                candidates.Add(CreateRegexIndexedCandidate(in features, scope, alternationPlan.Value, SearchPlanner.EstimateCandidateUpperBound(alternationPlan.Value.SelectedGrams, scope.Count), options));
             }
 
             return candidates;
@@ -50,7 +50,7 @@ internal static class SearchPlanCandidateBuilder
         var fragmentPlans = new List<LiteralPlan>(features.Anchors.MandatoryAnchors.Length);
         foreach (var fragment in features.Anchors.MandatoryAnchors)
         {
-            var current = LiteralQueryPlanner.Create(segment, scope.Ordinals, scope.Bytes, fragment.Text, features.ResolvedCaseMode, options);
+            var current = LiteralQueryPlanner.Create(segment, scope.Count, scope.Bytes, fragment.Text, features.ResolvedCaseMode, options);
             if (current.IsMissingGram)
             {
                 candidates.Add(CreateRegexIndexedCandidate(in features, scope, current, estimatedCandidates: 0, options));
@@ -66,10 +66,10 @@ internal static class SearchPlanCandidateBuilder
             var selected = MergeFragmentGrams(segment, fragmentPlans, anchor, options);
             if (selected.Length > 0)
             {
-                var estimatedCandidates = SearchPlanner.EstimateCandidateUpperBound(selected, scope.Ordinals.Length);
+                var estimatedCandidates = SearchPlanner.EstimateCandidateUpperBound(selected, scope.Count);
                 var indexed = LiteralPlan.Indexed(
                     features.ResolvedCaseMode,
-                    scope.Ordinals.Length,
+            scope.Count,
                     scope.Bytes,
                     string.Join("|", features.Anchors.GetMandatoryTexts()),
                     selected,
@@ -115,13 +115,13 @@ internal static class SearchPlanCandidateBuilder
     private static SearchPlanCandidate CreateDirectRegexCandidate(in SearchQueryFeatures features, SegmentScope scope)
     {
         return new SearchPlanCandidate(
-            LiteralPlan.Direct(features.Query.CaseMode, scope.Ordinals.Length, scope.Bytes),
+            LiteralPlan.Direct(features.Query.CaseMode, scope.Count, scope.Bytes),
             features.RegexPlan.GetDirectScanPlanFamily(features.HasMandatoryFragments),
             SearchCandidateKind.DirectScan,
             SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan, usesIndex: false),
             SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan),
             null,
-            scope.Ordinals.Length,
+            scope.Count,
             [],
             SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan));
     }
@@ -158,7 +158,7 @@ internal static class SearchPlanCandidateBuilder
 
     private static LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans, CaseMode resolvedCaseMode, SegmentScope scope, in RegexExecutionPlan regexPlan)
     {
-        var best = LiteralPlan.Direct(resolvedCaseMode, scope.Ordinals.Length, scope.Bytes);
+        var best = LiteralPlan.Direct(resolvedCaseMode, scope.Count, scope.Bytes);
         var bestScore = double.PositiveInfinity;
         foreach (var plan in fragmentPlans)
         {
@@ -167,7 +167,7 @@ internal static class SearchPlanCandidateBuilder
                 continue;
             }
 
-            var score = SearchPlanner.EstimateIndexedCost(plan.MandatoryFragment.Length, SearchPlanner.EstimateCandidateUpperBound(plan.SelectedGrams, scope.Ordinals.Length), plan.SelectedGrams, regexPlan);
+            var score = SearchPlanner.EstimateIndexedCost(plan.MandatoryFragment.Length, SearchPlanner.EstimateCandidateUpperBound(plan.SelectedGrams, scope.Count), plan.SelectedGrams, regexPlan);
             if (score < bestScore)
             {
                 best = plan;
@@ -237,7 +237,7 @@ internal static class SearchPlanCandidateBuilder
             }
 
             branch.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-            estimatedCandidates += SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(branch), scope.Ordinals.Length);
+            estimatedCandidates += SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(branch), scope.Count);
             groupLengths.Add(branch.Count);
             for (var branchIndex = 0; branchIndex < branch.Count; branchIndex++)
             {
@@ -253,7 +253,7 @@ internal static class SearchPlanCandidateBuilder
         return (
             LiteralPlan.Indexed(
                 resolvedCaseMode,
-                scope.Ordinals.Length,
+            scope.Count,
                 scope.Bytes,
                 string.Join("|", mandatoryFragments),
                 [.. selected],
@@ -262,7 +262,7 @@ internal static class SearchPlanCandidateBuilder
                 isMissing: false,
                 unionCandidates: true,
                 unionGroupLengths: [.. groupLengths]),
-            Math.Clamp(estimatedCandidates, 1d, scope.Ordinals.Length));
+            Math.Clamp(estimatedCandidates, 1d, scope.Count));
     }
 
     private static LiteralPlan? TryCreateLeadingLiteralSetPlan(MappedSegment segment, SegmentScope scope, CaseMode resolvedCaseMode, in RegexExecutionPlan regexPlan, SiftOptions options)
@@ -305,7 +305,7 @@ internal static class SearchPlanCandidateBuilder
         }
 
         selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Indexed(resolvedCaseMode, scope.Ordinals.Length, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength, isMissing: false, unionCandidates: true);
+        return LiteralPlan.Indexed(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength, isMissing: false, unionCandidates: true);
     }
 
     private static LiteralPlan? TryCreateLiteralSetPlan(MappedSegment segment, SegmentScope scope, CaseMode resolvedCaseMode, string[] literals, SiftOptions options, bool isAdvisory)
@@ -333,7 +333,7 @@ internal static class SearchPlanCandidateBuilder
             }
 
             var indexed = literalPlan.Value;
-            if (isAdvisory && IsPoisonousSeedPlan(indexed, scope.Ordinals.Length, options))
+            if (isAdvisory && IsPoisonousSeedPlan(indexed, scope.Count, options))
             {
                 continue;
             }
@@ -365,11 +365,11 @@ internal static class SearchPlanCandidateBuilder
 
         if (selected.Count == 0 || pair is null)
         {
-            return LiteralPlan.Indexed(resolvedCaseMode, scope.Ordinals.Length, scope.Bytes, string.Empty, [], default, 3, isMissing: true, unionCandidates: true);
+            return LiteralPlan.Indexed(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [], default, 3, isMissing: true, unionCandidates: true);
         }
 
         selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Indexed(resolvedCaseMode, scope.Ordinals.Length, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength, isMissing: false, unionCandidates: true);
+        return LiteralPlan.Indexed(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength, isMissing: false, unionCandidates: true);
     }
 
     private static bool IsPoisonousSeedText(string value)
@@ -420,7 +420,7 @@ internal static class SearchPlanCandidateBuilder
 
     private static LiteralPlan? SelectIndexedLiteralCandidate(MappedSegment segment, SegmentScope scope, string literal, CaseMode resolvedCaseMode, SiftOptions options)
     {
-        var candidates = LiteralQueryPlanner.Enumerate(segment, scope.Ordinals, scope.Bytes, literal, resolvedCaseMode, options);
+        var candidates = LiteralQueryPlanner.Enumerate(segment, scope.Count, scope.Bytes, literal, resolvedCaseMode, options);
         for (var i = 0; i < candidates.Length; i++)
         {
             if (candidates[i].UsesIndex)
