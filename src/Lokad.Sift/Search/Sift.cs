@@ -423,7 +423,10 @@ public sealed class Sift : ISift
         var manifest = _storage.HasManifest
             ? _storage.ReadManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
-        var selectedSegmentIds = SelectSegmentsForCompaction(manifest, options);
+        var selectedSegmentIds = SelectSegmentsForCompaction(
+            manifest,
+            options,
+            cancellationToken);
         if (selectedSegmentIds.Count == 0)
         {
             watch.Stop();
@@ -483,7 +486,10 @@ public sealed class Sift : ISift
             ContentBytes: publication.ContentBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds,
             PeakManagedBytes: 0,
-            HasMoreWork: SelectSegmentsForCompaction(manifest, options).Count > 0);
+            HasMoreWork: SelectSegmentsForCompaction(
+                manifest,
+                options,
+                CancellationToken.None).Count > 0);
     }
 
     public void Dispose()
@@ -862,7 +868,7 @@ public sealed class Sift : ISift
         foreach (var entry in manifest.Segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var segment = _storage.OpenSegment(entry.SegmentId);
+            using var segment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
             foreach (var path in affectedPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -916,7 +922,9 @@ public sealed class Sift : ISift
                     continue;
                 }
 
-                var cursor = new CompactionCursor(_storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals);
+                var cursor = new CompactionCursor(
+                    _storage.OpenSegment(entry.SegmentId, cancellationToken),
+                    entry.DeadOrdinals);
                 if (cursor.MoveNext())
                 {
                     cursors.Add(cursor);
@@ -989,8 +997,12 @@ public sealed class Sift : ISift
         }
     }
 
-    private HashSet<ulong> SelectSegmentsForCompaction(CorpusManifest manifest, CompactOptions options)
+    private HashSet<ulong> SelectSegmentsForCompaction(
+        CorpusManifest manifest,
+        CompactOptions options,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var ordered = manifest.Segments
             .Select(entry => new
             {
@@ -999,7 +1011,9 @@ public sealed class Sift : ISift
                 DeadFraction = entry.DocumentCount == 0 ? 0d : (double)entry.DeadOrdinals.Length / entry.DocumentCount,
                 DeadContentFraction = entry.ContentBytes == 0
                     ? 0d
-                    : (double)GetDeadContentBytes(entry) / entry.ContentBytes,
+                    : (double)GetDeadContentBytes(
+                        entry,
+                        cancellationToken: cancellationToken) / entry.ContentBytes,
                 HasMetadataBloat = entry.DeadOrdinals.Length >= options.MetadataBloatDeadOrdinalsThreshold
             })
             .OrderByDescending(item => item.DeadContentFraction)
@@ -1067,7 +1081,8 @@ public sealed class Sift : ISift
 
     private long GetDeadContentBytes(
         SegmentManifestEntry segment,
-        ISet<LegacyMaintenanceKey>? currentLegacyKeys = null)
+        ISet<LegacyMaintenanceKey>? currentLegacyKeys = null,
+        CancellationToken cancellationToken = default)
     {
         if (segment.DeadOrdinals.Length == 0)
         {
@@ -1091,9 +1106,12 @@ public sealed class Sift : ISift
         }
 
         long deadContentBytes = 0;
-        using var mappedSegment = _storage.OpenSegment(segment.SegmentId);
+        using var mappedSegment = _storage.OpenSegment(
+            segment.SegmentId,
+            cancellationToken);
         foreach (var deadOrdinal in segment.DeadOrdinals)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             deadContentBytes = checked(
                 deadContentBytes +
                 mappedSegment.GetDocument(deadOrdinal).ContentLength);

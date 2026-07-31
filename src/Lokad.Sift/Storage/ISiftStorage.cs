@@ -12,7 +12,7 @@ public interface ISiftStorage
         CancellationToken cancellationToken);
     void PublishManifest(CorpusManifest manifest);
     CorpusManifest ReadManifest();
-    MappedSegment OpenSegment(ulong segmentId);
+    MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken = default);
     long GetSegmentBytes(ulong segmentId);
     long? GetAvailableBytes();
     void EnsureSnapshotMetadata();

@@ -21,7 +21,10 @@ public sealed unsafe class MappedSegment : IDisposable
     private readonly Dictionary<SegmentRegionId, (long Offset, long Length)> _regions = new();
     private int _disposed;
 
-    public MappedSegment(string path, bool validateChecksums = true)
+    public MappedSegment(
+        string path,
+        bool validateChecksums = true,
+        CancellationToken cancellationToken = default)
     {
         var accounted = false;
         try
@@ -34,7 +37,7 @@ public sealed unsafe class MappedSegment : IDisposable
             Interlocked.Add(ref s_mappedBytes, _mappedLength);
             Interlocked.Increment(ref s_openSegments);
             accounted = true;
-            Initialize(validateChecksums);
+            Initialize(validateChecksums, cancellationToken);
         }
         catch
         {
@@ -58,7 +61,10 @@ public sealed unsafe class MappedSegment : IDisposable
         }
     }
 
-    public MappedSegment(ReadOnlyMemory<byte> bytes, bool validateChecksums = true)
+    public MappedSegment(
+        ReadOnlyMemory<byte> bytes,
+        bool validateChecksums = true,
+        CancellationToken cancellationToken = default)
     {
         var accounted = false;
         try
@@ -70,7 +76,7 @@ public sealed unsafe class MappedSegment : IDisposable
             Interlocked.Add(ref s_mappedBytes, _mappedLength);
             Interlocked.Increment(ref s_openSegments);
             accounted = true;
-            Initialize(validateChecksums);
+            Initialize(validateChecksums, cancellationToken);
         }
         catch
         {
@@ -320,7 +326,9 @@ public sealed unsafe class MappedSegment : IDisposable
             : (gram >> 16) & 0xFF;
     }
 
-    private void ValidateLexiconRegion(SegmentRegionId regionId)
+    private void ValidateLexiconRegion(
+        SegmentRegionId regionId,
+        CancellationToken cancellationToken)
     {
         var region = GetRegion(regionId);
         var lexicon = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
@@ -354,6 +362,11 @@ public sealed unsafe class MappedSegment : IDisposable
         var bucketPrefix = 0;
         for (var entry = 0; entry < entryCount; entry++)
         {
+            if ((entry & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             while (bucketPrefix + 1 < SegmentFormat.LexiconBucketCount &&
                    LittleEndianCodec.ReadInt32(lexicon.Slice(4 + (bucketPrefix + 1) * 4, 4)) <= entry)
             {
@@ -457,11 +470,14 @@ public sealed unsafe class MappedSegment : IDisposable
         return null;
     }
 
-    private void ValidateRegionChecksum(SegmentRegionId regionId, ulong expected)
+    private void ValidateRegionChecksum(
+        SegmentRegionId regionId,
+        ulong expected,
+        CancellationToken cancellationToken)
     {
         var region = GetRegion(regionId);
         var span = new ReadOnlySpan<byte>(BasePointer + region.Offset, checked((int)region.Length));
-        var actual = Hashing.Fnv1A64(span);
+        var actual = Hashing.Fnv1A64(span, cancellationToken);
         if (actual != expected)
         {
             throw new InvalidDataException($"Checksum mismatch for region '{regionId}'.");
@@ -481,8 +497,11 @@ public sealed unsafe class MappedSegment : IDisposable
         }
     }
 
-    private void Initialize(bool validateChecksums)
+    private void Initialize(
+        bool validateChecksums,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var fileLength = _mappedLength;
         if (fileLength < SegmentFormat.HeaderSize)
         {
@@ -550,7 +569,7 @@ public sealed unsafe class MappedSegment : IDisposable
             if (validateChecksums)
             {
                 var expected = Read<ulong>(checksumCursor + 4);
-                ValidateRegionChecksum(id, expected);
+                ValidateRegionChecksum(id, expected, cancellationToken);
             }
 
             checksumCursor += SegmentFormat.ChecksumEntrySize;
@@ -568,25 +587,30 @@ public sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException("Invalid Sift content length.");
         }
 
-        ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex);
-        ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex);
-        ValidateLexiconRegion(SegmentRegionId.ContentBiCsLex);
-        ValidateLexiconRegion(SegmentRegionId.ContentBiIcLex);
-        ValidateLexiconRegion(SegmentRegionId.PathTriCsLex);
-        ValidateLexiconRegion(SegmentRegionId.PathTriIcLex);
+        ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentBiCsLex, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.ContentBiIcLex, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.PathTriCsLex, cancellationToken);
+        ValidateLexiconRegion(SegmentRegionId.PathTriIcLex, cancellationToken);
         if (validateChecksums)
         {
-            ValidateDocuments();
+            ValidateDocuments(cancellationToken);
         }
     }
 
-    private void ValidateDocuments()
+    private void ValidateDocuments(CancellationToken cancellationToken)
     {
         var pathBlob = GetRegion(SegmentRegionId.PathBlob);
         var contentBlob = GetRegion(SegmentRegionId.ContentBlob);
         var lineIndexBlob = GetRegion(SegmentRegionId.LineIndexBlob);
         for (uint ordinal = 0; ordinal < DocumentCount; ordinal++)
         {
+            if ((ordinal & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var document = GetDocument(ordinal);
             ValidateDocumentSlice(document.PathOffset, document.PathLength, pathBlob.Length, "path");
             ValidateDocumentSlice(document.ContentOffset, document.ContentLength, contentBlob.Length, "content");

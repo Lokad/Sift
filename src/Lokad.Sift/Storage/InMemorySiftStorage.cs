@@ -55,7 +55,9 @@ public sealed class InMemorySiftStorage : ISiftStorage
             : throw new FileNotFoundException("Sift manifest is not present in memory-backed storage.");
     }
 
-    public MappedSegment OpenSegment(ulong segmentId)
+    public MappedSegment OpenSegment(
+        ulong segmentId,
+        CancellationToken cancellationToken = default)
     {
         if (!_segments.TryGetValue(segmentId, out var bytes))
         {
@@ -63,7 +65,10 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
 
         // Published in-memory packs were checksummed immediately before insertion.
-        var segment = new MappedSegment(bytes, validateChecksums: false);
+        var segment = new MappedSegment(
+            bytes,
+            validateChecksums: false,
+            cancellationToken);
         if (segment.SegmentId == segmentId)
         {
             return segment;

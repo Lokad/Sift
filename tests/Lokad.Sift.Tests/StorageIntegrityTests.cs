@@ -11,6 +11,21 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageIntegrityTests
 {
     [Fact]
+    public async Task SegmentValidationObservesCancellation()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        var segmentId = storage.ReadManifest().Segments[0].SegmentId;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            storage.OpenSegment(segmentId, cancellation.Token));
+    }
+
+    [Fact]
     public void AvailableBytesUsesMostSpecificMountedFileSystem()
     {
         var nestedDrive = DriveInfo.GetDrives()

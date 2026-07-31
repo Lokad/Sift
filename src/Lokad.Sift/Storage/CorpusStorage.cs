@@ -151,7 +151,7 @@ public sealed class CorpusStorage : ISiftStorage
             documents,
             segmentBytes => EnsureCapacity(segmentBytes, minimumFreeBytesAfterPublication),
             cancellationToken);
-        ValidateSegmentPack(tempSegmentPath);
+        ValidateSegmentPack(tempSegmentPath, cancellationToken);
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterSegmentFlushBeforePublish);
         var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.ToString("X16"));
         var finalSegmentPath = Path.Combine(finalSegmentDirectory, "segment.pack");
@@ -307,27 +307,50 @@ public sealed class CorpusStorage : ISiftStorage
         return new CorpusManifest(corpusId, generation, segments);
     }
 
-    public MappedSegment OpenSegment(ulong segmentId)
+    public MappedSegment OpenSegment(
+        ulong segmentId,
+        CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _segmentOpenCount);
         var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
         if (_validatedSegmentIds.ContainsKey(segmentId))
         {
-            return OpenAndValidateIdentity(path, segmentId, validateChecksums: false);
+            return OpenAndValidateIdentity(
+                path,
+                segmentId,
+                validateChecksums: false,
+                cancellationToken);
         }
 
         var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
-        lock (validationGate)
+        while (!Monitor.TryEnter(validationGate, millisecondsTimeout: 50))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        try
         {
             if (_validatedSegmentIds.ContainsKey(segmentId))
             {
-                return OpenAndValidateIdentity(path, segmentId, validateChecksums: false);
+                return OpenAndValidateIdentity(
+                    path,
+                    segmentId,
+                    validateChecksums: false,
+                    cancellationToken);
             }
 
-            var segment = OpenAndValidateIdentity(path, segmentId, validateChecksums: true);
+            var segment = OpenAndValidateIdentity(
+                path,
+                segmentId,
+                validateChecksums: true,
+                cancellationToken);
             _validatedSegmentIds.TryAdd(segmentId, 0);
             _segmentValidationGates.TryRemove(segmentId, out _);
             return segment;
+        }
+        finally
+        {
+            Monitor.Exit(validationGate);
         }
     }
 
@@ -834,14 +857,23 @@ public sealed class CorpusStorage : ISiftStorage
             : manifest with { Segments = resolvedSegments };
     }
 
-    private static void ValidateSegmentPack(string path)
+    private static void ValidateSegmentPack(
+        string path,
+        CancellationToken cancellationToken)
     {
-        using var _ = new MappedSegment(path);
+        using var _ = new MappedSegment(
+            path,
+            validateChecksums: true,
+            cancellationToken);
     }
 
-    private static MappedSegment OpenAndValidateIdentity(string path, ulong expectedSegmentId, bool validateChecksums)
+    private static MappedSegment OpenAndValidateIdentity(
+        string path,
+        ulong expectedSegmentId,
+        bool validateChecksums,
+        CancellationToken cancellationToken)
     {
-        var segment = new MappedSegment(path, validateChecksums);
+        var segment = new MappedSegment(path, validateChecksums, cancellationToken);
         if (segment.SegmentId == expectedSegmentId)
         {
             return segment;
