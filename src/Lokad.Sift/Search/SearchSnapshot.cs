@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Lokad.Sift;
 using Lokad.Sift.Indexer;
@@ -77,7 +78,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         foreach (var entry in _segments)
         {
             using var cache = OpenSegment(entry);
-            var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
+            var segmentPlan = SearchPlanner.CreateSegmentPlan(
+                cache,
+                matcher,
+                query,
+                resolvedCaseMode,
+                anchors,
+                regexPlan,
+                _options,
+                CancellationToken.None);
             scopeDocuments += segmentPlan.Scope.Ordinals.Length;
             scopeBytes += segmentPlan.Scope.Bytes;
             if (explainedPlan is null || segmentPlan.Scope.Bytes > explainedScopeBytes)
@@ -170,12 +179,34 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ValidateQuery(query);
         using var operation = BeginOperation();
+        using var deadlineCancellation = CreateDeadlineCancellation(
+            query.MaxElapsedMilliseconds,
+            cancellationToken);
+        var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
         return CanUseSegmentParallelSearch(query)
-            ? SearchParallel(query, pathFilter, collector, pathVisibility, cancellationToken)
-            : SearchSequential(query, pathFilter, collector, pathVisibility, cancellationToken);
+            ? SearchParallel(
+                query,
+                pathFilter,
+                collector,
+                pathVisibility,
+                effectiveCancellationToken,
+                cancellationToken)
+            : SearchSequential(
+                query,
+                pathFilter,
+                collector,
+                pathVisibility,
+                effectiveCancellationToken,
+                cancellationToken);
     }
 
-    private SearchStats SearchSequential(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, IPathVisibility? pathVisibility, CancellationToken cancellationToken)
+    private SearchStats SearchSequential(
+        in SearchQuery query,
+        in PathFilter pathFilter,
+        IHitCollector collector,
+        IPathVisibility? pathVisibility,
+        CancellationToken cancellationToken,
+        CancellationToken callerCancellationToken)
     {
         ArgumentNullException.ThrowIfNull(collector);
 
@@ -208,119 +239,141 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var hitDocuments = 0;
         var stopReason = SearchStopReason.None;
 
-        foreach (var entry in _segments)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (HasElapsed(query, watch))
-            {
-                stopReason = SearchStopReason.MaxElapsedTime;
-                break;
-            }
-
-            using var cache = OpenSegment(entry);
-            var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
-            scopeDocuments += segmentPlan.Scope.Ordinals.Length;
-            scopeBytes += segmentPlan.Scope.Bytes;
-
-            var candidates = CandidateGenerator.Generate(cache.Segment, segmentPlan.Scope.Ordinals, segmentPlan.ContentPlan.ChosenPlan.CandidatePlan);
-            var byteRegexStartPrecheckGroups = segmentPlan.ContentPlan.ChosenPlan.CandidateKind == SearchCandidateKind.DirectScan
-                ? preparedOrderedAnchorGroups
-                : [];
-            postingsBytesRead += candidates.PostingsBytesRead;
-            candidateDocumentsAfterIndex += candidates.Ordinals.Length;
-            var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Length);
-
-            foreach (var ordinal in candidates.Ordinals)
+            foreach (var entry in _segments)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (HasElapsed(query, watch))
                 {
                     stopReason = SearchStopReason.MaxElapsedTime;
-                    goto Done;
+                    break;
                 }
 
-                var document = cache.Segment.GetDocument(ordinal);
-                if (pathVisibility is not null && !pathVisibility.IsVisible(cache.Segment.GetPathBytes(document)))
-                {
-                    continue;
-                }
+                using var cache = OpenSegment(entry, cancellationToken);
+                var segmentPlan = SearchPlanner.CreateSegmentPlan(
+                    cache,
+                    matcher,
+                    query,
+                    resolvedCaseMode,
+                    anchors,
+                    regexPlan,
+                    _options,
+                    cancellationToken);
+                scopeDocuments += segmentPlan.Scope.Ordinals.Length;
+                scopeBytes += segmentPlan.Scope.Bytes;
 
-                if (string.IsNullOrEmpty(query.Pattern))
+                var candidates = CandidateGenerator.Generate(cache.Segment, segmentPlan.Scope.Ordinals, segmentPlan.ContentPlan.ChosenPlan.CandidatePlan);
+                cancellationToken.ThrowIfCancellationRequested();
+                var byteRegexStartPrecheckGroups = segmentPlan.ContentPlan.ChosenPlan.CandidateKind == SearchCandidateKind.DirectScan
+                    ? preparedOrderedAnchorGroups
+                    : [];
+                postingsBytesRead += candidates.PostingsBytesRead;
+                candidateDocumentsAfterIndex += candidates.Ordinals.Length;
+                var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Length);
+
+                foreach (var ordinal in candidates.Ordinals)
                 {
-                    candidateDocumentsAfterPrecheck++;
-                    verifiedDocuments++;
-                    var shouldContinue = collector.OnHit(
-                        new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
-                    hitsReturned++;
-                    if (!shouldContinue)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (HasElapsed(query, watch))
                     {
-                        stopReason = SearchStopReason.Cancelled;
+                        stopReason = SearchStopReason.MaxElapsedTime;
                         goto Done;
                     }
 
-                    hitDocuments++;
-                }
-                else
-                {
-                    bytesScanned += document.ContentLength;
-                    if (bytesScanned > query.MaxBytesScanned)
-                    {
-                        stopReason = SearchStopReason.MaxBytesScanned;
-                        goto Done;
-                    }
-
-                    var contentBytes = cache.Segment.GetContentBytes(document);
-                    if (!PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out var predecodedText))
+                    var document = cache.Segment.GetDocument(ordinal);
+                    if (pathVisibility is not null && !pathVisibility.IsVisible(cache.Segment.GetPathBytes(document)))
                     {
                         continue;
                     }
 
-                    if (useOrderedAnchorPrecheck && !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
+                    if (string.IsNullOrEmpty(query.Pattern))
                     {
-                        continue;
-                    }
+                        candidateDocumentsAfterPrecheck++;
+                        verifiedDocuments++;
+                        var shouldContinue = collector.OnHit(
+                            new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
+                        hitsReturned++;
+                        if (!shouldContinue)
+                        {
+                            stopReason = SearchStopReason.Cancelled;
+                            goto Done;
+                        }
 
-                    candidateDocumentsAfterPrecheck++;
-                    var countBefore = hitsReturned;
-                    var documentHitLimit = GetDocumentHitLimit(hitsReturned, query);
-                    if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
-                    {
-                        SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
-                    }
-                    else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
-                    {
-                        Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
+                        hitDocuments++;
                     }
                     else
                     {
-                        RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                        if (document.ContentLength > query.MaxBytesScanned - bytesScanned)
+                        {
+                            stopReason = SearchStopReason.MaxBytesScanned;
+                            goto Done;
+                        }
+
+                        bytesScanned += document.ContentLength;
+                        var contentBytes = cache.Segment.GetContentBytes(document);
+                        if (!PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out var predecodedText))
+                        {
+                            continue;
+                        }
+
+                        if (useOrderedAnchorPrecheck && !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
+                        {
+                            continue;
+                        }
+
+                        candidateDocumentsAfterPrecheck++;
+                        var countBefore = hitsReturned;
+                        var documentHitLimit = GetDocumentHitLimit(hitsReturned, query);
+                        if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
+                        {
+                            SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
+                        }
+                        else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
+                        {
+                            Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
+                        }
+                        else
+                        {
+                            RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                        }
+
+                        verifiedDocuments++;
+                        regexInvocations = byteRegexInvocations + fallbackRegexInvocations;
+                        if (stopReason != SearchStopReason.None)
+                        {
+                            goto Done;
+                        }
+
+                        if (hitsReturned > countBefore)
+                        {
+                            hitDocuments++;
+                        }
                     }
 
-                    verifiedDocuments++;
-                    regexInvocations = byteRegexInvocations + fallbackRegexInvocations;
-                    if (stopReason != SearchStopReason.None)
+                    if (hitDocuments >= query.MaxDocuments)
                     {
+                        stopReason = SearchStopReason.MaxDocuments;
                         goto Done;
                     }
 
-                    if (hitsReturned > countBefore)
+                    if (hitsReturned >= query.MaxHits)
                     {
-                        hitDocuments++;
+                        stopReason = SearchStopReason.MaxHits;
+                        goto Done;
                     }
                 }
-
-                if (hitDocuments >= query.MaxDocuments)
-                {
-                    stopReason = SearchStopReason.MaxDocuments;
-                    goto Done;
-                }
-
-                if (hitsReturned >= query.MaxHits)
-                {
-                    stopReason = SearchStopReason.MaxHits;
-                    goto Done;
-                }
             }
+        }
+        catch (OperationCanceledException) when (
+            !callerCancellationToken.IsCancellationRequested &&
+            cancellationToken.IsCancellationRequested)
+        {
+            stopReason = SearchStopReason.MaxElapsedTime;
+        }
+        catch (RegexMatchTimeoutException) when (query.TimeoutPolicy != TimeoutPolicy.Throw)
+        {
+            stopReason = SearchStopReason.RegexTimeout;
         }
 
     Done:
@@ -347,7 +400,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             stopReason);
     }
 
-    private SearchStats SearchParallel(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, IPathVisibility? pathVisibility, CancellationToken cancellationToken)
+    private SearchStats SearchParallel(
+        in SearchQuery query,
+        in PathFilter pathFilter,
+        IHitCollector collector,
+        IPathVisibility? pathVisibility,
+        CancellationToken cancellationToken,
+        CancellationToken callerCancellationToken)
     {
         ArgumentNullException.ThrowIfNull(collector);
 
@@ -399,16 +458,44 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
 
             var batchLength = Math.Min(batchResults.Length, _segments.Count - batchStart);
-            Parallel.For(0, batchLength, options, batchIndex =>
+            try
             {
-                var segmentIndex = batchStart + batchIndex;
-                using var cache = OpenSegment(_segments[segmentIndex]);
-                batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, watch, cancellationToken);
-            });
+                Parallel.For(0, batchLength, options, batchIndex =>
+                {
+                    var segmentIndex = batchStart + batchIndex;
+                    using var cache = OpenSegment(_segments[segmentIndex], cancellationToken);
+                    batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, watch, cancellationToken);
+                });
+            }
+            catch (OperationCanceledException) when (
+                !callerCancellationToken.IsCancellationRequested &&
+                cancellationToken.IsCancellationRequested)
+            {
+                stopReason = SearchStopReason.MaxElapsedTime;
+                goto Done;
+            }
+            catch (AggregateException exception) when (
+                query.TimeoutPolicy != TimeoutPolicy.Throw &&
+                ContainsOnlyRegexTimeouts(exception))
+            {
+                stopReason = SearchStopReason.RegexTimeout;
+                goto Done;
+            }
+            catch (RegexMatchTimeoutException) when (query.TimeoutPolicy != TimeoutPolicy.Throw)
+            {
+                stopReason = SearchStopReason.RegexTimeout;
+                goto Done;
+            }
 
             for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    callerCancellationToken.ThrowIfCancellationRequested();
+                    stopReason = SearchStopReason.MaxElapsedTime;
+                    goto Done;
+                }
+
                 var result = batchResults[batchIndex];
                 scopeDocuments += result.ScopeDocuments;
                 scopeBytes += result.ScopeBytes;
@@ -667,11 +754,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         throw new InvalidOperationException($"Unknown segment id {segmentId}.");
     }
 
-    private SegmentCache OpenSegment(SegmentManifestEntry entry)
+    private SegmentCache OpenSegment(
+        SegmentManifestEntry entry,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return new SegmentCache(_storage.OpenSegment(entry.SegmentId), entry.DeadOrdinals);
+            return new SegmentCache(
+                _storage.OpenSegment(entry.SegmentId, cancellationToken),
+                entry.DeadOrdinals);
         }
         catch (Exception exception) when (
             exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException)
@@ -744,6 +835,27 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return watch.ElapsedMilliseconds >= query.MaxElapsedMilliseconds;
     }
 
+    private static CancellationTokenSource? CreateDeadlineCancellation(
+        long maxElapsedMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        if (maxElapsedMilliseconds > uint.MaxValue - 1L)
+        {
+            return null;
+        }
+
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(maxElapsedMilliseconds));
+        return deadline;
+    }
+
+    private static bool ContainsOnlyRegexTimeouts(AggregateException exception)
+    {
+        var failures = exception.Flatten().InnerExceptions;
+        return failures.Count > 0 &&
+               failures.All(static failure => failure is RegexMatchTimeoutException);
+    }
+
     private static bool IsDeadOrdinal(uint[] deadOrdinals, uint ordinal)
     {
         return Array.BinarySearch(deadOrdinals, ordinal) >= 0;
@@ -751,7 +863,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SegmentSearchResult SearchSegmentFully(SegmentCache cache, in SearchQuery query, PathFilterMatcher matcher, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, PreparedLiteralQuery? preparedLiteral, PreparedMandatoryFragment[] preparedMandatoryFragments, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, RegexExecutionPlan regexPlan, IPathVisibility? pathVisibility, Stopwatch watch, CancellationToken cancellationToken)
     {
-        var segmentPlan = SearchPlanner.CreateSegmentPlan(cache, matcher, query, resolvedCaseMode, anchors, regexPlan, _options);
+        var segmentPlan = SearchPlanner.CreateSegmentPlan(
+            cache,
+            matcher,
+            query,
+            resolvedCaseMode,
+            anchors,
+            regexPlan,
+            _options,
+            cancellationToken);
         var scope = segmentPlan.Scope;
         var mandatoryFragments = anchors.GetMandatoryTexts();
         var postingsBytesRead = 0L;
@@ -1700,7 +1820,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private bool CanUseSegmentParallelSearch(in SearchQuery query)
     {
         return _searchOptions.SegmentParallelism > 1 &&
-               _segments.Count > 1;
+               _segments.Count > 1 &&
+               query.MaxHits == int.MaxValue &&
+               query.MaxDocuments == int.MaxValue &&
+               query.MaxBytesScanned == long.MaxValue;
     }
 }
 

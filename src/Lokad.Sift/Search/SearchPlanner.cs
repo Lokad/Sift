@@ -5,9 +5,23 @@ namespace Lokad.Sift.Search;
 
 internal static class SearchPlanner
 {
-    public static SegmentSearchPlan CreateSegmentPlan(SegmentCache cache, PathFilterMatcher matcher, in SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan, SiftOptions options)
+    public static SegmentSearchPlan CreateSegmentPlan(
+        SegmentCache cache,
+        PathFilterMatcher matcher,
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        in SearchQueryAnchors anchors,
+        in RegexExecutionPlan regexPlan,
+        SiftOptions options,
+        CancellationToken cancellationToken)
     {
-        var scope = BuildScope(cache, matcher, out var prefixDocuments, out var pathIndexCandidates, out var pathVerificationKind);
+        var scope = BuildScope(
+            cache,
+            matcher,
+            cancellationToken,
+            out var prefixDocuments,
+            out var pathIndexCandidates,
+            out var pathVerificationKind);
         var contentPlan = CreatePlan(cache.Segment, scope, query, resolvedCaseMode, anchors, regexPlan, options);
         return new SegmentSearchPlan(
             scope,
@@ -166,7 +180,13 @@ internal static class SearchPlanner
         return postingsBytes + verifierCost;
     }
 
-    private static SegmentScope BuildScope(SegmentCache cache, PathFilterMatcher matcher, out int prefixDocuments, out int pathIndexCandidates, out PathVerificationKind pathVerificationKind)
+    private static SegmentScope BuildScope(
+        SegmentCache cache,
+        PathFilterMatcher matcher,
+        CancellationToken cancellationToken,
+        out int prefixDocuments,
+        out int pathIndexCandidates,
+        out PathVerificationKind pathVerificationKind)
     {
         var prefixRange = matcher.PathPrefix is null
             ? (StartInclusive: 0u, EndExclusive: (uint)cache.Segment.DocumentCount)
@@ -179,6 +199,11 @@ internal static class SearchPlanner
             var prefixOrdinals = new uint[prefixDocuments];
             for (var i = 0; i < prefixOrdinals.Length; i++)
             {
+                if ((i & 0xFFF) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 prefixOrdinals[i] = prefixRange.StartInclusive + (uint)i;
             }
 
@@ -193,6 +218,11 @@ internal static class SearchPlanner
             scopedOrdinals = new uint[prefixDocuments];
             for (var i = 0; i < scopedOrdinals.Length; i++)
             {
+                if ((i & 0xFFF) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 scopedOrdinals[i] = prefixRange.StartInclusive + (uint)i;
             }
         }
@@ -207,6 +237,11 @@ internal static class SearchPlanner
         var deadIndex = 0;
         for (var i = 0; i < scopedOrdinals.Length; i++)
         {
+            if ((i & 0xFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var ordinal = scopedOrdinals[i];
             while (deadIndex < cache.DeadOrdinals.Length && cache.DeadOrdinals[deadIndex] < ordinal)
             {

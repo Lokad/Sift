@@ -1212,6 +1212,29 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task ByteBudgetStopsBeforeScanningAnOversizedDocument()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "0123456789"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery(
+                "needle",
+                PatternMode.Literal,
+                CaseMode.Sensitive,
+                MaxBytesScanned: 5),
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(SearchStopReason.MaxBytesScanned, stats.StopReason);
+        Assert.Equal(0, stats.BytesScanned);
+        Assert.Empty(collector.Hits);
+    }
+
+    [Fact]
     public async Task ExplainUsesIndexForLargeLiteralScope()
     {
         var documents = Enumerable.Range(0, 9000)
@@ -1718,6 +1741,38 @@ public sealed class SearchIntegrationTests
         Assert.Equal(sequentialStats.StopReason, parallelStats.StopReason);
     }
 
+    [Fact]
+    public async Task FiniteGlobalLimitsAvoidParallelSegmentPrework()
+    {
+        var documents = Enumerable.Range(0, 8)
+            .Select(static i => ($"src/{i:D2}.txt", "needle"))
+            .ToArray();
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(fixture.CreateSource());
+        var storage = Assert.IsType<Lokad.Sift.Storage.CorpusStorage>(index.Storage);
+        var opensBeforeSearch = storage.SegmentOpenCount;
+        using var snapshot = index.OpenSnapshot(new SearchOptions(SegmentParallelism: 4));
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery(
+                "needle",
+                PatternMode.Literal,
+                CaseMode.Sensitive,
+                MaxHits: 1,
+                MaxDocuments: int.MaxValue,
+                MaxBytesScanned: long.MaxValue),
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(SearchStopReason.MaxHits, stats.StopReason);
+        Assert.Equal(1, storage.SegmentOpenCount - opensBeforeSearch);
+    }
+
     [Theory]
     [InlineData(PatternMode.Literal, "a", "a a a a a")]
     [InlineData(PatternMode.Regex, "a", "a a a a a")]
@@ -2171,6 +2226,25 @@ public sealed class SearchIntegrationTests
             new SearchQuery("^(a+)+\\1$", PatternMode.Regex, CaseMode.Sensitive, TimeoutPolicy: TimeoutPolicy.Throw),
             new PathFilter(),
             collector));
+    }
+
+    [Fact]
+    public async Task PathRegexTimeoutStopsSearchSafely()
+    {
+        var pathologicalPath = new string('a', 20_000) + "!";
+        using var fixture = new CorpusFixture((pathologicalPath, "alpha"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(PathRegex: "^(a+)+\\1$"),
+            collector);
+
+        Assert.Equal(SearchStopReason.RegexTimeout, stats.StopReason);
+        Assert.Empty(collector.Hits);
     }
 
     [Fact]
