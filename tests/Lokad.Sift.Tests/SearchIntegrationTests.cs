@@ -1720,6 +1720,33 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task SingleLaneSearchDeliversHitsWithoutBufferingTheSegment()
+    {
+        var documents = Enumerable.Range(0, 100)
+            .Select(static i => ($"src/{i:D5}.txt", "needle\n"))
+            .ToArray();
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions());
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 1));
+        var collector = new StopAfterFirstHitCollector();
+        var stats = snapshot.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
+            {
+                MaxHits = int.MaxValue,
+                MaxDocuments = int.MaxValue,
+                MaxBytesScanned = long.MaxValue
+            },
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(SearchStopReason.Cancelled, stats.StopReason);
+        Assert.Equal(1, stats.VerifiedDocuments);
+        Assert.Equal(1, stats.HitsReturned);
+    }
+
+    [Fact]
     public async Task SegmentParallelSearchHonorsGlobalSearchLimits()
     {
         var documents = Enumerable.Range(0, 96)
@@ -2369,6 +2396,11 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(1, stats.HitsReturned);
         Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
+    }
+
+    private sealed class StopAfterFirstHitCollector : IHitCollector
+    {
+        public bool OnHit(in RawHit hit) => false;
     }
 
     private sealed class SlowHitCollector : IHitCollector

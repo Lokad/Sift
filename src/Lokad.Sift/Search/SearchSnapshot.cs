@@ -455,7 +455,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         long byteRegexCacheHits = 0;
         long byteRegexCacheMisses = 0;
         var hitsReturned = 0;
-        var hitDocuments = 0;
         var stopReason = SearchStopReason.None;
 
         // Consume one parallel-width batch at a time so completed segments and
@@ -514,67 +513,27 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 scopeBytes += result.ScopeBytes;
                 postingsBytesRead += result.PostingsBytesRead;
                 candidateDocumentsAfterIndex += result.CandidateDocumentsAfterIndex;
+                candidateDocumentsAfterPrecheck += result.CandidateDocumentsAfterPrecheck;
+                verifiedDocuments += result.VerifiedDocuments;
+                bytesScanned += result.BytesScanned;
+                decodedChars += result.DecodedChars;
+                regexInvocations += result.RegexInvocations;
+                byteRegexInvocations += result.Utf8RegexInvocations;
+                fallbackRegexInvocations += result.FallbackRegexInvocations;
+                nonBacktrackingRegexInvocations += result.NonBacktrackingRegexInvocations;
+                byteRegexMatchedDocuments += result.Utf8RegexMatchedDocuments;
+                byteRegexStartPositionsTried += result.Utf8RegexMatchesEnumerated;
+                byteRegexCacheHits += result.Utf8RegexCacheHits;
+                byteRegexCacheMisses += result.Utf8RegexCacheMisses;
 
-                for (var docIndex = 0; docIndex < result.Documents.Count; docIndex++)
+                for (var hitIndex = 0; hitIndex < result.Hits.Count; hitIndex++)
                 {
-                    var document = result.Documents[docIndex];
-                    bytesScanned += document.BytesScanned;
-                    if (bytesScanned > query.MaxBytesScanned)
+                    var hit = result.Hits[hitIndex];
+                    var shouldContinue = collector.OnHit(hit);
+                    hitsReturned++;
+                    if (!shouldContinue)
                     {
-                        stopReason = SearchStopReason.MaxBytesScanned;
-                        goto Done;
-                    }
-
-                    candidateDocumentsAfterPrecheck += document.CandidateDocumentsAfterPrecheck;
-                    verifiedDocuments += document.VerifiedDocuments;
-                    decodedChars += document.DecodedChars;
-                    regexInvocations += document.RegexInvocations;
-                    byteRegexInvocations += document.Utf8RegexInvocations;
-                    fallbackRegexInvocations += document.FallbackRegexInvocations;
-                    nonBacktrackingRegexInvocations += document.NonBacktrackingRegexInvocations;
-                    byteRegexMatchedDocuments += document.Utf8RegexMatchedDocuments;
-                    byteRegexStartPositionsTried += document.Utf8RegexMatchesEnumerated;
-                    byteRegexCacheHits += document.Utf8RegexCacheHits;
-                    byteRegexCacheMisses += document.Utf8RegexCacheMisses;
-
-                    var countBefore = hitsReturned;
-                    for (var hitIndex = 0; hitIndex < document.Hits.Count; hitIndex++)
-                    {
-                        var shouldContinue = collector.OnHit(document.Hits[hitIndex]);
-                        hitsReturned++;
-                        if (!shouldContinue)
-                        {
-                            stopReason = SearchStopReason.Cancelled;
-                            goto Done;
-                        }
-
-                        if (hitsReturned >= query.MaxHits)
-                        {
-                            stopReason = SearchStopReason.MaxHits;
-                            goto Done;
-                        }
-                    }
-
-                    if (hitsReturned > countBefore)
-                    {
-                        hitDocuments++;
-                    }
-
-                    if (document.StopReason != SearchStopReason.None)
-                    {
-                        stopReason = document.StopReason;
-                        goto Done;
-                    }
-
-                    if (hitDocuments >= query.MaxDocuments)
-                    {
-                        stopReason = SearchStopReason.MaxDocuments;
-                        goto Done;
-                    }
-
-                    if (hitsReturned >= query.MaxHits)
-                    {
-                        stopReason = SearchStopReason.MaxHits;
+                        stopReason = SearchStopReason.Cancelled;
                         goto Done;
                     }
                 }
@@ -902,9 +861,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         postingsBytesRead = candidates.PostingsBytesRead;
         candidateDocumentsAfterIndex = candidates.Ordinals.Count;
         var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(preparedOrderedAnchorGroups, candidates.Ordinals.Count);
-        var documents = new List<DocumentSearchResult>(candidates.Ordinals.Count);
+        var bufferedHits = new BufferingHitCollector();
         var segmentStopReason = SearchStopReason.None;
         long segmentBytesScanned = 0;
+        long decodedChars = 0;
+        var candidateDocumentsAfterPrecheck = 0;
+        var verifiedDocuments = 0;
+        var byteRegexInvocations = 0;
+        var fallbackRegexInvocations = 0;
+        var nonBacktrackingRegexInvocations = 0;
+        var byteRegexMatchedDocuments = 0;
+        long byteRegexStartPositionsTried = 0;
+        long byteRegexCacheHits = 0;
+        long byteRegexCacheMisses = 0;
+        var hitsReturned = 0;
         var segmentHitDocuments = 0;
 
         foreach (var ordinal in candidates.Ordinals)
@@ -924,21 +894,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
             if (string.IsNullOrEmpty(query.Pattern))
             {
-                documents.Add(new DocumentSearchResult(
-                    BytesScanned: 0,
-                    CandidateDocumentsAfterPrecheck: 1,
-                    VerifiedDocuments: 1,
-                    DecodedChars: 0,
-                    RegexInvocations: 0,
-                    Utf8RegexInvocations: 0,
-                    FallbackRegexInvocations: 0,
-                    NonBacktrackingRegexInvocations: 0,
-                    Utf8RegexMatchedDocuments: 0,
-                    Utf8RegexMatchesEnumerated: 0,
-                    Utf8RegexCacheHits: 0,
-                    Utf8RegexCacheMisses: 0,
-                    StopReason: SearchStopReason.None,
-                    Hits: [new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1)]));
+                bufferedHits.OnHit(new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
+                candidateDocumentsAfterPrecheck++;
+                verifiedDocuments++;
+                hitsReturned++;
                 segmentHitDocuments++;
                 if (segmentHitDocuments >= query.MaxDocuments)
                 {
@@ -956,101 +915,47 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
 
             segmentBytesScanned += document.ContentLength;
-            var collector = new BufferingHitCollector();
-            long decodedChars = 0;
-            var regexInvocations = 0;
-            var byteRegexInvocations = 0;
-            var fallbackRegexInvocations = 0;
-            var nonBacktrackingRegexInvocations = 0;
-            var byteRegexMatchedDocuments = 0;
-            long byteRegexStartPositionsTried = 0;
-            long byteRegexCacheHits = 0;
-            long byteRegexCacheMisses = 0;
-            var hitsReturned = 0;
-            var stopReason = SearchStopReason.None;
             var contentBytes = cache.Segment.GetContentBytes(document);
             if (!PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out var predecodedText))
             {
-                documents.Add(new DocumentSearchResult(
-                    BytesScanned: document.ContentLength,
-                    CandidateDocumentsAfterPrecheck: 0,
-                    VerifiedDocuments: 0,
-                    DecodedChars: decodedChars,
-                    RegexInvocations: 0,
-                    Utf8RegexInvocations: 0,
-                    FallbackRegexInvocations: 0,
-                    NonBacktrackingRegexInvocations: 0,
-                    Utf8RegexMatchedDocuments: 0,
-                    Utf8RegexMatchesEnumerated: 0,
-                    Utf8RegexCacheHits: 0,
-                    Utf8RegexCacheMisses: 0,
-                    StopReason: SearchStopReason.None,
-                    Hits: collector.Hits));
                 continue;
             }
 
             if (useOrderedAnchorPrecheck && !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
             {
-                documents.Add(new DocumentSearchResult(
-                    BytesScanned: document.ContentLength,
-                    CandidateDocumentsAfterPrecheck: 0,
-                    VerifiedDocuments: 0,
-                    DecodedChars: decodedChars,
-                    RegexInvocations: 0,
-                    Utf8RegexInvocations: 0,
-                    FallbackRegexInvocations: 0,
-                    NonBacktrackingRegexInvocations: 0,
-                    Utf8RegexMatchedDocuments: 0,
-                    Utf8RegexMatchesEnumerated: 0,
-                    Utf8RegexCacheHits: 0,
-                    Utf8RegexCacheMisses: 0,
-                    StopReason: SearchStopReason.None,
-                    Hits: collector.Hits));
                 continue;
             }
 
+            candidateDocumentsAfterPrecheck++;
+            verifiedDocuments++;
+            var countBefore = hitsReturned;
             var documentHitLimit = GetDocumentHitLimit(hitsReturned, query);
+            var documentStopReason = SearchStopReason.None;
             if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
             {
-                SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
+                SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, bufferedHits, ref decodedChars, ref hitsReturned, ref documentStopReason, predecodedText, regexPlan.ExactLiteral);
             }
             else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
             {
-                Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
+                Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, bufferedHits, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref documentStopReason);
             }
             else
             {
-                RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, bufferedHits, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref documentStopReason, predecodedText);
             }
-            regexInvocations = byteRegexInvocations + fallbackRegexInvocations;
-            if (stopReason == SearchStopReason.None && hitsReturned >= query.MaxHits)
+            if (documentStopReason == SearchStopReason.None && hitsReturned >= query.MaxHits)
             {
-                stopReason = SearchStopReason.MaxHits;
+                documentStopReason = SearchStopReason.MaxHits;
             }
 
-            documents.Add(new DocumentSearchResult(
-                BytesScanned: document.ContentLength,
-                CandidateDocumentsAfterPrecheck: 1,
-                VerifiedDocuments: 1,
-                DecodedChars: decodedChars,
-                RegexInvocations: regexInvocations,
-                Utf8RegexInvocations: byteRegexInvocations,
-                FallbackRegexInvocations: fallbackRegexInvocations,
-                NonBacktrackingRegexInvocations: nonBacktrackingRegexInvocations,
-                Utf8RegexMatchedDocuments: byteRegexMatchedDocuments,
-                Utf8RegexMatchesEnumerated: byteRegexStartPositionsTried,
-                Utf8RegexCacheHits: byteRegexCacheHits,
-                Utf8RegexCacheMisses: byteRegexCacheMisses,
-                StopReason: stopReason,
-                Hits: collector.Hits));
-
-            if (collector.Hits.Count > 0)
+            if (hitsReturned > countBefore)
             {
                 segmentHitDocuments++;
             }
 
-            if (stopReason != SearchStopReason.None)
+            if (documentStopReason != SearchStopReason.None)
             {
+                segmentStopReason = documentStopReason;
                 break;
             }
 
@@ -1066,8 +971,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             scope.Bytes,
             postingsBytesRead,
             candidateDocumentsAfterIndex,
+            candidateDocumentsAfterPrecheck,
+            verifiedDocuments,
+            segmentBytesScanned,
+            decodedChars,
+            byteRegexInvocations + fallbackRegexInvocations,
+            byteRegexInvocations,
+            fallbackRegexInvocations,
+            nonBacktrackingRegexInvocations,
+            byteRegexMatchedDocuments,
+            byteRegexStartPositionsTried,
+            byteRegexCacheHits,
+            byteRegexCacheMisses,
             segmentStopReason,
-            documents);
+            bufferedHits.Hits);
     }
 
     private static void SearchLiteralDocument(
@@ -1977,13 +1894,9 @@ internal readonly record struct SegmentSearchResult(
     long ScopeBytes,
     long PostingsBytesRead,
     int CandidateDocumentsAfterIndex,
-    SearchStopReason StopReason,
-    List<DocumentSearchResult> Documents);
-
-internal readonly record struct DocumentSearchResult(
-    int BytesScanned,
     int CandidateDocumentsAfterPrecheck,
     int VerifiedDocuments,
+    long BytesScanned,
     long DecodedChars,
     int RegexInvocations,
     int Utf8RegexInvocations,
