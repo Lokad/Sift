@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Numerics;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Search;
@@ -964,14 +965,43 @@ public sealed class Sift : ISift
             return live;
         }
 
-        var sortedPaths = affectedPaths.ToArray();
-        Array.Sort(sortedPaths, StringComparer.Ordinal);
+        string[]? sortedPaths = null;
         foreach (var entry in manifest.Segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var segment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
+            var binarySearchComparisons = (long)affectedPaths.Count *
+                (BitOperations.Log2((uint)Math.Max(segment.DocumentCount, 1)) + 1);
+            if (binarySearchComparisons <= segment.DocumentCount)
+            {
+                // A small batch can target paths near the end of a large segment,
+                // for which a merge scan would traverse nearly every document.
+                foreach (var path in affectedPaths)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!segment.TryFindDocumentOrdinal(path, out var foundOrdinal) ||
+                        Array.BinarySearch(entry.DeadOrdinals, foundOrdinal) >= 0)
+                    {
+                        continue;
+                    }
+
+                    live[path] = new LiveDocumentKey(
+                        entry.SegmentId,
+                        foundOrdinal,
+                        segment.GetDocument(foundOrdinal).ContentLength);
+                }
+
+                continue;
+            }
+
+            if (sortedPaths is null)
+            {
+                sortedPaths = affectedPaths.ToArray();
+                Array.Sort(sortedPaths, StringComparer.Ordinal);
+            }
+
             // Both inputs are ordinal-sorted, so one merge pass replaces a
-            // binary search—and its former path decoding—for every changed path.
+            // binary search for every path in a large update batch.
             var pathIndex = 0;
             var ordinal = 0u;
             var deadIndex = 0;
