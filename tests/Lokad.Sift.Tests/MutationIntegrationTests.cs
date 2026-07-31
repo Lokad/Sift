@@ -240,12 +240,36 @@ public sealed class MutationIntegrationTests
         var after = index.Storage.ReadManifest();
         Assert.Equal(1, exception.RejectedUpserts);
         Assert.Equal("replacement is too large".Length, exception.RejectedBytes);
+        var rejected = Assert.Single(exception.RejectedDocuments);
+        Assert.Equal("src/a.txt", rejected.Path);
+        Assert.Equal(DocumentRejectionReason.MaximumDocumentBytesExceeded, rejected.Reason);
+        Assert.Equal("replacement is too large".Length, rejected.SubmittedBytes);
         Assert.Equal(before.Generation, after.Generation);
         Assert.Equal(before.Segments.Select(static segment => segment.SegmentId),
             after.Segments.Select(static segment => segment.SegmentId));
         using var snapshot = index.OpenSnapshot();
         Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
         Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0, 1, 2 }, DocumentRejectionReason.BinaryContent)]
+    [InlineData(new byte[] { 0xC3, 0x28 }, DocumentRejectionReason.InvalidUtf8)]
+    public async Task RejectedUpsertReportsContentFailure(byte[] content, DocumentRejectionReason expectedReason)
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        var source = new SubmittedDocumentSource([
+            new SubmittedDocument("src/rejected.txt", content),
+            new SubmittedDocument("src/unread.txt", "valid"u8.ToArray())
+        ]);
+
+        var exception = await Assert.ThrowsAsync<RejectedUpsertException>(() => index.Update(source, []));
+
+        var rejected = Assert.Single(exception.RejectedDocuments);
+        Assert.Equal("src/rejected.txt", rejected.Path);
+        Assert.Equal(expectedReason, rejected.Reason);
+        Assert.Equal(1, source.ConsumedDocuments);
     }
 
     [Fact]
@@ -323,7 +347,8 @@ public sealed class MutationIntegrationTests
         using var fixture = new CorpusFixture();
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
         {
-            MaxDocumentBytes = 1
+            MaxDocumentBytes = 1,
+            RejectedUpsertPolicy = RejectedUpsertPolicy.PreserveExisting
         });
         await index.Build(fixture.CreateSource());
 

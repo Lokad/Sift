@@ -37,6 +37,13 @@ public enum RejectedUpsertPolicy
     PreserveExisting
 }
 
+public enum DocumentRejectionReason
+{
+    MaximumDocumentBytesExceeded,
+    BinaryContent,
+    InvalidUtf8
+}
+
 public readonly record struct SearchQuery
 {
     public SearchQuery(string pattern)
@@ -216,16 +223,40 @@ public sealed class SiftOptions
 
 public sealed class RejectedUpsertException : Exception
 {
-    public RejectedUpsertException(int rejectedUpserts, long rejectedBytes)
-        : base($"Sift rejected {rejectedUpserts} upsert(s) containing {rejectedBytes} byte(s); the update was not committed.")
+    public RejectedUpsertException(
+        int rejectedUpserts,
+        long rejectedBytes,
+        IReadOnlyList<RejectedDocument> rejectedDocuments)
+        : base(CreateMessage(rejectedUpserts, rejectedBytes, rejectedDocuments))
     {
         RejectedUpserts = rejectedUpserts;
         RejectedBytes = rejectedBytes;
+        RejectedDocuments = rejectedDocuments.ToArray();
     }
 
     public int RejectedUpserts { get; }
     public long RejectedBytes { get; }
+    public IReadOnlyList<RejectedDocument> RejectedDocuments { get; }
+
+    private static string CreateMessage(
+        int rejectedUpserts,
+        long rejectedBytes,
+        IReadOnlyList<RejectedDocument> rejectedDocuments)
+    {
+        if (rejectedDocuments.Count == 0)
+        {
+            return $"Sift rejected {rejectedUpserts} upsert(s) containing {rejectedBytes} byte(s); the update was not committed.";
+        }
+
+        var first = rejectedDocuments[0];
+        return $"Sift rejected upsert '{first.Path}' ({first.Reason}, {first.SubmittedBytes} byte(s)); the update was not committed.";
+    }
 }
+
+public readonly record struct RejectedDocument(
+    string Path,
+    DocumentRejectionReason Reason,
+    int SubmittedBytes);
 
 public readonly record struct SelectedNGram(string Text, int Length, int DocFreq);
 

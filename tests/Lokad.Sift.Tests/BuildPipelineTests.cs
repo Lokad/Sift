@@ -32,7 +32,7 @@ public sealed class BuildPipelineTests
         using var fixture = new CorpusFixture();
         using var index = new SiftIndex(fixture.CorpusPath);
 
-        var stats = await index.Build(new BinaryDocumentSource([new SubmittedDocument("src/a.bin", binaryLike)]));
+        var stats = await index.Build(new SubmittedDocumentSource([new SubmittedDocument("src/a.bin", binaryLike)]));
 
         Assert.Equal(1, stats.RejectedDocuments);
         Assert.Equal(0, stats.IndexedDocuments);
@@ -153,7 +153,7 @@ public sealed class BuildPipelineTests
             TargetSegmentContentBytes = 5,
             TargetSegmentDocumentCount = 50_000
         });
-        var source = new BinaryDocumentSource(
+        var source = new SubmittedDocumentSource(
             [
                 new SubmittedDocument("src/a.txt", "aaaaa"u8.ToArray()),
                 new SubmittedDocument("src/b.txt", "bbbbb"u8.ToArray()),
@@ -226,29 +226,6 @@ public sealed class BuildPipelineTests
             MTimeUtcTicks = 0,
             ContentHash64 = 0
         };
-    }
-
-    private sealed class BinaryDocumentSource : IDocumentSource
-    {
-        private readonly IReadOnlyList<SubmittedDocument> _documents;
-        private int _index;
-
-        public BinaryDocumentSource(IReadOnlyList<SubmittedDocument> documents)
-        {
-            _documents = documents;
-        }
-
-        public bool TryReadNext(out SubmittedDocument document)
-        {
-            if (_index >= _documents.Count)
-            {
-                document = default;
-                return false;
-            }
-
-            document = _documents[_index++];
-            return true;
-        }
     }
 
     private sealed class ObservingDocumentSource : IDocumentSource

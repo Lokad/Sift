@@ -539,6 +539,7 @@ public sealed class Sift : ISift
                 _options,
                 operationName: "update",
                 forbiddenPaths: deletionSet,
+                rejectedUpsertPolicy: _options.RejectedUpsertPolicy,
                 collectAcceptedPaths: true,
                 preparePartition: partition => RemoveUnchangedDocuments(
                     existingManifest,
@@ -554,11 +555,6 @@ public sealed class Sift : ISift
                         _options.MinimumFreeBytesAfterMutation,
                         cancellationToken));
                 });
-            ThrowIfRejectedUpserts(
-                _options.RejectedUpsertPolicy,
-                upsertLoad.Rejected,
-                upsertLoad.RejectedBytes);
-
             var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
             affectedPaths.UnionWith(deletionSet);
             var liveDocumentKeys = FindLiveDocumentKeys(
@@ -654,17 +650,6 @@ public sealed class Sift : ISift
             SkippedBytes: upsertLoad.SkippedBytes,
             RejectedBytes: upsertLoad.RejectedBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds);
-    }
-
-    internal static void ThrowIfRejectedUpserts(
-        RejectedUpsertPolicy policy,
-        int rejectedUpserts,
-        long rejectedBytes)
-    {
-        if (policy == RejectedUpsertPolicy.FailUpdate && rejectedUpserts > 0)
-        {
-            throw new RejectedUpsertException(rejectedUpserts, rejectedBytes);
-        }
     }
 
     public Task<CompactStats> Compact(CompactOptions options)

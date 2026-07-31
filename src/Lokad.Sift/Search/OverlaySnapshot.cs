@@ -69,11 +69,11 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         IReadOnlyCollection<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
-        var load = IndexBuilder.LoadDocuments(upserts, cancellationToken, _options);
-        Sift.ThrowIfRejectedUpserts(
-            _options.RejectedUpsertPolicy,
-            load.Rejected,
-            load.RejectedBytes);
+        var load = IndexBuilder.LoadDocuments(
+            upserts,
+            cancellationToken,
+            _options,
+            _options.RejectedUpsertPolicy);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {

@@ -275,7 +275,8 @@ For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a fi
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
 - Rejected upserts fail the entire update by default, preventing callers from
-  checkpointing an event whose replacement was not indexed. Set
+  checkpointing an event whose replacement was not indexed. The exception
+  identifies the first rejected path, reason, and submitted size. Set
   `RejectedUpsertPolicy.PreserveExisting` only when retaining the old searchable
   version and inspecting `RejectedUpserts` is intentional.
 - Use `ShouldCompact(...)` with the same options passed to `Compact(...)`; do not trigger on aggregate segment count alone.

@@ -37,6 +37,8 @@
 
 ### Fixed
 
+- Failed rejected updates at the first invalid document and included its
+  canonical path, rejection reason, and submitted size in the exception.
 - Preserved invariant Unicode case-folding semantics when case-insensitive regex
   searches use ASCII n-gram indexes.
 - Prevented rejected-only and ineffective deletion updates from publishing

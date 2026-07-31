@@ -109,6 +109,31 @@ internal sealed class InMemoryDocumentSource : IDocumentSource
     }
 }
 
+internal sealed class SubmittedDocumentSource : IDocumentSource
+{
+    private readonly IReadOnlyList<SubmittedDocument> _documents;
+    private int _index;
+
+    public SubmittedDocumentSource(IReadOnlyList<SubmittedDocument> documents)
+    {
+        _documents = documents;
+    }
+
+    public int ConsumedDocuments => _index;
+
+    public bool TryReadNext(out SubmittedDocument document)
+    {
+        if (_index >= _documents.Count)
+        {
+            document = default;
+            return false;
+        }
+
+        document = _documents[_index++];
+        return true;
+    }
+}
+
 
 
 
