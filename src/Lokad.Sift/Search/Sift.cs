@@ -521,6 +521,7 @@ public sealed class Sift : ISift
 
         var publishedSegments = new List<SegmentManifestEntry>();
         var attemptedSegmentIds = new List<ulong>();
+        var existingUpsertKeys = new Dictionary<string, LiveDocumentKey>(StringComparer.Ordinal);
         var deletedDocuments = 0;
         StreamedDocuments upsertLoad;
         try
@@ -537,6 +538,7 @@ public sealed class Sift : ISift
                 preparePartition: partition => RemoveUnchangedDocuments(
                     existingManifest,
                     partition,
+                    existingUpsertKeys,
                     cancellationToken),
                 partition =>
                 {
@@ -550,10 +552,22 @@ public sealed class Sift : ISift
                 });
             var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
             affectedPaths.UnionWith(deletionSet);
-            var liveDocumentKeys = FindLiveDocumentKeys(
+            var liveDocumentKeys = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
+            foreach (var path in upsertLoad.AcceptedPaths)
+            {
+                if (existingUpsertKeys.TryGetValue(path, out var key))
+                {
+                    liveDocumentKeys.Add(path, key);
+                }
+            }
+
+            foreach (var pair in FindLiveDocumentKeys(
                 existingManifest,
-                affectedPaths,
-                cancellationToken);
+                deletionSet,
+                cancellationToken))
+            {
+                liveDocumentKeys.Add(pair.Key, pair.Value);
+            }
             foreach (var path in deletionSet)
             {
                 if (liveDocumentKeys.ContainsKey(path))
@@ -1214,12 +1228,16 @@ public sealed class Sift : ISift
             return live;
         }
 
+        var unresolvedPaths = affectedPaths.ToHashSet(StringComparer.Ordinal);
         string[]? sortedPaths = null;
-        foreach (var entry in manifest.Segments)
+        for (var entryIndex = manifest.Segments.Count - 1;
+             entryIndex >= 0 && unresolvedPaths.Count > 0;
+             entryIndex--)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var entry = manifest.Segments[entryIndex];
             using var segment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
-            var binarySearchComparisons = (long)affectedPaths.Count *
+            var binarySearchComparisons = (long)unresolvedPaths.Count *
                 (BitOperations.Log2((uint)Math.Max(segment.DocumentCount, 1)) + 1);
             if (binarySearchComparisons <= segment.DocumentCount)
             {
@@ -1228,19 +1246,23 @@ public sealed class Sift : ISift
                 foreach (var path in affectedPaths)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!segment.TryFindDocumentOrdinal(path, out var foundOrdinal) ||
-                        Array.BinarySearch(entry.DeadOrdinals, foundOrdinal) >= 0)
+                    if (!unresolvedPaths.Contains(path) ||
+                        !segment.TryFindDocumentOrdinal(path, out var foundOrdinal))
                     {
                         continue;
                     }
 
-                    var document = segment.GetDocument(foundOrdinal);
-                    live[path] = new LiveDocumentKey(
-                        entry.SegmentId,
-                        foundOrdinal,
-                        document.ContentLength,
-                        document.MTimeUtcTicks,
-                        document.ContentHash64);
+                    unresolvedPaths.Remove(path);
+                    if (Array.BinarySearch(entry.DeadOrdinals, foundOrdinal) < 0)
+                    {
+                        var document = segment.GetDocument(foundOrdinal);
+                        live.Add(path, new LiveDocumentKey(
+                            entry.SegmentId,
+                            foundOrdinal,
+                            document.ContentLength,
+                            document.MTimeUtcTicks,
+                            document.ContentHash64));
+                    }
                 }
 
                 continue;
@@ -1260,6 +1282,16 @@ public sealed class Sift : ISift
             var comparisons = 0;
             while (pathIndex < sortedPaths.Length && ordinal < segment.DocumentCount)
             {
+                while (pathIndex < sortedPaths.Length && !unresolvedPaths.Contains(sortedPaths[pathIndex]))
+                {
+                    pathIndex++;
+                }
+
+                if (pathIndex >= sortedPaths.Length)
+                {
+                    break;
+                }
+
                 if ((comparisons++ & 0xFFF) == 0)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -1286,14 +1318,15 @@ public sealed class Sift : ISift
 
                 if (deadIndex >= entry.DeadOrdinals.Length || entry.DeadOrdinals[deadIndex] != ordinal)
                 {
-                    live[sortedPaths[pathIndex]] = new LiveDocumentKey(
+                    live.Add(sortedPaths[pathIndex], new LiveDocumentKey(
                         entry.SegmentId,
                         ordinal,
                         document.ContentLength,
                         document.MTimeUtcTicks,
-                        document.ContentHash64);
+                        document.ContentHash64));
                 }
 
+                unresolvedPaths.Remove(sortedPaths[pathIndex]);
                 ordinal++;
                 pathIndex++;
             }
@@ -1327,6 +1360,7 @@ public sealed class Sift : ISift
     private void RemoveUnchangedDocuments(
         CorpusManifest manifest,
         List<StoredDocument> documents,
+        IDictionary<string, LiveDocumentKey> existingKeys,
         CancellationToken cancellationToken)
     {
         if (documents.Count == 0 || manifest.Segments.Count == 0)
@@ -1337,8 +1371,21 @@ public sealed class Sift : ISift
         var byPath = documents.ToDictionary(static document => document.Path, StringComparer.Ordinal);
         var paths = byPath.Keys.ToHashSet(StringComparer.Ordinal);
         var current = FindLiveDocumentKeys(manifest, paths, cancellationToken);
+        foreach (var pair in current)
+        {
+            existingKeys.Add(pair.Key, pair.Value);
+        }
+
         var unchangedPaths = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var group in current.GroupBy(static pair => pair.Value.SegmentId))
+        var possibleMatches = current.Where(pair =>
+        {
+            var incoming = byPath[pair.Key];
+            var indexed = pair.Value;
+            return indexed.ContentLength == incoming.Content.Length &&
+                   indexed.ContentHash64 == incoming.ContentHash64 &&
+                   indexed.MTimeUtcTicks == incoming.MTimeUtcTicks;
+        });
+        foreach (var group in possibleMatches.GroupBy(static pair => pair.Value.SegmentId))
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var segment = _storage.OpenSegment(group.Key, cancellationToken);
@@ -1346,13 +1393,6 @@ public sealed class Sift : ISift
             {
                 var incoming = byPath[pair.Key];
                 var indexed = pair.Value;
-                if (indexed.ContentLength != incoming.Content.Length ||
-                    indexed.ContentHash64 != incoming.ContentHash64 ||
-                    indexed.MTimeUtcTicks != incoming.MTimeUtcTicks)
-                {
-                    continue;
-                }
-
                 // The persisted hash is only a fast rejection filter; byte equality
                 // is required before suppressing a replacement.
                 var indexedDocument = segment.GetDocument(indexed.Ordinal);

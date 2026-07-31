@@ -342,6 +342,30 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task ChangedUpsertFindsLatestDocumentWithoutRescanningOlderSegments()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "alpha"),
+            ("src/b.txt", "beta"),
+            ("src/c.txt", "gamma")
+        ]));
+        var storage = TestHelpers.GetStorage(index);
+        var opensBeforeUpdate = storage.SegmentOpenCount;
+
+        var stats = await index.Update(
+            new InMemoryDocumentSource([("src/c.txt", "omega")]),
+            []);
+
+        Assert.Equal(1, stats.UpsertedDocuments);
+        Assert.Equal(1, storage.SegmentOpenCount - opensBeforeUpdate);
+    }
+
+    [Fact]
     public async Task DuplicateRejectedUpsertPathsAreRejected()
     {
         using var fixture = new CorpusFixture();
