@@ -162,6 +162,68 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task OverlaySearchesRemainConsistentDuringApply()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/base.txt", "alpha\n")]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Apply(
+            new InMemoryDocumentSource([("src/overlay.txt", "alpha 0\n")]),
+            []);
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            for (var iteration = 0; iteration < 50; iteration++)
+            {
+                var collector = new HitBuffer();
+                overlay.Search(
+                    new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                    new PathFilter(),
+                    collector);
+                Assert.NotEmpty(collector.Hits);
+            }
+        }));
+        var writer = Task.Run(async () =>
+        {
+            for (var iteration = 1; iteration <= 20; iteration++)
+            {
+                await overlay.Apply(
+                    new InMemoryDocumentSource([
+                        ("src/overlay.txt", $"alpha {iteration}\n")
+                    ]),
+                    []);
+            }
+        });
+
+        await Task.WhenAll(readers.Append(writer));
+    }
+
+    [Fact]
+    public async Task OverlayDisposeWaitsForAnActiveSearch()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+        var overlay = index.OpenOverlaySnapshot();
+        using var collector = new BlockingHitCollector();
+        var search = Task.Run(() => overlay.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector));
+        await collector.WaitUntilBlocked();
+
+        var dispose = Task.Run(overlay.Dispose);
+        await Task.Delay(100);
+        Assert.False(dispose.IsCompleted);
+
+        collector.Release();
+        await search;
+        await dispose.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Throws<ObjectDisposedException>(() => overlay.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            new HitBuffer()));
+    }
+
+    [Fact]
     public async Task ReaderSnapshotRemainsConsistentDuringUpdatePublication()
     {
         using var fixture = new CorpusFixture(
@@ -233,6 +295,35 @@ public sealed class ConcurrencyTests
 
             document = default;
             return false;
+        }
+
+        public Task WaitUntilBlocked()
+        {
+            return _entered.Task;
+        }
+
+        public void Release()
+        {
+            _release.Set();
+        }
+
+        public void Dispose()
+        {
+            _release.Dispose();
+        }
+    }
+
+    private sealed class BlockingHitCollector : IHitCollector, IDisposable
+    {
+        private readonly TaskCompletionSource _entered = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ManualResetEventSlim _release = new(false);
+
+        public bool OnHit(in RawHit hit)
+        {
+            _entered.TrySetResult();
+            _release.Wait();
+            return true;
         }
 
         public Task WaitUntilBlocked()

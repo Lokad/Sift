@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Lokad.Sift;
 using Lokad.Sift.Indexer;
@@ -16,8 +17,13 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly HashSet<ulong> _baseSegmentIds;
     private readonly Dictionary<ulong, ulong> _overlayToSyntheticSegmentIds = [];
     private readonly Dictionary<ulong, ulong> _syntheticToOverlaySegmentIds = [];
+    // Collectors may materialize overlay hits recursively while Search holds a read lease.
+    private readonly ReaderWriterLockSlim _stateLock = new(LockRecursionPolicy.SupportsRecursion);
+    private readonly SemaphoreSlim _applyLock = new(1, 1);
+    private readonly object _syntheticSync = new();
     private IIndexSnapshot _overlaySnapshot;
     private ulong _nextSyntheticSegmentId = ulong.MaxValue;
+    private int _disposed;
 
     internal OverlaySnapshot(SearchSnapshot baseSnapshot, SiftOptions options, SearchOptions searchOptions)
     {
@@ -38,7 +44,23 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private async Task<UpdateStats> ApplyCore(IDocumentSource upserts, IReadOnlyCollection<DocumentKey> deletions, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(upserts);
+        await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            return await ApplyCoreUnderLock(upserts, deletions, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _applyLock.Release();
+        }
+    }
 
+    private async Task<UpdateStats> ApplyCoreUnderLock(
+        IDocumentSource upserts,
+        IReadOnlyCollection<DocumentKey> deletions,
+        CancellationToken cancellationToken)
+    {
         var load = IndexBuilder.LoadDocuments(upserts, cancellationToken, _options);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
@@ -64,20 +86,28 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             CreateDeletionKeys(deletionSet),
             cancellationToken);
 
-        for (var i = 0; i < load.Documents.Count; i++)
+        _stateLock.EnterWriteLock();
+        try
         {
-            var document = load.Documents[i];
-            _overlayDocuments[document.Path] = document;
-            _deletedPaths.Remove(document.Path);
-        }
+            for (var i = 0; i < load.Documents.Count; i++)
+            {
+                var document = load.Documents[i];
+                _overlayDocuments[document.Path] = document;
+                _deletedPaths.Remove(document.Path);
+            }
 
-        foreach (var path in deletionSet)
+            foreach (var path in deletionSet)
+            {
+                _overlayDocuments.Remove(path);
+                _deletedPaths.Add(path);
+            }
+
+            RefreshOverlaySnapshot();
+        }
+        finally
         {
-            _overlayDocuments.Remove(path);
-            _deletedPaths.Add(path);
+            _stateLock.ExitWriteLock();
         }
-
-        RefreshOverlaySnapshot();
 
         return new UpdateStats(
             load.Submitted,
@@ -94,11 +124,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     public Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(target);
-        return target.Update(new StoredDocumentSource(GetSortedOverlayDocuments()), CreateDeletionKeys(_deletedPaths), cancellationToken);
+        using var state = BeginRead();
+        return target.Update(
+            new StoredDocumentSource(GetSortedOverlayDocuments()),
+            CreateDeletionKeys(_deletedPaths),
+            cancellationToken);
     }
 
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
+        using var state = BeginRead();
         var basePlan = _baseSnapshot.Explain(query, pathFilter);
         if (_overlayDocuments.Count == 0 && _deletedPaths.Count == 0)
         {
@@ -132,6 +167,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(collector);
+        using var state = BeginRead();
+        var watch = Stopwatch.StartNew();
 
         var overlayCollector = new OverlayHitCollector(this, collector);
         var overlayStats = _overlaySnapshot.Search(query, pathFilter, overlayCollector, cancellationToken);
@@ -158,6 +195,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return overlayStats with { StopReason = SearchStopReason.MaxBytesScanned };
         }
 
+        var remainingElapsedMilliseconds = query.MaxElapsedMilliseconds - watch.ElapsedMilliseconds;
+        if (remainingElapsedMilliseconds <= 0)
+        {
+            return overlayStats with { StopReason = SearchStopReason.MaxElapsedTime };
+        }
+
         var hiddenPaths = BuildHiddenPathList();
         var baseCollector = new TrackingCollector(collector);
         var baseStats = _baseSnapshot.Search(
@@ -165,7 +208,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             {
                 MaxHits = remainingHits,
                 MaxDocuments = remainingDocuments,
-                MaxBytesScanned = remainingBytes
+                MaxBytesScanned = remainingBytes,
+                MaxElapsedMilliseconds = remainingElapsedMilliseconds
             },
             pathFilter,
             baseCollector,
@@ -177,16 +221,25 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
     {
-        if (_syntheticToOverlaySegmentIds.TryGetValue(hit.SegmentId, out var overlaySegmentId))
+        using var state = BeginRead();
+        ulong overlaySegmentId;
+        lock (_syntheticSync)
         {
-            return _overlaySnapshot.Materialize(hit with { SegmentId = overlaySegmentId }, contextBefore, contextAfter);
+            if (!_syntheticToOverlaySegmentIds.TryGetValue(hit.SegmentId, out overlaySegmentId))
+            {
+                return _baseSnapshot.Materialize(hit, contextBefore, contextAfter);
+            }
         }
 
-        return _baseSnapshot.Materialize(hit, contextBefore, contextAfter);
+        return _overlaySnapshot.Materialize(
+            hit with { SegmentId = overlaySegmentId },
+            contextBefore,
+            contextAfter);
     }
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
+        using var state = BeginRead();
         var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
         if (_overlayDocuments.TryGetValue(normalizedPath, out var document))
         {
@@ -205,36 +258,85 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public void Dispose()
     {
-        _overlaySnapshot.Dispose();
-        _overlayIndex.Dispose();
-        _baseSnapshot.Dispose();
+        if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _applyLock.Wait();
+        try
+        {
+            _stateLock.EnterWriteLock();
+            try
+            {
+                _overlaySnapshot.Dispose();
+                _overlayIndex.Dispose();
+                _baseSnapshot.Dispose();
+            }
+            finally
+            {
+                _stateLock.ExitWriteLock();
+            }
+        }
+        finally
+        {
+            _applyLock.Release();
+        }
     }
 
     private void RefreshOverlaySnapshot()
     {
         _overlaySnapshot.Dispose();
         _overlaySnapshot = _overlayIndex.OpenSnapshot(_searchOptions);
-        _overlayToSyntheticSegmentIds.Clear();
-        _syntheticToOverlaySegmentIds.Clear();
-        _nextSyntheticSegmentId = ulong.MaxValue;
+        lock (_syntheticSync)
+        {
+            _overlayToSyntheticSegmentIds.Clear();
+            _syntheticToOverlaySegmentIds.Clear();
+            _nextSyntheticSegmentId = ulong.MaxValue;
+        }
     }
 
     private ulong GetSyntheticSegmentId(ulong overlaySegmentId)
     {
-        if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId, out var syntheticSegmentId))
+        lock (_syntheticSync)
         {
+            if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId, out var syntheticSegmentId))
+            {
+                return syntheticSegmentId;
+            }
+
+            while (_baseSegmentIds.Contains(_nextSyntheticSegmentId) || _syntheticToOverlaySegmentIds.ContainsKey(_nextSyntheticSegmentId))
+            {
+                _nextSyntheticSegmentId--;
+            }
+
+            syntheticSegmentId = _nextSyntheticSegmentId--;
+            _overlayToSyntheticSegmentIds.Add(overlaySegmentId, syntheticSegmentId);
+            _syntheticToOverlaySegmentIds.Add(syntheticSegmentId, overlaySegmentId);
             return syntheticSegmentId;
         }
+    }
 
-        while (_baseSegmentIds.Contains(_nextSyntheticSegmentId) || _syntheticToOverlaySegmentIds.ContainsKey(_nextSyntheticSegmentId))
+    private StateReadLease BeginRead()
+    {
+        _stateLock.EnterReadLock();
+        try
         {
-            _nextSyntheticSegmentId--;
+            ThrowIfDisposed();
+            return new StateReadLease(_stateLock);
         }
+        catch
+        {
+            _stateLock.ExitReadLock();
+            throw;
+        }
+    }
 
-        syntheticSegmentId = _nextSyntheticSegmentId--;
-        _overlayToSyntheticSegmentIds.Add(overlaySegmentId, syntheticSegmentId);
-        _syntheticToOverlaySegmentIds.Add(syntheticSegmentId, overlaySegmentId);
-        return syntheticSegmentId;
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
     }
 
     private byte[][] BuildHiddenPathList()
@@ -417,6 +519,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             var next = _documents[_index++];
             document = new SubmittedDocument(next.Path, next.Content, new DateTimeOffset(next.MTimeUtcTicks, TimeSpan.Zero));
             return true;
+        }
+    }
+
+    private sealed class StateReadLease(ReaderWriterLockSlim stateLock) : IDisposable
+    {
+        private ReaderWriterLockSlim? _stateLock = stateLock;
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _stateLock, null)?.ExitReadLock();
         }
     }
 

@@ -2374,6 +2374,30 @@ public sealed class SearchIntegrationTests
         Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
     }
 
+    [Fact]
+    public async Task OverlaySharesOneWallClockBudgetWithTheBase()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/base.txt", "needle")]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Apply(
+            new InMemoryDocumentSource([("src/overlay.txt", "needle")]),
+            []);
+        var collector = new SlowHitCollector();
+
+        var stats = overlay.Search(
+            new SearchQuery(
+                "needle",
+                PatternMode.Literal,
+                CaseMode.Sensitive,
+                MaxElapsedMilliseconds: 50),
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(1, stats.HitsReturned);
+        Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
+    }
+
     private sealed class SlowHitCollector : IHitCollector
     {
         public bool OnHit(in RawHit hit)
