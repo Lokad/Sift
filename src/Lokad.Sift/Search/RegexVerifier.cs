@@ -22,8 +22,7 @@ internal static class RegexVerifier
     public static bool TrySearchDocument(
         MappedSegment segment,
         SegmentDocument document,
-        in SearchQuery query,
-        CaseMode resolvedCaseMode,
+        PreparedRegexVerifier prepared,
         int hitLimit,
         IHitCollector collector,
         ref long decodedChars,
@@ -42,10 +41,8 @@ internal static class RegexVerifier
             ? predecodedText.AsSpan()
             : decodedBuffer.AsSpan();
 
-        var entry = GetRegexEntry(query, resolvedCaseMode);
-        var regex = entry.Regex;
         regexInvocations++;
-        if (entry.UsesNonBacktracking)
+        if (prepared.UsesNonBacktracking)
         {
             nonBacktrackingRegexInvocations++;
         }
@@ -56,7 +53,7 @@ internal static class RegexVerifier
 
         try
         {
-            foreach (var match in regex.EnumerateMatches(text))
+            foreach (var match in prepared.Regex.EnumerateMatches(text))
             {
                 if (hitsReturned >= hitLimit)
                 {
@@ -96,7 +93,7 @@ internal static class RegexVerifier
         }
         catch (RegexMatchTimeoutException)
         {
-            if (query.TimeoutPolicy == TimeoutPolicy.Throw)
+            if (prepared.TimeoutPolicy == TimeoutPolicy.Throw)
             {
                 throw;
             }
@@ -165,14 +162,15 @@ internal static class RegexVerifier
         return pattern;
     }
 
-    public static bool CanUseNonBacktracking(in SearchQuery query, CaseMode resolvedCaseMode)
+    public static PreparedRegexVerifier Prepare(in SearchQuery query, CaseMode resolvedCaseMode)
     {
-        return GetRegexEntry(query, resolvedCaseMode).UsesNonBacktracking;
+        var entry = GetRegexEntry(query, resolvedCaseMode);
+        return new PreparedRegexVerifier(entry.Regex, entry.UsesNonBacktracking, query.TimeoutPolicy);
     }
 
     public static Regex GetRegex(in SearchQuery query, CaseMode resolvedCaseMode)
     {
-        return GetRegexEntry(query, resolvedCaseMode).Regex;
+        return Prepare(query, resolvedCaseMode).Regex;
     }
 
     private static RegexEntry GetRegexEntry(in SearchQuery query, CaseMode resolvedCaseMode)
@@ -262,3 +260,8 @@ internal static class RegexVerifier
         }
     }
 }
+
+internal sealed record PreparedRegexVerifier(
+    Regex Regex,
+    bool UsesNonBacktracking,
+    TimeoutPolicy TimeoutPolicy);

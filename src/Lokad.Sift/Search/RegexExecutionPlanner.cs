@@ -25,7 +25,7 @@ internal static class RegexExecutionPlanner
             return RegexExecutionPlan.ForUtf8Regex(byteRegexProgram);
         }
 
-        return RegexExecutionPlan.ForFallback(RegexVerifier.CanUseNonBacktracking(query, resolvedCaseMode));
+        return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, resolvedCaseMode));
     }
 
     public static bool NeedsUnicodeDecode(in SearchQuery query, string[] mandatoryFragments, CaseMode resolvedCaseMode, in RegexExecutionPlan regexPlan)
@@ -103,15 +103,17 @@ internal readonly record struct RegexExecutionPlan(
     RegexExecutionKind Kind,
     string? ExactLiteral,
     Utf8RegexProgram? Utf8RegexProgram,
-    bool CanUseNonBacktracking)
+    PreparedRegexVerifier? PreparedFallbackRegex)
 {
-    public static RegexExecutionPlan Literal => new(RegexExecutionKind.Literal, null, null, false);
+    public static RegexExecutionPlan Literal => new(RegexExecutionKind.Literal, null, null, null);
 
-    public static RegexExecutionPlan ForExactLiteral(string literal) => new(RegexExecutionKind.ExactLiteral, literal, null, false);
+    public static RegexExecutionPlan ForExactLiteral(string literal) => new(RegexExecutionKind.ExactLiteral, literal, null, null);
 
-    public static RegexExecutionPlan ForUtf8Regex(Utf8RegexProgram program) => new(RegexExecutionKind.Byte, null, program, false);
+    public static RegexExecutionPlan ForUtf8Regex(Utf8RegexProgram program) => new(RegexExecutionKind.Byte, null, program, null);
 
-    public static RegexExecutionPlan ForFallback(bool canUseNonBacktracking) => new(RegexExecutionKind.Fallback, null, null, canUseNonBacktracking);
+    public static RegexExecutionPlan ForFallback(PreparedRegexVerifier preparedRegex) => new(RegexExecutionKind.Fallback, null, null, preparedRegex);
+
+    public bool CanUseNonBacktracking => PreparedFallbackRegex?.UsesNonBacktracking == true;
 
     public bool IsExactLiteral => Kind == RegexExecutionKind.ExactLiteral;
 

@@ -1027,6 +1027,7 @@ public sealed class SearchIntegrationTests
         Assert.Equal(1, stats.HitsReturned);
         Assert.Equal(2, stats.Utf8RegexInvocations);
         Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(1, stats.Utf8RegexCacheHits + stats.Utf8RegexCacheMisses);
     }
 
     [Fact]

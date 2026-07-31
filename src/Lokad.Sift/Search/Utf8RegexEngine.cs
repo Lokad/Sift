@@ -44,7 +44,7 @@ internal static class Utf8RegexEngine
     public static bool TrySearchDocument(
         MappedSegment segment,
         SegmentDocument document,
-        Utf8RegexProgram program,
+        PreparedUtf8Regex prepared,
         PreparedOrderedAnchor[][]? preparedOrderedAnchorGroups,
         int hitLimit,
         IHitCollector collector,
@@ -52,30 +52,19 @@ internal static class Utf8RegexEngine
         ref int byteRegexInvocations,
         ref int byteRegexMatchedDocuments,
         ref long byteRegexStartPositionsTried,
-        ref long byteRegexCacheHits,
-        ref long byteRegexCacheMisses,
         ref SearchStopReason stopReason)
     {
         _ = preparedOrderedAnchorGroups;
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         byteRegexInvocations++;
-        var regex = GetRegex(program, out var cacheHit);
-        if (cacheHit)
-        {
-            byteRegexCacheHits++;
-        }
-        else
-        {
-            byteRegexCacheMisses++;
-        }
 
         var matched = false;
         try
         {
             // Stay on the byte-native API surface. If Sift ever needs to continue from a byte offset,
             // it should slice contentBytes or use a future byte-offset Utf8Regex API rather than a UTF-16 startAt overload.
-            foreach (var match in regex.EnumerateMatches(contentBytes))
+            foreach (var match in prepared.Regex.EnumerateMatches(contentBytes))
             {
                 if (hitsReturned >= hitLimit)
                 {
@@ -109,6 +98,11 @@ internal static class Utf8RegexEngine
         }
         catch (RegexMatchTimeoutException)
         {
+            if (prepared.TimeoutPolicy == TimeoutPolicy.Throw)
+            {
+                throw;
+            }
+
             stopReason = SearchStopReason.RegexTimeout;
             return false;
         }
@@ -121,7 +115,7 @@ internal static class Utf8RegexEngine
         return matched;
     }
 
-    private static CompiledUtf8Regex GetRegex(Utf8RegexProgram program, out bool cacheHit)
+    public static PreparedUtf8Regex Prepare(Utf8RegexProgram program, TimeoutPolicy timeoutPolicy)
     {
         var options = RegexOptions.CultureInvariant;
         if (program.Multiline)
@@ -140,10 +134,11 @@ internal static class Utf8RegexEngine
         }
 
         var key = new Utf8RegexCacheKey(program.Pattern, options);
-        return Cache.GetOrAdd(
+        var regex = Cache.GetOrAdd(
             key,
             static cacheKey => new CompiledUtf8Regex(cacheKey.Pattern, cacheKey.Options, DefaultTimeout),
-            out cacheHit);
+            out var cacheHit);
+        return new PreparedUtf8Regex(regex, cacheHit, timeoutPolicy);
     }
 
     private static bool IsAscii(string text) => Encoding.UTF8.GetByteCount(text) == text.Length;
@@ -1424,3 +1419,8 @@ internal enum Utf8RegexAtomKind
     StartAnchor,
     EndAnchor
 }
+
+internal sealed record PreparedUtf8Regex(
+    CompiledUtf8Regex Regex,
+    bool CacheHit,
+    TimeoutPolicy TimeoutPolicy);

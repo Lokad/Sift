@@ -229,6 +229,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matcher = new PathFilterMatcher(pathFilter);
         var resolvedCaseMode = ResolveCaseMode(query);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
+        var preparedRegex = PrepareRegexExecution(query, resolvedCaseMode, regexPlan);
         var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
         var mandatoryFragments = anchors.GetMandatoryTexts();
         var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
@@ -249,8 +250,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var nonBacktrackingRegexInvocations = 0;
         var byteRegexMatchedDocuments = 0;
         long byteRegexStartPositionsTried = 0;
-        long byteRegexCacheHits = 0;
-        long byteRegexCacheMisses = 0;
+        long byteRegexCacheHits = preparedRegex.Utf8Regex?.CacheHit == true ? 1 : 0;
+        long byteRegexCacheMisses = preparedRegex.Utf8Regex?.CacheHit == false ? 1 : 0;
         var hitsReturned = 0;
         var hitDocuments = 0;
         var stopReason = SearchStopReason.None;
@@ -357,13 +358,17 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         {
                             SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
                         }
-                        else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
+                        else if (preparedRegex.Utf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
                         {
-                            Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref stopReason);
+                            Utf8RegexEngine.TrySearchDocument(cache.Segment, document, utf8Regex, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref stopReason);
+                        }
+                        else if (preparedRegex.FallbackRegex is { } fallbackRegex)
+                        {
+                            RegexVerifier.TrySearchDocument(cache.Segment, document, fallbackRegex, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
                         }
                         else
                         {
-                            RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                            throw new InvalidOperationException("The regex execution plan has no prepared verifier.");
                         }
 
                         verifiedDocuments++;
@@ -441,6 +446,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matcher = new PathFilterMatcher(pathFilter);
         var resolvedCaseMode = ResolveCaseMode(query);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
+        var preparedRegex = PrepareRegexExecution(query, resolvedCaseMode, regexPlan);
         var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
         var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
         var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
@@ -467,8 +473,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var nonBacktrackingRegexInvocations = 0;
         var byteRegexMatchedDocuments = 0;
         long byteRegexStartPositionsTried = 0;
-        long byteRegexCacheHits = 0;
-        long byteRegexCacheMisses = 0;
+        long byteRegexCacheHits = preparedRegex.Utf8Regex?.CacheHit == true ? 1 : 0;
+        long byteRegexCacheMisses = preparedRegex.Utf8Regex?.CacheHit == false ? 1 : 0;
         var hitsReturned = 0;
         var stopReason = SearchStopReason.None;
 
@@ -491,7 +497,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 {
                     var segmentIndex = batchStart + batchIndex;
                     var cache = OpenSegment(_segments[segmentIndex], cancellationToken);
-                    batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, watch, cancellationToken);
+                    batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, preparedRegex, pathVisibility, watch, cancellationToken);
                 });
             }
             catch (OperationCanceledException) when (
@@ -890,7 +896,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return Array.BinarySearch(deadOrdinals, ordinal) >= 0;
     }
 
-    private SegmentSearchResult SearchSegmentFully(SegmentCache cache, in SearchQuery query, PathFilterMatcher matcher, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, PreparedLiteralQuery? preparedLiteral, PreparedMandatoryFragment[] preparedMandatoryFragments, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, RegexExecutionPlan regexPlan, IPathVisibility? pathVisibility, Stopwatch watch, CancellationToken cancellationToken)
+    private SegmentSearchResult SearchSegmentFully(
+        SegmentCache cache,
+        in SearchQuery query,
+        PathFilterMatcher matcher,
+        CaseMode resolvedCaseMode,
+        in SearchQueryAnchors anchors,
+        PreparedLiteralQuery? preparedLiteral,
+        PreparedMandatoryFragment[] preparedMandatoryFragments,
+        PreparedOrderedAnchor[][] preparedOrderedAnchorGroups,
+        RegexExecutionPlan regexPlan,
+        PreparedRegexExecution preparedRegex,
+        IPathVisibility? pathVisibility,
+        Stopwatch watch,
+        CancellationToken cancellationToken)
     {
         var segmentPlan = SearchPlanner.CreateSegmentPlan(
             cache,
@@ -998,13 +1017,17 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             {
                 SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, bufferedHits, ref decodedChars, ref hitsReturned, ref documentStopReason, predecodedText, regexPlan.ExactLiteral);
             }
-            else if (regexPlan.UsesUtf8Regex && regexPlan.Utf8RegexProgram is not null && CanUseUtf8RegexForDocument(document))
+            else if (preparedRegex.Utf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
             {
-                Utf8RegexEngine.TrySearchDocument(cache.Segment, document, regexPlan.Utf8RegexProgram, byteRegexStartPrecheckGroups, documentHitLimit, bufferedHits, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref byteRegexCacheHits, ref byteRegexCacheMisses, ref documentStopReason);
+                Utf8RegexEngine.TrySearchDocument(cache.Segment, document, utf8Regex, byteRegexStartPrecheckGroups, documentHitLimit, bufferedHits, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref documentStopReason);
+            }
+            else if (preparedRegex.FallbackRegex is { } fallbackRegex)
+            {
+                RegexVerifier.TrySearchDocument(cache.Segment, document, fallbackRegex, documentHitLimit, bufferedHits, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref documentStopReason, predecodedText);
             }
             else
             {
-                RegexVerifier.TrySearchDocument(cache.Segment, document, query, resolvedCaseMode, documentHitLimit, bufferedHits, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref documentStopReason, predecodedText);
+                throw new InvalidOperationException("The regex execution plan has no prepared verifier.");
             }
             if (documentStopReason == SearchStopReason.None && hitsReturned >= query.MaxHits)
             {
@@ -1524,6 +1547,28 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return prepared;
     }
 
+    private static PreparedRegexExecution PrepareRegexExecution(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        in RegexExecutionPlan regexPlan)
+    {
+        if (query.PatternMode != PatternMode.Regex || regexPlan.IsExactLiteral)
+        {
+            return default;
+        }
+
+        if (regexPlan.Utf8RegexProgram is { } utf8RegexProgram)
+        {
+            return new PreparedRegexExecution(
+                Utf8RegexEngine.Prepare(utf8RegexProgram, query.TimeoutPolicy),
+                RegexVerifier.Prepare(query, resolvedCaseMode));
+        }
+
+        return regexPlan.PreparedFallbackRegex is { } fallbackRegex
+            ? new PreparedRegexExecution(null, fallbackRegex)
+            : throw new InvalidOperationException("The regex execution plan has no fallback verifier.");
+    }
+
     private static SearchQueryAnchors BuildQueryAnchors(
         in SearchQuery query,
         CaseMode resolvedCaseMode,
@@ -1924,6 +1969,10 @@ internal sealed class PreparedLiteralQuery
     public byte[]? LoweredAsciiNeedle { get; }
     public bool IsAscii { get; }
 }
+
+internal readonly record struct PreparedRegexExecution(
+    PreparedUtf8Regex? Utf8Regex,
+    PreparedRegexVerifier? FallbackRegex);
 
 internal sealed class PreparedMandatoryFragment
 {
