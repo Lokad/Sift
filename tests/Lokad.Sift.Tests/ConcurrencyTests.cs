@@ -97,6 +97,39 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task DisposeCancelsAWriterWaitingForTheCorpusLock()
+    {
+        using var fixture = new CorpusFixture();
+        var storage = new Lokad.Sift.Storage.CorpusStorage(fixture.CorpusPath);
+        using var writerLock = storage.AcquireWriterLock();
+        var index = new SiftIndex(fixture.CorpusPath);
+        var build = index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+
+        var dispose = Task.Run(index.Dispose);
+
+        await dispose.WaitAsync(TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await build);
+    }
+
+    [Fact]
+    public async Task DisposeWaitsForAnActiveDocumentSourceToReturn()
+    {
+        using var fixture = new CorpusFixture();
+        var index = new SiftIndex(fixture.CorpusPath);
+        using var source = new BlockingDocumentSource("src/a.txt", "alpha\n");
+        var build = index.Build(source);
+        await source.WaitUntilBlocked();
+
+        var dispose = Task.Run(index.Dispose);
+        await Task.Delay(100);
+        Assert.False(dispose.IsCompleted);
+
+        source.Release();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await build);
+    }
+
+    [Fact]
     public async Task ReaderSnapshotRemainsConsistentDuringUpdatePublication()
     {
         using var fixture = new CorpusFixture(

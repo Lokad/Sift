@@ -12,11 +12,15 @@ public sealed class Sift : ISift
     private readonly ISiftStorage _storage;
     private readonly IndexBuilder _builder;
     private readonly SiftOptions _options;
+    private readonly CancellationTokenSource _writerCancellation = new();
+    private readonly ManualResetEventSlim _writersIdle = new(initialState: true);
     private readonly CancellationTokenSource _reclamationCancellation = new();
     private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
     private readonly ConcurrentDictionary<LegacyMaintenanceKey, long> _legacyDeadContentBytes = new();
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
     private readonly object _reclamationSync = new();
+    // Prevents Dispose from racing a mutation between its disposed check and activity registration.
+    private readonly object _activitySync = new();
     private int _activeWriters;
     private int _currentActivity;
     private int _reclamationRequests;
@@ -105,10 +109,13 @@ public sealed class Sift : ISift
         var activity = BeginActivity(SiftActivity.Build);
         return Task.Run(async () =>
         {
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _writerCancellation.Token);
             try
             {
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
-                var stats = BuildCore(documents, cancellationToken);
+                var stats = BuildCore(documents, operationCancellation.Token);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
                 return stats with { PeakManagedBytes = peakManagedBytes };
             }
@@ -246,9 +253,12 @@ public sealed class Sift : ISift
         var activity = BeginActivity(SiftActivity.Update);
         return Task.Run(() =>
         {
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _writerCancellation.Token);
             try
             {
-                return UpdateCore(upserts, deletionArray, cancellationToken);
+                return UpdateCore(upserts, deletionArray, operationCancellation.Token);
             }
             catch (Exception exception) when (IsIndexCorruption(exception))
             {
@@ -384,10 +394,13 @@ public sealed class Sift : ISift
         var activity = BeginActivity(SiftActivity.Compact);
         return Task.Run(async () =>
         {
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _writerCancellation.Token);
             try
             {
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
-                var stats = CompactCore(options, cancellationToken);
+                var stats = CompactCore(options, operationCancellation.Token);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
                 return stats with { PeakManagedBytes = peakManagedBytes };
             }
@@ -475,7 +488,7 @@ public sealed class Sift : ISift
 
     public void Dispose()
     {
-        lock (_reclamationSync)
+        lock (_activitySync)
         {
             if (_disposed != 0)
             {
@@ -483,10 +496,18 @@ public sealed class Sift : ISift
             }
 
             Volatile.Write(ref _disposed, 1);
+            _writerCancellation.Cancel();
+        }
+
+        _writersIdle.Wait();
+        lock (_reclamationSync)
+        {
             _reclamationCancellation.Cancel();
         }
 
         _reclamationIdle.Wait();
+        _writerCancellation.Dispose();
+        _writersIdle.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
     }
@@ -687,10 +708,14 @@ public sealed class Sift : ISift
 
     private IDisposable BeginActivity(SiftActivity activity)
     {
-        ThrowIfDisposed();
-        if (Interlocked.Increment(ref _activeWriters) == 1)
+        lock (_activitySync)
         {
-            Volatile.Write(ref _currentActivity, (int)activity);
+            ThrowIfDisposed();
+            if (++_activeWriters == 1)
+            {
+                Volatile.Write(ref _currentActivity, (int)activity);
+                _writersIdle.Reset();
+            }
         }
 
         return new ActivityScope(this);
@@ -744,9 +769,13 @@ public sealed class Sift : ISift
                 return;
             }
 
-            if (Interlocked.Decrement(ref owner._activeWriters) == 0)
+            lock (owner._activitySync)
             {
-                Volatile.Write(ref owner._currentActivity, (int)SiftActivity.Idle);
+                if (--owner._activeWriters == 0)
+                {
+                    Volatile.Write(ref owner._currentActivity, (int)SiftActivity.Idle);
+                    owner._writersIdle.Set();
+                }
             }
         }
     }
