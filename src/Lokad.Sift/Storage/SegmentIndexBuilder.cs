@@ -604,40 +604,12 @@ internal static class SegmentIndexBuilder
         return (byte)(value is >= (byte)'A' and <= (byte)'Z' ? value + 32 : value);
     }
 
-    internal static BuiltIndex BuildIndexFromPostingsBlob(List<IndexEntry> entries, byte[] postingsBlob, int[] bucketStarts, int gramLength)
-    {
-        if (entries.Count == 0)
-        {
-            var emptyLexicon = GC.AllocateUninitializedArray<byte>(SegmentFormat.LexiconHeaderSize);
-            LittleEndianCodec.WriteInt32(emptyLexicon, 0);
-            emptyLexicon[4] = 0;
-            return new BuiltIndex(emptyLexicon, [0], []);
-        }
-
-        var suffixSize = gramLength == 2 ? 1 : 2;
-        var entrySize = suffixSize + 12;
-        var lexicon = GC.AllocateUninitializedArray<byte>(SegmentFormat.LexiconHeaderSize + entries.Count * entrySize);
-        LittleEndianCodec.WriteInt32(lexicon, entries.Count);
-        WriteBucketTable(lexicon, bucketStarts, entries.Count);
-        for (var i = 0; i < entries.Count; i++)
-        {
-            var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
-            var entry = entries[i];
-            WriteSuffix(lexicon.AsSpan(entryOffset, suffixSize), entry.Gram, suffixSize);
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(entryOffset + suffixSize, 4), entry.PostingsOffset);
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(entryOffset + suffixSize + 4, 4), entry.PostingsBytes);
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(entryOffset + suffixSize + 8, 4), entry.DocFreq);
-        }
-
-        return new BuiltIndex(lexicon, postingsBlob, [.. entries]);
-    }
-
-    internal static void WriteBucketTable(byte[] lexicon, ReadOnlySpan<int> bucketStarts, int entryCount)
+    internal static void WriteBucketTable(Span<byte> lexicon, ReadOnlySpan<int> bucketStarts, int entryCount)
     {
         for (var bucket = 0; bucket < SegmentFormat.LexiconBucketCount; bucket++)
         {
             var value = bucket < bucketStarts.Length ? bucketStarts[bucket] : entryCount;
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(4 + bucket * 4, 4), value);
+            LittleEndianCodec.WriteInt32(lexicon.Slice(4 + bucket * 4, 4), value);
         }
     }
 
@@ -800,10 +772,10 @@ internal sealed class DirectIndexedGramBuilder
         cancellationToken.ThrowIfCancellationRequested();
         if (_touchedCount == 0)
         {
-            var emptyLexicon = GC.AllocateUninitializedArray<byte>(SegmentFormat.LexiconHeaderSize);
-            LittleEndianCodec.WriteInt32(emptyLexicon, 0);
-            emptyLexicon[4] = 0;
-            return new BuiltIndex(emptyLexicon, [0], []);
+            var empty = BuiltIndex.Rent(SegmentFormat.LexiconHeaderSize, postingsLength: 1);
+            empty.Lexicon.Clear();
+            empty.Postings[0] = 0;
+            return empty;
         }
 
         var entries = new List<IndexEntry>(_touchedCount);
@@ -858,7 +830,9 @@ internal sealed class DirectIndexedGramBuilder
 
         var suffixSize = gramLength == 2 ? 1 : 2;
         var entrySize = suffixSize + 12;
-        var lexicon = GC.AllocateUninitializedArray<byte>(SegmentFormat.LexiconHeaderSize + entries.Count * entrySize);
+        var lexiconLength = SegmentFormat.LexiconHeaderSize + entries.Count * entrySize;
+        var index = BuiltIndex.Rent(lexiconLength, totalBytes);
+        var lexicon = index.Lexicon;
         LittleEndianCodec.WriteInt32(lexicon, entries.Count);
         SegmentIndexBuilder.WriteBucketTable(lexicon, bucketStarts, entries.Count);
         for (var i = 0; i < entries.Count; i++)
@@ -870,13 +844,13 @@ internal sealed class DirectIndexedGramBuilder
 
             var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
             var entry = entries[i];
-            SegmentIndexBuilder.WriteSuffix(lexicon.AsSpan(entryOffset, suffixSize), entry.Gram, suffixSize);
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(entryOffset + suffixSize, 4), entry.PostingsOffset);
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(entryOffset + suffixSize + 4, 4), entry.PostingsBytes);
-            LittleEndianCodec.WriteInt32(lexicon.AsSpan(entryOffset + suffixSize + 8, 4), entry.DocFreq);
+            SegmentIndexBuilder.WriteSuffix(lexicon.Slice(entryOffset, suffixSize), entry.Gram, suffixSize);
+            LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize, 4), entry.PostingsOffset);
+            LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4), entry.PostingsBytes);
+            LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4), entry.DocFreq);
         }
 
-        var postingsBlob = GC.AllocateUninitializedArray<byte>(totalBytes);
+        var postingsBlob = index.Postings;
         ordinalsOffset = 0;
         for (var i = 0; i < entries.Count; i++)
         {
@@ -888,11 +862,11 @@ internal sealed class DirectIndexedGramBuilder
             var entry = entries[i];
             PostingsCodec.Encode(
                 _ordinals.AsSpan(ordinalsOffset, entry.DocFreq),
-                postingsBlob.AsSpan(entry.PostingsOffset, entry.PostingsBytes));
+                postingsBlob.Slice(entry.PostingsOffset, entry.PostingsBytes));
             ordinalsOffset += entry.DocFreq;
         }
 
-        return new BuiltIndex(lexicon, postingsBlob, [.. entries]);
+        return index;
     }
 
     private void AddTouched(int gram)
@@ -978,10 +952,48 @@ internal sealed class DirectIndexedGramBuilder
     }
 }
 
-internal readonly record struct BuiltIndex(
-    byte[] Lexicon,
-    byte[] Postings,
-    IndexEntry[] Entries);
+internal sealed class BuiltIndex : IDisposable
+{
+    private byte[] _lexicon;
+    private byte[] _postings;
+
+    private BuiltIndex(byte[] lexicon, int lexiconLength, byte[] postings, int postingsLength)
+    {
+        _lexicon = lexicon;
+        _postings = postings;
+        LexiconLength = lexiconLength;
+        PostingsLength = postingsLength;
+    }
+
+    public int LexiconLength { get; }
+    public int PostingsLength { get; }
+    public Span<byte> Lexicon => _lexicon.AsSpan(0, LexiconLength);
+    public Span<byte> Postings => _postings.AsSpan(0, PostingsLength);
+
+    public static BuiltIndex Rent(int lexiconLength, int postingsLength)
+    {
+        return new BuiltIndex(
+            ArrayPool<byte>.Shared.Rent(lexiconLength),
+            lexiconLength,
+            ArrayPool<byte>.Shared.Rent(postingsLength),
+            postingsLength);
+    }
+
+    public void Dispose()
+    {
+        var lexicon = Interlocked.Exchange(ref _lexicon, []);
+        if (lexicon.Length > 0)
+        {
+            ArrayPool<byte>.Shared.Return(lexicon);
+        }
+
+        var postings = Interlocked.Exchange(ref _postings, []);
+        if (postings.Length > 0)
+        {
+            ArrayPool<byte>.Shared.Return(postings);
+        }
+    }
+}
 
 internal readonly record struct IndexEntry(
     int Gram,

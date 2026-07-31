@@ -15,7 +15,7 @@ internal static unsafe class SegmentWriter
         where TDocument : ISegmentBuildDocument
     {
         _ = tempPath;
-        var prepared = Prepare(documents, cancellationToken);
+        using var prepared = Prepare(documents, cancellationToken);
         ensureCapacity(prepared.TotalLength);
         using var stream = new FileStream(path, new FileStreamOptions
         {
@@ -57,7 +57,7 @@ internal static unsafe class SegmentWriter
     public static (byte[] Bytes, long ContentBytes) WriteToBytes<TDocument>(ulong segmentId, IReadOnlyList<TDocument> documents, CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
     {
-        var prepared = Prepare(documents, cancellationToken);
+        using var prepared = Prepare(documents, cancellationToken);
         var bytes = GC.AllocateUninitializedArray<byte>(prepared.TotalLength);
         WritePrepared(bytes, segmentId, documents, prepared, cancellationToken);
         return (bytes, prepared.ContentBlobLength);
@@ -70,66 +70,76 @@ internal static unsafe class SegmentWriter
     {
         // Build indexes sequentially so one segment cannot retain four 64 MiB trigram
         // workspaces plus their variable postings state at the same time.
-        var indexes = new[]
+        var indexes = new List<BuiltIndex>(6);
+        try
         {
-            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false, cancellationToken),
-            SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true, cancellationToken),
-            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false, cancellationToken),
-            SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true, cancellationToken),
-            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false, cancellationToken),
-            SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true, cancellationToken)
-        };
+            indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false, cancellationToken));
+            indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true, cancellationToken));
+            indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false, cancellationToken));
+            indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true, cancellationToken));
+            indexes.Add(SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false, cancellationToken));
+            indexes.Add(SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true, cancellationToken));
 
-        var rows = new DocumentRow[documents.Count];
-        var pathBlobLength = 0;
-        var contentBlobLength = 0;
-        var lineIndexBlobLength = 0;
-        for (var i = 0; i < documents.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var document = documents[i];
-            var pathUtf8 = document.GetPathUtf8();
-            var content = document.GetContentBytes();
-            var encodedLineIndex = document.GetEncodedLineIndex();
-            rows[i] = new DocumentRow(
-                (ulong)pathBlobLength,
-                pathUtf8.Length,
-                (ulong)contentBlobLength,
-                content.Length,
-                (ulong)lineIndexBlobLength,
-                encodedLineIndex.Length,
-                document.LineCount,
-                document.Flags,
-                document.MTimeUtcTicks,
-                document.ContentHash64);
-            pathBlobLength = checked(pathBlobLength + pathUtf8.Length);
-            contentBlobLength = checked(contentBlobLength + content.Length);
-            lineIndexBlobLength = checked(lineIndexBlobLength + encodedLineIndex.Length);
+            var rows = new DocumentRow[documents.Count];
+            var pathBlobLength = 0;
+            var contentBlobLength = 0;
+            var lineIndexBlobLength = 0;
+            for (var i = 0; i < documents.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var document = documents[i];
+                var pathUtf8 = document.GetPathUtf8();
+                var content = document.GetContentBytes();
+                var encodedLineIndex = document.GetEncodedLineIndex();
+                rows[i] = new DocumentRow(
+                    (ulong)pathBlobLength,
+                    pathUtf8.Length,
+                    (ulong)contentBlobLength,
+                    content.Length,
+                    (ulong)lineIndexBlobLength,
+                    encodedLineIndex.Length,
+                    document.LineCount,
+                    document.Flags,
+                    document.MTimeUtcTicks,
+                    document.ContentHash64);
+                pathBlobLength = checked(pathBlobLength + pathUtf8.Length);
+                contentBlobLength = checked(contentBlobLength + content.Length);
+                lineIndexBlobLength = checked(lineIndexBlobLength + encodedLineIndex.Length);
+            }
+
+            var totalLength = checked(
+                SegmentFormat.HeaderSize +
+                SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize +
+                rows.Length * SegmentFormat.DocumentRowSize +
+                pathBlobLength +
+                contentBlobLength +
+                lineIndexBlobLength);
+            foreach (var index in indexes)
+            {
+                totalLength = checked(totalLength + index.Lexicon.Length + index.Postings.Length);
+            }
+
+            totalLength = checked(
+                totalLength +
+                PreparedSegment.StatsLength +
+                SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize);
+            return new PreparedSegment(
+                rows,
+                pathBlobLength,
+                contentBlobLength,
+                lineIndexBlobLength,
+                [.. indexes],
+                totalLength);
         }
-
-        var totalLength = checked(
-            SegmentFormat.HeaderSize +
-            SegmentFormat.RegionCount * SegmentFormat.RegionDirectoryEntrySize +
-            rows.Length * SegmentFormat.DocumentRowSize +
-            pathBlobLength +
-            contentBlobLength +
-            lineIndexBlobLength);
-        foreach (var index in indexes)
+        catch
         {
-            totalLength = checked(totalLength + index.Lexicon.Length + index.Postings.Length);
-        }
+            foreach (var index in indexes)
+            {
+                index.Dispose();
+            }
 
-        totalLength = checked(
-            totalLength +
-            PreparedSegment.StatsLength +
-            SegmentFormat.RegionCount * SegmentFormat.ChecksumEntrySize);
-        return new PreparedSegment(
-            rows,
-            pathBlobLength,
-            contentBlobLength,
-            lineIndexBlobLength,
-            indexes,
-            totalLength);
+            throw;
+        }
     }
 
     private static void WritePrepared<TDocument>(
@@ -364,9 +374,17 @@ internal static unsafe class SegmentWriter
         int ContentBlobLength,
         int LineIndexBlobLength,
         BuiltIndex[] Indexes,
-        int TotalLength)
+        int TotalLength) : IDisposable
     {
         public const int StatsLength = 8 + 256 * 4;
+
+        public void Dispose()
+        {
+            foreach (var index in Indexes)
+            {
+                index.Dispose();
+            }
+        }
     }
 
     private readonly record struct DocumentRow(
