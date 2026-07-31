@@ -1238,6 +1238,31 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task DefaultPlannerUsesIndexForMailboxShapedSegment()
+    {
+        var filler = new string('x', 4096);
+        var documents = Enumerable.Range(0, 300)
+            .Select(i => (
+                $"messages/{i:D5}.txt",
+                i == 150 ? filler + " uncommon-needle\n" : filler + "\n"))
+            .ToArray();
+
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        var plan = snapshot.Explain(
+            new SearchQuery("uncommon-needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter());
+
+        Assert.Single(TestHelpers.GetStorage(index).ReadManifest().Segments);
+        Assert.True(plan.ScopeDocumentCount < 8192);
+        Assert.True(plan.UsesIndex);
+        Assert.Equal("ContentTrigram", plan.CandidateKind);
+    }
+
+    [Fact]
     public async Task ExplainFallsBackToDirectScanForSmallLiteralScope()
     {
         using var fixture = new CorpusFixture(
