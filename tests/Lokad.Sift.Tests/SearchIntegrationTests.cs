@@ -2537,6 +2537,24 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task WholeWordTreatsSupplementaryUnicodeLettersAsWordCharacters()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "\U00010400alpha alpha\U00010400 alpha"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true },
+            new PathFilter(),
+            collector);
+
+        Assert.Single(collector.Hits);
+    }
+
+    [Fact]
     public async Task AsciiWholeWordLiteralSearchAvoidsUtf16Decode()
     {
         using var fixture = new CorpusFixture(

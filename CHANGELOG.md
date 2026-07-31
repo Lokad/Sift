@@ -43,6 +43,8 @@
 
 ### Fixed
 
+- Treated supplementary-plane Unicode letters and digits as single word
+  characters for whole-word literal boundaries.
 - Failed rejected updates at the first invalid document and included its
   canonical path, rejection reason, and submitted size in the exception.
 - Preserved invariant Unicode case-folding semantics when case-insensitive regex
