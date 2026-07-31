@@ -554,6 +554,10 @@ public sealed class Sift : ISift
                         _options.MinimumFreeBytesAfterMutation,
                         cancellationToken));
                 });
+            ThrowIfRejectedUpserts(
+                _options.RejectedUpsertPolicy,
+                upsertLoad.Rejected,
+                upsertLoad.RejectedBytes);
 
             var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
             affectedPaths.UnionWith(deletionSet);
@@ -650,6 +654,17 @@ public sealed class Sift : ISift
             SkippedBytes: upsertLoad.SkippedBytes,
             RejectedBytes: upsertLoad.RejectedBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds);
+    }
+
+    internal static void ThrowIfRejectedUpserts(
+        RejectedUpsertPolicy policy,
+        int rejectedUpserts,
+        long rejectedBytes)
+    {
+        if (policy == RejectedUpsertPolicy.FailUpdate && rejectedUpserts > 0)
+        {
+            throw new RejectedUpsertException(rejectedUpserts, rejectedBytes);
+        }
     }
 
     public Task<CompactStats> Compact(CompactOptions options)
@@ -992,6 +1007,11 @@ public sealed class Sift : ISift
         if (options.MaxPatternCharacters <= 0 || options.MaxPathFilterPatterns <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Pattern limits must be positive.");
+        }
+
+        if (!Enum.IsDefined(options.RejectedUpsertPolicy))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
         }
     }
 

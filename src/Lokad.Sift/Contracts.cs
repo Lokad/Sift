@@ -31,6 +31,12 @@ public enum TimeoutPolicy
     StopSearch
 }
 
+public enum RejectedUpsertPolicy
+{
+    FailUpdate,
+    PreserveExisting
+}
+
 public readonly record struct SearchQuery
 {
     public SearchQuery(string pattern)
@@ -202,6 +208,21 @@ public sealed class SiftOptions
     public int MaxPatternCharacters { get; init; } = 16 * 1024;
     // Bounds aggregate include/exclude matcher construction per search.
     public int MaxPathFilterPatterns { get; init; } = 256;
+    // Prevents consumers from checkpointing an event whose replacement was not indexed.
+    public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; } = RejectedUpsertPolicy.FailUpdate;
+}
+
+public sealed class RejectedUpsertException : Exception
+{
+    public RejectedUpsertException(int rejectedUpserts, long rejectedBytes)
+        : base($"Sift rejected {rejectedUpserts} upsert(s) containing {rejectedBytes} byte(s); the update was not committed.")
+    {
+        RejectedUpserts = rejectedUpserts;
+        RejectedBytes = rejectedBytes;
+    }
+
+    public int RejectedUpserts { get; }
+    public long RejectedBytes { get; }
 }
 
 public readonly record struct SelectedNGram(string Text, int Length, int DocFreq);

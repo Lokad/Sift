@@ -44,6 +44,9 @@
 
 ### Breaking changes
 
+- Rejected upserts now fail the whole batch by default. Set
+  `RejectedUpsertPolicy.PreserveExisting` to retain the former counter-based
+  behavior explicitly.
 - Replaced optional method and constructor parameters with explicit overloads and
   mandatory full signatures.
 - Reworked `SearchQuery`, `SearchOptions`, `PathFilter`, and

@@ -70,6 +70,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         CancellationToken cancellationToken)
     {
         var load = IndexBuilder.LoadDocuments(upserts, cancellationToken, _options);
+        Sift.ThrowIfRejectedUpserts(
+            _options.RejectedUpsertPolicy,
+            load.Rejected,
+            load.RejectedBytes);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {

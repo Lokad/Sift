@@ -187,7 +187,8 @@ public sealed class MutationIntegrationTests
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
         {
-            MaxDocumentBytes = 8
+            MaxDocumentBytes = 8,
+            RejectedUpsertPolicy = RejectedUpsertPolicy.PreserveExisting
         });
         await index.Build(fixture.CreateSource());
         var before = index.Storage.ReadManifest();
@@ -216,6 +217,35 @@ public sealed class MutationIntegrationTests
             new PathFilter(),
             replacement);
         Assert.Empty(replacement.Hits);
+    }
+
+    [Fact]
+    public async Task RejectedUpsertFailsEntireUpdateByDefault()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaxDocumentBytes = 8
+        });
+        await index.Build(fixture.CreateSource());
+        var before = index.Storage.ReadManifest();
+
+        var exception = await Assert.ThrowsAsync<RejectedUpsertException>(() => index.Update(
+            new InMemoryDocumentSource([
+                ("src/b.txt", "bravo"),
+                ("src/a.txt", "replacement is too large")
+            ]),
+            []));
+
+        var after = index.Storage.ReadManifest();
+        Assert.Equal(1, exception.RejectedUpserts);
+        Assert.Equal("replacement is too large".Length, exception.RejectedBytes);
+        Assert.Equal(before.Generation, after.Generation);
+        Assert.Equal(before.Segments.Select(static segment => segment.SegmentId),
+            after.Segments.Select(static segment => segment.SegmentId));
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
     }
 
     [Fact]
