@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using System.Buffers;
 using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
@@ -669,7 +669,7 @@ internal sealed class DirectIndexedGramBuilder
     private ushort _documentStamp;
     private uint[] _ordinals = [];
     private Dictionary<int, int>? _overflowCounts;
-    private Dictionary<int, int>? _touchedLookup;
+    private int[] _gramIndexes = [];
     private int[] _docFrequencies = [];
     private int[] _writePositions = [];
     public int GramLength { get; }
@@ -682,7 +682,7 @@ internal sealed class DirectIndexedGramBuilder
         _seen = GC.AllocateUninitializedArray<ushort>(domainSize);
         Array.Clear(_counts);
         Array.Clear(_seen);
-        _touched = GC.AllocateUninitializedArray<int>(1024);
+        _touched = ArrayPool<int>.Shared.Rent(1024);
     }
 
     public void StartDocument()
@@ -727,7 +727,6 @@ internal sealed class DirectIndexedGramBuilder
         cancellationToken.ThrowIfCancellationRequested();
         if (_touchedCount == 0)
         {
-            _ordinals = [];
             return;
         }
 
@@ -735,8 +734,7 @@ internal sealed class DirectIndexedGramBuilder
         cancellationToken.ThrowIfCancellationRequested();
         var totalPairs = 0;
         EnsureLocalCapacity();
-        _touchedLookup ??= new Dictionary<int, int>(_touchedCount);
-        _touchedLookup.Clear();
+        EnsureCapacity(ref _gramIndexes, _counts.Length);
         for (var i = 0; i < _touchedCount; i++)
         {
             if ((i & 0x3FF) == 0)
@@ -748,13 +746,14 @@ internal sealed class DirectIndexedGramBuilder
             var docFreq = GetCount(gram);
             _docFrequencies[i] = docFreq;
             _writePositions[i] = totalPairs;
-            _touchedLookup.Add(gram, i);
+            _gramIndexes[gram] = i;
             totalPairs += docFreq;
         }
 
         if (_ordinals.Length < totalPairs)
         {
-            _ordinals = GC.AllocateUninitializedArray<uint>(totalPairs);
+            Return(ref _ordinals);
+            _ordinals = ArrayPool<uint>.Shared.Rent(totalPairs);
         }
     }
 
@@ -766,9 +765,12 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         _seen[gram] = _documentStamp;
-        var touchedLookup = _touchedLookup
-            ?? throw new InvalidOperationException("PrepareForFill must run before ordinals are added.");
-        _ordinals[_writePositions[touchedLookup[gram]]++] = ordinal;
+        if (_gramIndexes.Length == 0)
+        {
+            throw new InvalidOperationException("PrepareForFill must run before ordinals are added.");
+        }
+
+        _ordinals[_writePositions[_gramIndexes[gram]]++] = ordinal;
     }
 
     public BuiltIndex BuildIndex(
@@ -832,7 +834,6 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         _overflowCounts?.Clear();
-        _touchedLookup?.Clear();
         _touchedCount = 0;
 
         var suffixSize = gramLength == 2 ? 1 : 2;
@@ -878,7 +879,10 @@ internal sealed class DirectIndexedGramBuilder
     {
         if (_touchedCount == _touched.Length)
         {
-            Array.Resize(ref _touched, _touched.Length * 2);
+            var expanded = ArrayPool<int>.Shared.Rent(_touched.Length * 2);
+            _touched.AsSpan(0, _touchedCount).CopyTo(expanded);
+            ArrayPool<int>.Shared.Return(_touched);
+            _touched = expanded;
         }
 
         _touched[_touchedCount++] = gram;
@@ -892,14 +896,12 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         _overflowCounts = null;
-        _touchedLookup = null;
-        _ordinals = [];
-        _docFrequencies = [];
-        _writePositions = [];
-        if (_touched.Length > 1024)
-        {
-            _touched = GC.AllocateUninitializedArray<int>(1024);
-        }
+        Return(ref _ordinals);
+        Return(ref _gramIndexes);
+        Return(ref _docFrequencies);
+        Return(ref _writePositions);
+        ArrayPool<int>.Shared.Return(_touched);
+        _touched = ArrayPool<int>.Shared.Rent(1024);
 
         _touchedCount = 0;
     }
@@ -918,15 +920,41 @@ internal sealed class DirectIndexedGramBuilder
 
     private void EnsureLocalCapacity()
     {
-        if (_docFrequencies.Length < _touchedCount)
+        EnsureCapacity(ref _docFrequencies, _touchedCount);
+        EnsureCapacity(ref _writePositions, _touchedCount);
+    }
+
+    private static void EnsureCapacity(ref int[] buffer, int length)
+    {
+        if (buffer.Length >= length)
         {
-            Array.Resize(ref _docFrequencies, _touchedCount);
+            return;
         }
 
-        if (_writePositions.Length < _touchedCount)
+        Return(ref buffer);
+        buffer = ArrayPool<int>.Shared.Rent(length);
+    }
+
+    private static void Return(ref int[] buffer)
+    {
+        if (buffer.Length == 0)
         {
-            Array.Resize(ref _writePositions, _touchedCount);
+            return;
         }
+
+        ArrayPool<int>.Shared.Return(buffer);
+        buffer = [];
+    }
+
+    private static void Return(ref uint[] buffer)
+    {
+        if (buffer.Length == 0)
+        {
+            return;
+        }
+
+        ArrayPool<uint>.Shared.Return(buffer);
+        buffer = [];
     }
 }
 
