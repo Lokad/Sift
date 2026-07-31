@@ -16,6 +16,7 @@ public interface ISiftStorage
     CorpusManifest ReadManifest();
     MappedSegment OpenSegment(ulong segmentId);
     MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken);
+    void ValidateSegment(ulong segmentId, CancellationToken cancellationToken);
     long GetSegmentBytes(ulong segmentId);
     long? GetAvailableBytes();
     void EnsureSnapshotMetadata();

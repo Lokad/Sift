@@ -60,8 +60,8 @@ var initialDocuments = new InMemoryDocumentSource(
 var build = await index.Build(initialDocuments);
 Console.WriteLine($"Indexed {build.IndexedDocuments} documents in {build.ElapsedMilliseconds} ms.");
 
-// On process restart, await this before serving queries to move full pack
-// checksum validation off the first request path.
+// On process restart, schedule explicit full-pack validation outside latency-sensitive
+// work. Normal search and update opens validate structure without reading every pack byte.
 var validation = await index.Validate();
 Console.WriteLine($"Validated {validation.ValidatedSegments} segment(s) in {validation.ElapsedMilliseconds} ms.");
 

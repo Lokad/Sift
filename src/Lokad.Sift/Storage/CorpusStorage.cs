@@ -324,13 +324,25 @@ public sealed class CorpusStorage : ISiftStorage
     {
         Interlocked.Increment(ref _segmentOpenCount);
         var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
+        return OpenAndValidateIdentity(
+            path,
+            segmentId,
+            validateChecksums: false,
+            cancellationToken);
+    }
+
+    public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _segmentOpenCount);
+        var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
         if (_validatedSegmentIds.ContainsKey(segmentId))
         {
-            return OpenAndValidateIdentity(
+            using var _ = OpenAndValidateIdentity(
                 path,
                 segmentId,
                 validateChecksums: false,
                 cancellationToken);
+            return;
         }
 
         var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
@@ -343,21 +355,21 @@ public sealed class CorpusStorage : ISiftStorage
         {
             if (_validatedSegmentIds.ContainsKey(segmentId))
             {
-                return OpenAndValidateIdentity(
+                using var _ = OpenAndValidateIdentity(
                     path,
                     segmentId,
                     validateChecksums: false,
                     cancellationToken);
+                return;
             }
 
-            var segment = OpenAndValidateIdentity(
+            using var segment = OpenAndValidateIdentity(
                 path,
                 segmentId,
                 validateChecksums: true,
                 cancellationToken);
             _validatedSegmentIds.TryAdd(segmentId, 0);
             _segmentValidationGates.TryRemove(segmentId, out _);
-            return segment;
         }
         finally
         {

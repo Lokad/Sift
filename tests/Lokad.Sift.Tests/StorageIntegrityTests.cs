@@ -85,17 +85,12 @@ public sealed class StorageIntegrityTests
         await index.Build(fixture.CreateSource());
 
         var segmentPath = Directory.EnumerateFiles(Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
-        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        {
-            stream.Position = stream.Length / 2;
-            var current = stream.ReadByte();
-            stream.Position = stream.Position - 1;
-            stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
-        }
+        CorruptContentByte(segmentPath);
 
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = storage.ReadManifest();
-        Assert.Throws<InvalidDataException>(() => storage.OpenSegment(manifest.Segments[0].SegmentId));
+        Assert.Throws<InvalidDataException>(() =>
+            storage.ValidateSegment(manifest.Segments[0].SegmentId, CancellationToken.None));
     }
 
     [Fact]
@@ -111,13 +106,7 @@ public sealed class StorageIntegrityTests
             Path.Combine(fixture.CorpusPath, "segments"),
             "segment.pack",
             SearchOption.AllDirectories).Single();
-        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        {
-            stream.Position = stream.Length / 2;
-            var current = stream.ReadByte();
-            stream.Position--;
-            stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
-        }
+        CorruptContentByte(segmentPath);
 
         using var reopened = new SiftIndex(fixture.CorpusPath);
         await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
@@ -128,7 +117,7 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
-    public async Task UpdateValidatesExistingSegmentBeforeReadingIt()
+    public async Task OnlineUpdateDefersFullChecksumValidation()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
         using (var index = new SiftIndex(fixture.CorpusPath))
@@ -140,31 +129,17 @@ public sealed class StorageIntegrityTests
             Path.Combine(fixture.CorpusPath, "segments"),
             "segment.pack",
             SearchOption.AllDirectories).Single();
-        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        {
-            stream.Position = stream.Length / 2;
-            var current = stream.ReadByte();
-            stream.Position--;
-            stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
-        }
+        CorruptContentByte(segmentPath);
 
         using var restarted = new SiftIndex(fixture.CorpusPath);
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await restarted.Update(
-                new InMemoryDocumentSource([]),
-                [new DocumentKey("src/a.txt")]));
-        Assert.True(restarted.RequiresRebuild);
+        var update = await restarted.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/a.txt")]);
 
-        await restarted.Build(new InMemoryDocumentSource([("src/a.txt", "recovered\n")]));
-
+        Assert.Equal(1, update.DeletedDocuments);
         Assert.False(restarted.RequiresRebuild);
-        using var snapshot = restarted.OpenSnapshot();
-        var collector = new HitBuffer();
-        snapshot.Search(
-            new SearchQuery("recovered", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(),
-            collector);
-        Assert.Single(collector.Hits);
+        await Assert.ThrowsAsync<InvalidDataException>(() => restarted.Validate());
+        Assert.True(restarted.RequiresRebuild);
     }
 
     [Fact]
@@ -457,7 +432,7 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
-    public async Task ReopenedCorpusValidatesEachImmutableSegmentOnFirstUseOnly()
+    public async Task OnlineOpensDeferFullChecksumsToExplicitValidation()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha\n"),
@@ -483,6 +458,8 @@ public sealed class StorageIntegrityTests
                 new PathFilter());
         }
 
+        Assert.Equal(0, storage.ValidatedSegmentCount);
+        await reopened.Validate();
         Assert.Equal(1, storage.ValidatedSegmentCount);
         using (var snapshot = reopened.OpenSnapshot())
         {
@@ -869,6 +846,24 @@ public sealed class StorageIntegrityTests
     private static uint[] Decode(ReadOnlySpan<byte> postings)
     {
         return PostingsCodec.Decode(postings);
+    }
+
+    private static void CorruptContentByte(string segmentPath)
+    {
+        var segmentBytes = File.ReadAllBytes(segmentPath);
+        var contentRegionEntryOffset = SegmentFormat.HeaderSize +
+            ((int)SegmentRegionId.ContentBlob - 1) * SegmentFormat.RegionDirectoryEntrySize;
+        var contentOffset = BinaryPrimitives.ReadInt64LittleEndian(
+            segmentBytes.AsSpan(contentRegionEntryOffset + 4, sizeof(long)));
+        using var stream = new FileStream(
+            segmentPath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        stream.Position = contentOffset;
+        var current = stream.ReadByte();
+        stream.Position--;
+        stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
     }
 
     private static void RewriteManifestAsLegacyV2(string manifestPath)

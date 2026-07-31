@@ -113,6 +113,30 @@ public sealed class InMemorySiftStorage : ISiftStorage
             $"Sift segment '{segmentId:X16}' contains id '{actualSegmentId:X16}'.");
     }
 
+    public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
+    {
+        byte[] bytes;
+        lock (_writerLock)
+        {
+            if (!_segments.TryGetValue(segmentId, out var storedBytes))
+            {
+                throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+            }
+
+            bytes = storedBytes;
+        }
+
+        using var segment = new MappedSegment(
+            bytes,
+            validateChecksums: true,
+            cancellationToken);
+        if (segment.SegmentId != segmentId)
+        {
+            throw new InvalidDataException(
+                $"Sift segment '{segmentId:X16}' contains id '{segment.SegmentId:X16}'.");
+        }
+    }
+
     public long GetSegmentBytes(ulong segmentId)
     {
         lock (_writerLock)

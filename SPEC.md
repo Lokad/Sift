@@ -1017,6 +1017,9 @@ Sift shall pursue performance primarily through:
 The main performance risk is not index lookup itself, but over-verification, over-decoding, and poor memory locality.
 
 Sift is optimized primarily for steady-state use in long-lived local processes. One-time cold startup costs such as corpus open, recovery, and integrity validation are acceptable secondary overheads as long as they do not materially degrade steady-state query/update workflows.
+Normal segment opens validate identity and structural bounds only. Applications run
+explicit full-pack checksum validation outside latency-sensitive search and update
+paths; a successful publication has already checksum-validated every new pack.
 
 1. Indexed selective literal queries on warm cache should complete in the low tens of milliseconds on commodity desktop/server CPUs for a 10–50M LOC corpus.
 2. Indexed regex queries with extractable mandatory fragments should usually verify only a tiny fraction of scoped documents, preferably through the byte-oriented regex engine rather than fallback `.NET Regex`.

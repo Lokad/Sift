@@ -286,7 +286,7 @@ public sealed class Sift : ISift
         for (var i = 0; i < manifest.Segments.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var segment = _storage.OpenSegment(
+            _storage.ValidateSegment(
                 manifest.Segments[i].SegmentId,
                 cancellationToken);
             validatedBytes += segmentBytes[i];
