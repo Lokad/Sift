@@ -22,6 +22,48 @@ public sealed class CacheTests
     }
 
     [Fact]
+    public async Task BoundedLruCacheCoalescesConcurrentCreation()
+    {
+        const int concurrency = 8;
+        var cache = new BoundedLruCache<int, string>(capacity: 2);
+        using var barrier = new Barrier(concurrency);
+        var creations = 0;
+        var tasks = Enumerable.Range(0, concurrency)
+            .Select(worker => Task.Run(() =>
+            {
+                _ = worker;
+                barrier.SignalAndWait();
+                return cache.GetOrAdd(
+                    1,
+                    cacheKey =>
+                    {
+                        _ = cacheKey;
+                        Interlocked.Increment(ref creations);
+                        return "one";
+                    },
+                    out _);
+            }))
+            .ToArray();
+
+        var values = await Task.WhenAll(tasks);
+
+        Assert.All(values, static value => Assert.Equal("one", value));
+        Assert.Equal(1, creations);
+    }
+
+    [Fact]
+    public void BoundedLruCacheRemovesFaultedCreation()
+    {
+        var cache = new BoundedLruCache<int, string>(capacity: 2);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            cache.GetOrAdd(1, static _ => throw new InvalidOperationException("failure"), out _));
+
+        Assert.Equal("recovered", cache.GetOrAdd(1, static _ => "recovered", out var cacheHit));
+        Assert.False(cacheHit);
+    }
+
+    [Fact]
     public void UserRegexCacheIsBounded()
     {
         for (var i = 0; i < RegexVerifier.CacheCapacity + 32; i++)

@@ -28,6 +28,7 @@ internal sealed class BoundedLruCache<TKey, TValue>
 
     public TValue GetOrAdd(TKey key, Func<TKey, TValue> create, out bool cacheHit)
     {
+        Lazy<TValue> value;
         lock (_sync)
         {
             if (_entries.TryGetValue(key, out var existing))
@@ -35,35 +36,50 @@ internal sealed class BoundedLruCache<TKey, TValue>
                 _recency.Remove(existing);
                 _recency.AddFirst(existing);
                 cacheHit = true;
-                return existing.Value.Value;
+                value = existing.Value.Value;
+            }
+            else
+            {
+                value = new Lazy<TValue>(
+                    () => create(key),
+                    LazyThreadSafetyMode.ExecutionAndPublication);
+                var node = _recency.AddFirst(new Entry(key, value));
+                _entries.Add(key, node);
+                if (_entries.Count > _capacity)
+                {
+                    var expired = _recency.Last ??
+                        throw new InvalidOperationException("The cache recency list is unexpectedly empty.");
+                    _recency.RemoveLast();
+                    _entries.Remove(expired.Value.Key);
+                }
+
+                cacheHit = false;
             }
         }
 
-        var created = create(key);
-        lock (_sync)
+        try
         {
-            if (_entries.TryGetValue(key, out var raced))
-            {
-                _recency.Remove(raced);
-                _recency.AddFirst(raced);
-                cacheHit = true;
-                return raced.Value.Value;
-            }
-
-            var node = _recency.AddFirst(new Entry(key, created));
-            _entries.Add(key, node);
-            if (_entries.Count > _capacity)
-            {
-                var expired = _recency.Last ??
-                    throw new InvalidOperationException("The cache recency list is unexpectedly empty.");
-                _recency.RemoveLast();
-                _entries.Remove(expired.Value.Key);
-            }
-
-            cacheHit = false;
-            return created;
+            return value.Value;
+        }
+        catch
+        {
+            RemoveFaultedValue(key, value);
+            throw;
         }
     }
 
-    private sealed record Entry(TKey Key, TValue Value);
+    private void RemoveFaultedValue(TKey key, Lazy<TValue> value)
+    {
+        lock (_sync)
+        {
+            if (_entries.TryGetValue(key, out var current) &&
+                ReferenceEquals(current.Value.Value, value))
+            {
+                _entries.Remove(key);
+                _recency.Remove(current);
+            }
+        }
+    }
+
+    private sealed record Entry(TKey Key, Lazy<TValue> Value);
 }
