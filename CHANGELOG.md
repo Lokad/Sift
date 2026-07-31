@@ -13,7 +13,20 @@
 - Reduced allocation and segment-handle churn in broad, sequential, and
   parallel searches, including repeated hit materialization from one snapshot.
 - Reduced update, indexing, and compaction memory pressure by avoiding decoded
-  path copies, streaming compacted documents, and pooling large index workspaces.
+  path copies, streaming compacted documents, and moving fixed index workspaces
+  off the managed heap.
+- Reduced regex-search overhead by preparing verifiers once per query,
+  coalescing concurrent cache creation, and mapping Unicode offsets
+  incrementally.
+- Made small updates choose adaptively between indexed path lookups and segment
+  scans instead of scanning the entire corpus unconditionally.
+
+### Fixed
+
+- Preserved invariant Unicode case-folding semantics when case-insensitive regex
+  searches use ASCII n-gram indexes.
+- Prevented rejected-only and ineffective deletion updates from publishing
+  redundant manifest generations while preserving legacy-manifest migration.
 
 ### Breaking changes
 
