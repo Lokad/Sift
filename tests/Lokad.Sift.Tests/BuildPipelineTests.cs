@@ -169,6 +169,37 @@ public sealed class BuildPipelineTests
     }
 
     [Fact]
+    public async Task FailedInitialManifestSwapRollsBackManifestAndPacksTogether()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath);
+        var storage = TestHelpers.GetStorage(index);
+        storage.FaultInjector = new PublicationFaultInjector
+        {
+            ThrowOnStage = PublicationStage.AfterManifestFlushBeforeSwap
+        };
+
+        await Assert.ThrowsAsync<IOException>(
+            () => index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")])));
+
+        storage.FaultInjector = null;
+        Assert.False(storage.HasManifest);
+        Assert.False(File.Exists(storage.ManifestPath + ".tmp"));
+        Assert.Empty(Directory.EnumerateFiles(storage.SegmentsPath, "segment.pack", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFiles(storage.GenerationLeasesPath, "*.lease"));
+
+        var retry = await index.Build(
+            new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+
+        Assert.Equal(1, retry.IndexedDocuments);
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(
+            new DocumentKey("src/a.txt"),
+            out var content));
+        Assert.Equal("alpha\n"u8.ToArray(), content.ToArray());
+    }
+
+    [Fact]
     public void SegmentIndexConstructionObservesCancellationInsideADocument()
     {
         using var cancellation = new CancellationTokenSource();

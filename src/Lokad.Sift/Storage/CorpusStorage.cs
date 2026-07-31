@@ -487,18 +487,30 @@ public sealed class CorpusStorage : ISiftStorage
     void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
         ArgumentNullException.ThrowIfNull(attemptedSegmentIds);
+        // With no current manifest, a flushed initial manifest may still name every
+        // attempted pack. Roll it back before making those packs unreachable.
+        var canDeleteAttemptedPacks =
+            HasManifest ||
+            TryRemoveUnpublishedManifestArtifactsUnderWriterLock();
         HashSet<ulong>? referencedSegmentIds;
-        try
+        if (!canDeleteAttemptedPacks)
         {
-            referencedSegmentIds = HasManifest
-                ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
-                : [];
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            // An unreadable manifest could reference any attempted pack. Leave final
-            // packs untouched and let explicit recovery decide what is authoritative.
             referencedSegmentIds = null;
+        }
+        else
+        {
+            try
+            {
+                referencedSegmentIds = HasManifest
+                    ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
+                    : [];
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                // An unreadable manifest could reference any attempted pack. Leave final
+                // packs untouched and let explicit recovery decide what is authoritative.
+                referencedSegmentIds = null;
+            }
         }
 
         var deletedFinalSegment = false;
@@ -528,6 +540,12 @@ public sealed class CorpusStorage : ISiftStorage
             {
                 // Cleanup is best effort and the persistent marker schedules a retry.
             }
+        }
+
+        if (!canDeleteAttemptedPacks)
+        {
+            SetReclamationPending(isPending: true);
+            return;
         }
 
         try
@@ -582,6 +600,8 @@ public sealed class CorpusStorage : ISiftStorage
                     $"({failedBytes} bytes) could not be deleted.");
             }
 
+            DeleteDirectoryEntriesForRebuild(GenerationLeasesPath);
+            FlushDirectoryEntry(GenerationLeasesPath);
             return;
         }
 
@@ -1340,6 +1360,24 @@ public sealed class CorpusStorage : ISiftStorage
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            return false;
+        }
+    }
+
+    private bool TryRemoveUnpublishedManifestArtifactsUnderWriterLock()
+    {
+        try
+        {
+            DeleteFileForRebuild(ManifestPath + ".tmp");
+            DeleteDirectoryEntriesForRebuild(GenerationLeasesPath);
+            FlushDirectoryEntry(_rootPath);
+            FlushDirectoryEntry(GenerationLeasesPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Preserve the attempted packs if the temporary manifest can still
+            // become visible during crash recovery.
             return false;
         }
     }
