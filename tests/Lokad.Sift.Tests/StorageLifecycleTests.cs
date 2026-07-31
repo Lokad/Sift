@@ -430,6 +430,23 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public void SiftOptionsRejectInvalidPhysicalByteBudgets()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SiftIndex.CreateInMemory(new SiftOptions
+            {
+                MaximumPhysicalBytes = 0,
+                MinimumFreeBytesAfterMutation = 0
+            }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SiftIndex.CreateInMemory(new SiftOptions
+            {
+                MaximumPhysicalBytes = 1024,
+                MinimumFreeBytesAfterMutation = 1024
+            }));
+    }
+
+    [Fact]
     public async Task CompactionInputBudgetLimitsEachMaintenancePass()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions

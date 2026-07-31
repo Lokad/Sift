@@ -50,7 +50,11 @@ internal sealed class IndexBuilder
                 {
                     var segmentId = segmentSeed + (ulong)entries.Count;
                     attemptedSegmentIds.Add(segmentId);
-                    entries.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
+                    entries.Add(_storage.PublishSegment(
+                        partition,
+                        segmentId,
+                        _options.MinimumFreeBytesAfterMutation,
+                        cancellationToken));
                 });
 
             _storage.PublishManifest(new CorpusManifest(corpusId, generation, entries));

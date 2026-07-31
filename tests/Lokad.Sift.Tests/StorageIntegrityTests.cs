@@ -273,6 +273,7 @@ public sealed class StorageIntegrityTests
         var abandoned = abandonedStorage.PublishSegment(
             [CreateStoredDocument("src/abandoned.txt", "abandoned\n")],
             0x1234UL,
+            minimumFreeBytesAfterPublication: 0,
             CancellationToken.None);
         var abandonedPath = Path.Combine(
             abandonedStorage.SegmentsPath,
@@ -633,7 +634,11 @@ public sealed class StorageIntegrityTests
         };
 
         var documents = new[] { CreateStoredDocument("src/a.txt", "alpha\n") };
-        Assert.Throws<IOException>(() => storage.PublishSegment(documents, 0x1234UL, CancellationToken.None));
+        Assert.Throws<IOException>(() => storage.PublishSegment(
+            documents,
+            0x1234UL,
+            minimumFreeBytesAfterPublication: 0,
+            CancellationToken.None));
 
         Assert.Empty(Directory.EnumerateDirectories(storage.SegmentsPath));
         Assert.NotEmpty(Directory.EnumerateFileSystemEntries(storage.TempPath));
@@ -708,6 +713,7 @@ public sealed class StorageIntegrityTests
         var compactedEntry = storage.PublishSegment(
             [CreateStoredDocument("src/a.txt", "omega\n")],
             0x7777UL,
+            minimumFreeBytesAfterPublication: 0,
             CancellationToken.None);
 
         storage.FaultInjector = new PublicationFaultInjector

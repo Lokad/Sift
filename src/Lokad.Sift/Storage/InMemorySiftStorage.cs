@@ -25,7 +25,11 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    public SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken)
+    public SegmentManifestEntry PublishSegment(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        ulong segmentId,
+        long minimumFreeBytesAfterPublication,
+        CancellationToken cancellationToken)
     {
         _reclamationPending = true;
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);

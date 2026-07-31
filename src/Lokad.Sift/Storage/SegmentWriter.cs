@@ -5,10 +5,17 @@ namespace Lokad.Sift.Storage;
 
 internal static unsafe class SegmentWriter
 {
-    public static long Write(string path, string tempPath, ulong segmentId, IReadOnlyList<ISegmentBuildDocument> documents, CancellationToken cancellationToken)
+    public static long Write(
+        string path,
+        string tempPath,
+        ulong segmentId,
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        Action<long> ensureCapacity,
+        CancellationToken cancellationToken)
     {
         _ = tempPath;
         var prepared = Prepare(documents, cancellationToken);
+        ensureCapacity(prepared.TotalLength);
         using var stream = new FileStream(path, new FileStreamOptions
         {
             Mode = FileMode.Create,

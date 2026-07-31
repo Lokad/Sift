@@ -17,6 +17,7 @@ public sealed class CorpusStorage : ISiftStorage
     private const int GenerationLeaseHeaderSize = 40;
     private const int GenerationLeaseChecksumSize = 8;
     private readonly string _rootPath;
+    private readonly long _maximumPhysicalBytes;
     private readonly object _layoutLock = new();
     private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
@@ -24,8 +25,14 @@ public sealed class CorpusStorage : ISiftStorage
     private long _segmentOpenCount;
 
     public CorpusStorage(string rootPath)
+        : this(rootPath, long.MaxValue)
+    {
+    }
+
+    internal CorpusStorage(string rootPath, long maximumPhysicalBytes)
     {
         _rootPath = rootPath ?? throw new ArgumentNullException(nameof(rootPath));
+        _maximumPhysicalBytes = maximumPhysicalBytes;
     }
 
     public string ManifestPath => Path.Combine(_rootPath, "manifest.bin");
@@ -125,7 +132,11 @@ public sealed class CorpusStorage : ISiftStorage
 
     IDisposable ISiftStorage.AcquireWriterLock(CancellationToken cancellationToken) => AcquireWriterLock(cancellationToken);
 
-    public SegmentManifestEntry PublishSegment(IReadOnlyList<ISegmentBuildDocument> documents, ulong segmentId, CancellationToken cancellationToken)
+    public SegmentManifestEntry PublishSegment(
+        IReadOnlyList<ISegmentBuildDocument> documents,
+        ulong segmentId,
+        long minimumFreeBytesAfterPublication,
+        CancellationToken cancellationToken)
     {
         EnsureLayout();
         // A crash can leave this pack published but absent from the manifest; startup must sweep it.
@@ -133,7 +144,13 @@ public sealed class CorpusStorage : ISiftStorage
         var tempSegmentDirectory = Path.Combine(TempPath, segmentId.ToString("X16"));
         Directory.CreateDirectory(tempSegmentDirectory);
         var tempSegmentPath = Path.Combine(tempSegmentDirectory, "segment.pack");
-        var contentBytes = SegmentWriter.Write(tempSegmentPath, tempSegmentDirectory, segmentId, documents, cancellationToken);
+        var contentBytes = SegmentWriter.Write(
+            tempSegmentPath,
+            tempSegmentDirectory,
+            segmentId,
+            documents,
+            segmentBytes => EnsureCapacity(segmentBytes, minimumFreeBytesAfterPublication),
+            cancellationToken);
         ValidateSegmentPack(tempSegmentPath);
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterSegmentFlushBeforePublish);
         var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.ToString("X16"));
@@ -322,6 +339,15 @@ public sealed class CorpusStorage : ISiftStorage
 
     public long? GetAvailableBytes()
     {
+        var corpusAvailableBytes = Math.Max(0, _maximumPhysicalBytes - GetCorpusPhysicalBytes());
+        var filesystemAvailableBytes = GetFilesystemAvailableBytes();
+        return filesystemAvailableBytes is null
+            ? corpusAvailableBytes
+            : Math.Min(corpusAvailableBytes, filesystemAvailableBytes.Value);
+    }
+
+    private long? GetFilesystemAvailableBytes()
+    {
         try
         {
             var fullPath = Path.GetFullPath(_rootPath);
@@ -338,6 +364,44 @@ public sealed class CorpusStorage : ISiftStorage
         {
             return null;
         }
+    }
+
+    private void EnsureCapacity(long addedBytes, long minimumFreeBytesAfterPublication)
+    {
+        var availableBytes = GetAvailableBytes();
+        if (addedBytes > availableBytes ||
+            minimumFreeBytesAfterPublication > availableBytes - addedBytes)
+        {
+            var requiredBytes = addedBytes > long.MaxValue - minimumFreeBytesAfterPublication
+                ? long.MaxValue
+                : addedBytes + minimumFreeBytesAfterPublication;
+            throw new IOException(
+                $"Sift requires {requiredBytes} available bytes to publish a {addedBytes}-byte file " +
+                $"while retaining {minimumFreeBytesAfterPublication} bytes, but only {availableBytes} bytes are available.");
+        }
+    }
+
+    private long GetCorpusPhysicalBytes()
+    {
+        if (!Directory.Exists(_rootPath))
+        {
+            return 0;
+        }
+
+        long bytes = 0;
+        foreach (var path in Directory.EnumerateFiles(_rootPath, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                bytes = checked(bytes + new FileInfo(path).Length);
+            }
+            catch (FileNotFoundException)
+            {
+                // A concurrent snapshot cleanup may remove an obsolete lease.
+            }
+        }
+
+        return bytes;
     }
 
     bool ISiftStorage.IsReclamationPending
@@ -708,6 +772,7 @@ public sealed class CorpusStorage : ISiftStorage
 
         LittleEndianCodec.WriteUInt64(span.Slice(checksumOffset, checksumLength), Hashing.Fnv1A64(span.Slice(0, checksumOffset)));
 
+        EnsureCapacity(size, minimumFreeBytesAfterPublication: 0);
         using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             stream.SetLength(size);
@@ -938,6 +1003,7 @@ public sealed class CorpusStorage : ISiftStorage
         try
         {
             // Flush then rename so a reader can never acquire a partial lease.
+            EnsureCapacity(bytes.Length, minimumFreeBytesAfterPublication: 0);
             using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 stream.SetLength(bytes.Length);

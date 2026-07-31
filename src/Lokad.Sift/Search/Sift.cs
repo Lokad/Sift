@@ -27,7 +27,9 @@ public sealed class Sift : ISift
     public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;
 
     public Sift(string rootPath, SiftOptions? options = null)
-        : this(new CorpusStorage(rootPath), options)
+        : this(
+            new CorpusStorage(rootPath, options?.MaximumPhysicalBytes ?? long.MaxValue),
+            options)
     {
     }
 
@@ -297,7 +299,11 @@ public sealed class Sift : ISift
                 {
                     var segmentId = segmentSeed + (ulong)publishedSegments.Count;
                     attemptedSegmentIds.Add(segmentId);
-                    publishedSegments.Add(_storage.PublishSegment(partition, segmentId, cancellationToken));
+                    publishedSegments.Add(_storage.PublishSegment(
+                        partition,
+                        segmentId,
+                        _options.MinimumFreeBytesAfterMutation,
+                        cancellationToken));
                 });
 
             var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
@@ -418,30 +424,6 @@ public sealed class Sift : ISift
         }
 
         _storage.EnsureReplacementAllowedUnderWriterLock();
-        // Fully dead packs publish no replacement, so they must remain reclaimable at zero headroom.
-        var replacementSegmentBytes = manifest.Segments
-            .Where(entry =>
-                entry.LiveDocumentCount > 0 &&
-                selectedSegmentIds.Contains(entry.SegmentId))
-            .Aggregate(
-                0L,
-                (total, entry) => checked(
-                    total +
-                    _storage.GetSegmentBytes(entry.SegmentId)));
-        if (replacementSegmentBytes > 0 &&
-            _storage.GetAvailableBytes() is long availableBytes)
-        {
-            var requiredBytes = replacementSegmentBytes >
-                long.MaxValue - options.MinimumFreeBytesAfterCompaction
-                ? long.MaxValue
-                : replacementSegmentBytes + options.MinimumFreeBytesAfterCompaction;
-            if (availableBytes < requiredBytes)
-            {
-                throw new IOException(
-                    $"Sift compaction requires {requiredBytes} available bytes for replacement headroom " +
-                    $"and reserve, but the filesystem reports {availableBytes} bytes.");
-            }
-        }
 
         var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var attemptedSegmentIds = new List<ulong>();
@@ -455,6 +437,7 @@ public sealed class Sift : ISift
                 segmentSeed,
                 attemptedSegmentIds,
                 newSegments,
+                options,
                 cancellationToken);
 
             var retainedSegments = manifest.Segments
@@ -657,6 +640,19 @@ public sealed class Sift : ISift
         if (options.TargetSegmentContentBytes <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "TargetSegmentContentBytes must be positive.");
+        }
+
+        if (options.MaximumPhysicalBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaximumPhysicalBytes must be positive.");
+        }
+
+        if (options.MinimumFreeBytesAfterMutation < 0 ||
+            options.MinimumFreeBytesAfterMutation >= options.MaximumPhysicalBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "MinimumFreeBytesAfterMutation must be non-negative and smaller than MaximumPhysicalBytes.");
         }
 
         if (options.DirectScanScopeDocumentsThreshold < 0 ||
@@ -875,6 +871,7 @@ public sealed class Sift : ISift
         ulong segmentSeed,
         List<ulong> attemptedSegmentIds,
         List<SegmentManifestEntry> published,
+        CompactOptions options,
         CancellationToken cancellationToken)
     {
         var cursors = new List<CompactionCursor>();
@@ -918,7 +915,11 @@ public sealed class Sift : ISift
                 {
                     var segmentId = segmentSeed + (ulong)published.Count;
                     attemptedSegmentIds.Add(segmentId);
-                    published.Add(_storage.PublishSegment(currentPartition, segmentId, cancellationToken));
+                    published.Add(_storage.PublishSegment(
+                        currentPartition,
+                        segmentId,
+                        options.MinimumFreeBytesAfterCompaction,
+                        cancellationToken));
                     currentPartition = new List<CompactionDocument>();
                     currentBytes = 0;
                 }
@@ -938,7 +939,11 @@ public sealed class Sift : ISift
             {
                 var segmentId = segmentSeed + (ulong)published.Count;
                 attemptedSegmentIds.Add(segmentId);
-                published.Add(_storage.PublishSegment(currentPartition, segmentId, cancellationToken));
+                published.Add(_storage.PublishSegment(
+                    currentPartition,
+                    segmentId,
+                    options.MinimumFreeBytesAfterCompaction,
+                    cancellationToken));
             }
 
             return new CompactionPublication(published, mergedDocuments, contentBytes);

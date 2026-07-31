@@ -562,13 +562,75 @@ public sealed class MutationIntegrationTests
                 SegmentCountTrigger: 1,
                 MinimumFreeBytesAfterCompaction: long.MaxValue)));
 
-        Assert.Contains("replacement headroom", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("retaining", exception.Message, StringComparison.Ordinal);
         var after = index.Storage.ReadManifest();
         Assert.Equal(before.Generation, after.Generation);
         Assert.Equal(
             before.Segments.Select(static segment => segment.SegmentId),
             after.Segments.Select(static segment => segment.SegmentId));
         Assert.Equal(0, index.GetStorageStats().RetiredSegmentCount);
+    }
+
+    [Fact]
+    public async Task CompactionBudgetsTheExactReplacementPack()
+    {
+        using var fixture = new CorpusFixture();
+        var largeBody = new string('x', 2 * 1024 * 1024);
+        using (var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MinimumFreeBytesAfterMutation = 0
+        }))
+        {
+            await index.Build(new InMemoryDocumentSource([
+                ("src/large.txt", largeBody),
+                ("src/keep.txt", "keep")
+            ]));
+            await index.Update(
+                new InMemoryDocumentSource([("src/large.txt", "replacement")]),
+                []);
+        }
+
+        var currentBytes = Directory
+            .EnumerateFiles(fixture.CorpusPath, "*", SearchOption.AllDirectories)
+            .Sum(static path => new FileInfo(path).Length);
+        using var constrainedIndex = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaximumPhysicalBytes = currentBytes + 256 * 1024,
+            MinimumFreeBytesAfterMutation = 0
+        });
+
+        var compact = await constrainedIndex.Compact(new CompactOptions(
+            MinimumFreeBytesAfterCompaction: 0));
+
+        Assert.Equal(1, compact.InputSegments);
+        Assert.Equal(1, compact.OutputSegments);
+        using var snapshot = constrainedIndex.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("keep", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+        Assert.Single(collector.Hits);
+    }
+
+    [Fact]
+    public async Task BuildRefusesAConfiguredCorpusQuotaBeforeCreatingAPack()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaximumPhysicalBytes = 64,
+            MinimumFreeBytesAfterMutation = 0
+        });
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")])));
+
+        Assert.False(File.Exists(Path.Combine(fixture.CorpusPath, "manifest.bin")));
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories));
     }
 
     [Fact]

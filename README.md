@@ -25,7 +25,9 @@ var indexPath = @"C:\data\sift-index";
 using var index = new Sift(indexPath, new SiftOptions
 {
     TargetSegmentDocumentCount = 50_000, // Start a new segment once about 50k documents accumulate.
-    TargetSegmentContentBytes = 64L * 1024 * 1024 // Or once a segment reaches about 64 MiB of content.
+    TargetSegmentContentBytes = 64L * 1024 * 1024, // Or once a segment reaches about 64 MiB of content.
+    MaximumPhysicalBytes = 128L * 1024 * 1024 * 1024, // Optional corpus quota, including lifecycle metadata.
+    MinimumFreeBytesAfterMutation = 512L * 1024 * 1024 // Keep emergency headroom after publishing a pack.
 });
 // Alternative in-memory form:
 // using var index = Sift.CreateInMemory();
@@ -205,11 +207,13 @@ segments are refused while an earlier retired generation is still leased. Dispos
 the old snapshot and retry. A compaction pass selects at most
 `CompactOptions.MaxInputSegmentBytes` of physical packs by default, except that one
 larger debt-bearing segment remains eligible. Count-driven maintenance only merges
-clean segments when at least two fit into one target segment. Compaction still needs
-temporary disk headroom for the selected segments' new packs before the replaced
-packs can be deleted, so it requires space for a same-size replacement plus
-`CompactOptions.MinimumFreeBytesAfterCompaction` (512 MiB by default) when the
-filesystem exposes available-space information.
+clean segments when at least two fit into one target segment. Before creating each
+replacement pack, Sift checks its exact prepared size against both filesystem free
+space and `SiftOptions.MaximumPhysicalBytes`, then retains
+`CompactOptions.MinimumFreeBytesAfterCompaction` (512 MiB by default). Builds and
+updates similarly retain `SiftOptions.MinimumFreeBytesAfterMutation`. Set
+`MaximumPhysicalBytes` when filesystem free-space reporting does not reflect a
+container or tenant quota.
 
 ## What Sift is for
 
