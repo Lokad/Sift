@@ -20,6 +20,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
     private readonly StorageReadSnapshot _storageSnapshot;
+    private readonly object _mappedSegmentsSync = new();
+    // Reuse mappings across search, path lookup, and hit materialization while the generation is pinned.
+    private readonly Dictionary<ulong, MappedSegment> _mappedSegments = new();
     // Keep the generation lease alive until every operation that may open one
     // of its segment packs has completed.
     // Collectors may materialize hits while Search holds its disposal-exclusion read lease.
@@ -76,7 +79,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         foreach (var entry in _segments)
         {
-            using var cache = OpenSegment(entry);
+            var cache = OpenSegment(entry);
             var segmentPlan = SearchPlanner.CreateSegmentPlan(
                 cache,
                 matcher,
@@ -263,7 +266,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     break;
                 }
 
-                using var cache = OpenSegment(entry, cancellationToken);
+                var cache = OpenSegment(entry, cancellationToken);
                 var segmentPlan = SearchPlanner.CreateSegmentPlan(
                     cache,
                     matcher,
@@ -475,7 +478,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 Parallel.For(0, batchLength, options, batchIndex =>
                 {
                     var segmentIndex = batchStart + batchIndex;
-                    using var cache = OpenSegment(_segments[segmentIndex], cancellationToken);
+                    var cache = OpenSegment(_segments[segmentIndex], cancellationToken);
                     batchResults[batchIndex] = SearchSegmentFully(cache, queryCopy, matcher, resolvedCaseMode, anchors, preparedLiteral, preparedMandatoryFragments, preparedOrderedAnchorGroups, regexPlan, pathVisibility, watch, cancellationToken);
                 });
             }
@@ -581,7 +584,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ArgumentOutOfRangeException.ThrowIfNegative(contextBefore);
         ArgumentOutOfRangeException.ThrowIfNegative(contextAfter);
         using var operation = BeginOperation();
-        using var cache = OpenSegment(hit.SegmentId);
+        var cache = OpenSegment(hit.SegmentId);
 
         var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
         var path = cache.Segment.GetPath(document);
@@ -657,7 +660,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         foreach (var entry in _segments)
         {
-            using var cache = OpenSegment(entry);
+            var cache = OpenSegment(entry);
             if (!cache.Segment.TryFindDocumentOrdinal(normalizedPath, out var ordinal) || IsDeadOrdinal(cache.DeadOrdinals, ordinal))
             {
                 continue;
@@ -677,7 +680,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     internal string GetPath(in RawHit hit)
     {
         using var operation = BeginOperation();
-        using var cache = OpenSegment(hit.SegmentId);
+        var cache = OpenSegment(hit.SegmentId);
         var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
         return cache.Segment.GetPath(document);
     }
@@ -704,6 +707,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         _lifetimeLock.EnterWriteLock();
         try
         {
+            foreach (var segment in _mappedSegments.Values)
+            {
+                segment.Dispose();
+            }
+            _mappedSegments.Clear();
             _storageSnapshot.Dispose();
             Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
         }
@@ -735,18 +743,49 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         SegmentManifestEntry entry,
         CancellationToken cancellationToken)
     {
+        MappedSegment? openedSegment = null;
         try
         {
-            return new SegmentCache(
-                _storage.OpenSegment(entry.SegmentId, cancellationToken),
-                entry.DeadOrdinals,
-                entry.ContentBytes - entry.DeadContentBytes);
+            lock (_mappedSegmentsSync)
+            {
+                if (_mappedSegments.TryGetValue(entry.SegmentId, out var mappedSegment))
+                {
+                    return CreateCache(mappedSegment, entry);
+                }
+            }
+
+            openedSegment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
+            lock (_mappedSegmentsSync)
+            {
+                if (_mappedSegments.TryGetValue(entry.SegmentId, out var mappedSegment))
+                {
+                    return CreateCache(mappedSegment, entry);
+                }
+
+                _mappedSegments.Add(entry.SegmentId, openedSegment);
+                var cache = CreateCache(openedSegment, entry);
+                openedSegment = null;
+                return cache;
+            }
         }
         catch (Exception exception) when (
             exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException)
         {
             _onIndexFailure?.Invoke(exception);
             throw;
+        }
+        finally
+        {
+            // A concurrent operation may have populated the cache while this pack was being opened.
+            openedSegment?.Dispose();
+        }
+
+        static SegmentCache CreateCache(MappedSegment segment, SegmentManifestEntry manifestEntry)
+        {
+            return new SegmentCache(
+                segment,
+                manifestEntry.DeadOrdinals,
+                manifestEntry.ContentBytes - manifestEntry.DeadContentBytes);
         }
     }
 
@@ -1794,7 +1833,7 @@ internal interface IPathVisibility
     bool IsVisible(ReadOnlySpan<byte> normalizedPathUtf8);
 }
 
-internal sealed class SegmentCache : IDisposable
+internal readonly struct SegmentCache
 {
     public SegmentCache(MappedSegment segment, uint[] deadOrdinals, long liveContentBytes)
     {
@@ -1807,11 +1846,6 @@ internal sealed class SegmentCache : IDisposable
     public uint[] DeadOrdinals { get; }
 
     public long LiveContentBytes { get; }
-
-    public void Dispose()
-    {
-        Segment.Dispose();
-    }
 }
 
 internal readonly struct SnapshotOperation : IDisposable

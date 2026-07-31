@@ -1817,6 +1817,32 @@ public sealed class SearchIntegrationTests
         Assert.Equal(1, storage.SegmentOpenCount - opensBeforeSearch);
     }
 
+    [Fact]
+    public async Task SnapshotReusesSegmentMappingWhenMaterializingHits()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "needle"),
+            ("src/b.txt", "needle"),
+            ("src/c.txt", "needle"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var storage = Assert.IsType<Lokad.Sift.Storage.CorpusStorage>(index.Storage);
+        var opensBeforeSearch = storage.SegmentOpenCount;
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        snapshot.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+        var materializedHits = collector.Hits
+            .Select(hit => snapshot.Materialize(hit, 0, 0))
+            .ToArray();
+
+        Assert.Equal(3, materializedHits.Length);
+        Assert.Equal(1, storage.SegmentOpenCount - opensBeforeSearch);
+    }
+
     [Theory]
     [InlineData(PatternMode.Literal, "a", "a a a a a")]
     [InlineData(PatternMode.Regex, "a", "a a a a a")]
