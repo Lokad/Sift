@@ -23,6 +23,8 @@
 - Reduced update, indexing, and compaction memory pressure by avoiding decoded
   path copies, streaming compacted documents, and moving fixed index workspaces
   off the managed heap.
+- Deferred path encoding and line-index construction until after unchanged
+  upserts have been removed from an update partition.
 - Released pooled native indexing workspaces when the last `Sift` instance is
   disposed and exposed their current footprint through process metrics.
 - Reduced regex-search overhead by preparing verifiers once per query,

@@ -1755,11 +1755,27 @@ public interface ISegmentBuildDocument
 
 public sealed class StoredDocument : ISegmentBuildDocument
 {
+    private byte[] _pathUtf8 = [];
+    private int _lineCount;
+    private byte[] _encodedLineIndex = [];
+
     public required string Path { get; init; }
-    public required byte[] PathUtf8 { get; init; }
+    public required byte[] PathUtf8
+    {
+        get => _pathUtf8;
+        init => _pathUtf8 = value;
+    }
     public required ReadOnlyMemory<byte> Content { get; init; }
-    public required int LineCount { get; init; }
-    public required byte[] EncodedLineIndex { get; init; }
+    public required int LineCount
+    {
+        get => _lineCount;
+        init => _lineCount = value;
+    }
+    public required byte[] EncodedLineIndex
+    {
+        get => _encodedLineIndex;
+        init => _encodedLineIndex = value;
+    }
     public required ushort Flags { get; init; }
     public required long MTimeUtcTicks { get; init; }
     public required ulong ContentHash64 { get; init; }
@@ -1769,4 +1785,11 @@ public sealed class StoredDocument : ISegmentBuildDocument
     public ReadOnlySpan<byte> GetContentBytes() => Content.Span;
 
     public ReadOnlySpan<byte> GetEncodedLineIndex() => EncodedLineIndex;
+
+    internal void SetIndexMetadata(byte[] pathUtf8, int lineCount, byte[] encodedLineIndex)
+    {
+        _pathUtf8 = pathUtf8;
+        _lineCount = lineCount;
+        _encodedLineIndex = encodedLineIndex;
+    }
 }

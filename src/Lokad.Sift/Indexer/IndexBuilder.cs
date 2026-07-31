@@ -133,6 +133,11 @@ internal sealed class IndexBuilder
 
             if (partition.Count > 0)
             {
+                for (var i = 0; i < partition.Count; i++)
+                {
+                    Materialize(partition[i]);
+                }
+
                 publishPartition(partition);
             }
 
@@ -256,6 +261,7 @@ internal sealed class IndexBuilder
                 continue;
             }
 
+            Materialize(storedDocument);
             documents.Add(storedDocument);
             acceptedBytes += storedDocument.Content.Length;
         }
@@ -359,15 +365,15 @@ internal sealed class IndexBuilder
             flags |= 1 << 2;
         }
 
-        var encodedLineIndex = LineMap.EncodeLineIndex(span, out var lineCount);
         var ownedContent = content.ToArray();
+        // Index-only metadata stays empty until unchanged update candidates are removed.
         return new StoredDocument
         {
             Path = normalizedPath,
-            PathUtf8 = StrictUtf8.GetBytes(normalizedPath),
+            PathUtf8 = [],
             Content = ownedContent,
-            LineCount = lineCount,
-            EncodedLineIndex = encodedLineIndex,
+            LineCount = 0,
+            EncodedLineIndex = [],
             Flags = flags,
             MTimeUtcTicks = document.LastModifiedUtc?.UtcTicks ?? 0,
             ContentHash64 = Hashing.Fnv1A64(span)
@@ -398,6 +404,15 @@ internal sealed class IndexBuilder
 
             return suspicious >= 16 && suspicious * 5 >= sampleLength;
         }
+    }
+
+    private static void Materialize(StoredDocument document)
+    {
+        var encodedLineIndex = LineMap.EncodeLineIndex(document.Content.Span, out var lineCount);
+        document.SetIndexMetadata(
+            StrictUtf8.GetBytes(document.Path),
+            lineCount,
+            encodedLineIndex);
     }
 
     public static string CanonicalizePath(string path)
