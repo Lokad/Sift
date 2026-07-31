@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.InteropServices;
 using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
@@ -647,33 +648,48 @@ internal static class SegmentIndexBuilder
         ref var pooledBuilder = ref builder.GramLength == 2
             ? ref s_bigramBuilder
             : ref s_trigramBuilder;
-        _ = Interlocked.CompareExchange(ref pooledBuilder, builder, null);
+        if (Interlocked.CompareExchange(ref pooledBuilder, builder, null) is not null)
+        {
+            builder.Dispose();
+        }
     }
 
 }
 
-internal sealed class DirectIndexedGramBuilder
+internal sealed unsafe class DirectIndexedGramBuilder : IDisposable
 {
-    private readonly ushort[] _counts;
-    private readonly ushort[] _seen;
+    private readonly int _domainSize;
+    private void* _workspace;
+    private ushort* _counts;
+    private ushort* _seen;
+    private int* _gramIndexes;
     private int[] _touched;
     private int _touchedCount;
     private ushort _documentStamp;
     private uint[] _ordinals = [];
     private Dictionary<int, int>? _overflowCounts;
-    private int[] _gramIndexes = [];
     private int[] _docFrequencies = [];
     private int[] _writePositions = [];
+    private bool _preparedForFill;
     public int GramLength { get; }
 
     public DirectIndexedGramBuilder(int gramLength)
     {
         GramLength = gramLength;
         var domainSize = gramLength == 2 ? 1 << 16 : 1 << 24;
-        _counts = GC.AllocateUninitializedArray<ushort>(domainSize);
-        _seen = GC.AllocateUninitializedArray<ushort>(domainSize);
-        Array.Clear(_counts);
-        Array.Clear(_seen);
+        _domainSize = domainSize;
+        _workspace = NativeMemory.AllocZeroed(checked((nuint)domainSize * 8));
+        if (_workspace == null)
+        {
+            throw new OutOfMemoryException();
+        }
+
+        // These domain-sized primitive tables are reused across segment indexes.
+        // Native storage keeps the fixed workspace out of the managed heap
+        // (128 MiB for trigrams, where the distinction matters).
+        _counts = (ushort*)_workspace;
+        _seen = _counts + domainSize;
+        _gramIndexes = (int*)(_seen + domainSize);
         _touched = ArrayPool<int>.Shared.Rent(1024);
     }
 
@@ -685,7 +701,7 @@ internal sealed class DirectIndexedGramBuilder
             return;
         }
 
-        Array.Clear(_seen);
+        new Span<ushort>(_seen, _domainSize).Clear();
         _documentStamp = 1;
     }
 
@@ -717,6 +733,7 @@ internal sealed class DirectIndexedGramBuilder
     public void PrepareForFill(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        _preparedForFill = true;
         if (_touchedCount == 0)
         {
             return;
@@ -726,7 +743,6 @@ internal sealed class DirectIndexedGramBuilder
         cancellationToken.ThrowIfCancellationRequested();
         var totalPairs = 0;
         EnsureLocalCapacity();
-        EnsureCapacity(ref _gramIndexes, _counts.Length);
         for (var i = 0; i < _touchedCount; i++)
         {
             if ((i & 0x3FF) == 0)
@@ -757,7 +773,7 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         _seen[gram] = _documentStamp;
-        if (_gramIndexes.Length == 0)
+        if (!_preparedForFill)
         {
             throw new InvalidOperationException("PrepareForFill must run before ordinals are added.");
         }
@@ -877,13 +893,33 @@ internal sealed class DirectIndexedGramBuilder
 
         _overflowCounts = null;
         Return(ref _ordinals);
-        Return(ref _gramIndexes);
         Return(ref _docFrequencies);
         Return(ref _writePositions);
         ArrayPool<int>.Shared.Return(_touched);
         _touched = ArrayPool<int>.Shared.Rent(1024);
 
         _touchedCount = 0;
+        _preparedForFill = false;
+    }
+
+    ~DirectIndexedGramBuilder()
+    {
+        ReleaseWorkspace();
+    }
+
+    public void Dispose()
+    {
+        Return(ref _ordinals);
+        Return(ref _docFrequencies);
+        Return(ref _writePositions);
+        if (_touched.Length > 0)
+        {
+            ArrayPool<int>.Shared.Return(_touched);
+            _touched = [];
+        }
+
+        ReleaseWorkspace();
+        GC.SuppressFinalize(this);
     }
 
     private int GetCount(int gram)
@@ -935,6 +971,20 @@ internal sealed class DirectIndexedGramBuilder
 
         ArrayPool<uint>.Shared.Return(buffer);
         buffer = [];
+    }
+
+    private void ReleaseWorkspace()
+    {
+        if (_workspace == null)
+        {
+            return;
+        }
+
+        NativeMemory.Free(_workspace);
+        _workspace = null;
+        _counts = null;
+        _seen = null;
+        _gramIndexes = null;
     }
 }
 
