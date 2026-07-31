@@ -8,6 +8,7 @@ using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Tests;
 
+[Collection("ProcessMetrics")]
 public sealed class StorageIntegrityTests
 {
     [Fact]
