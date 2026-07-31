@@ -203,7 +203,60 @@ public sealed unsafe class MappedSegment : IDisposable
         }
 
         var candidate = GetDocument(ordinal);
-        return string.Equals(GetPath(candidate), normalizedPath, StringComparison.Ordinal);
+        return ComparePathOrdinal(candidate, normalizedPath) == 0;
+    }
+
+    // Segment paths are UTF-8, but their persisted order follows .NET ordinal
+    // string order. Compare UTF-16 code units while decoding in place so path
+    // lookup does not allocate a string for every binary-search probe.
+    internal int ComparePathOrdinal(SegmentDocument document, string normalizedPath)
+    {
+        var utf8 = GetPathBytes(document);
+        var utf16 = normalizedPath.AsSpan();
+        var byteIndex = 0;
+        var charIndex = 0;
+        Span<char> decoded = stackalloc char[2];
+        while (byteIndex < utf8.Length && charIndex < utf16.Length)
+        {
+            if (utf8[byteIndex] <= 0x7F)
+            {
+                var comparison = ((char)utf8[byteIndex]).CompareTo(utf16[charIndex]);
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+
+                byteIndex++;
+                charIndex++;
+                continue;
+            }
+
+            if (Rune.DecodeFromUtf8(utf8[byteIndex..], out var rune, out var consumed) != OperationStatus.Done)
+            {
+                throw new InvalidDataException("Sift segment contains an invalid UTF-8 path.");
+            }
+
+            var written = rune.EncodeToUtf16(decoded);
+            for (var i = 0; i < written; i++)
+            {
+                if (charIndex >= utf16.Length)
+                {
+                    return 1;
+                }
+
+                var comparison = decoded[i].CompareTo(utf16[charIndex++]);
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+            }
+
+            byteIndex += consumed;
+        }
+
+        return byteIndex < utf8.Length
+            ? 1
+            : charIndex < utf16.Length ? -1 : 0;
     }
 
     public int[] GetLineStarts(SegmentDocument document)
@@ -460,7 +513,7 @@ public sealed unsafe class MappedSegment : IDisposable
         {
             var mid = low + ((high - low) >> 1);
             var document = GetDocument((uint)mid);
-            if (string.CompareOrdinal(GetPath(document), value) < 0)
+            if (ComparePathOrdinal(document, value) < 0)
             {
                 low = mid + 1;
             }

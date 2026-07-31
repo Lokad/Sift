@@ -334,6 +334,34 @@ public sealed class Sift : ISift
     {
         ArgumentNullException.ThrowIfNull(upserts);
 
+        static uint[] MergeDeadOrdinals(uint[] existing, List<LiveDocumentKey> added)
+        {
+            var merged = new uint[existing.Length + added.Count];
+            var existingIndex = 0;
+            var addedIndex = 0;
+            var mergedIndex = 0;
+            while (existingIndex < existing.Length && addedIndex < added.Count)
+            {
+                if (existing[existingIndex] < added[addedIndex].Ordinal)
+                {
+                    merged[mergedIndex++] = existing[existingIndex++];
+                }
+                else
+                {
+                    merged[mergedIndex++] = added[addedIndex++].Ordinal;
+                }
+            }
+
+            existing.AsSpan(existingIndex).CopyTo(merged.AsSpan(mergedIndex));
+            mergedIndex += existing.Length - existingIndex;
+            while (addedIndex < added.Count)
+            {
+                merged[mergedIndex++] = added[addedIndex++].Ordinal;
+            }
+
+            return merged;
+        }
+
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
         var existingManifest = _storage.HasManifest
@@ -381,42 +409,50 @@ public sealed class Sift : ISift
                 affectedPaths,
                 cancellationToken);
             var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
-            var deadBySegment = existingManifest.Segments.ToDictionary(
-                static segment => segment.SegmentId,
-                static segment => new HashSet<uint>(segment.DeadOrdinals),
-                EqualityComparer<ulong>.Default);
-            var deadContentBytesBySegment = existingManifest.Segments.ToDictionary(
-                static segment => segment.SegmentId,
-                static segment => segment.DeadContentBytes,
-                EqualityComparer<ulong>.Default);
+            var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
 
             // A rejected replacement never became durable, so keep the prior
             // searchable version until a valid upsert or explicit deletion arrives.
-            foreach (var path in upsertLoad.AcceptedPaths)
+            foreach (var path in affectedPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (liveDocumentKeys.TryGetValue(path, out var current))
                 {
-                    AddDeadDocument(current, deadBySegment, deadContentBytesBySegment);
-                }
-            }
+                    if (!newlyDeadBySegment.TryGetValue(current.SegmentId, out var newlyDead))
+                    {
+                        newlyDead = [];
+                        newlyDeadBySegment.Add(current.SegmentId, newlyDead);
+                    }
 
-            foreach (var path in deletionSet)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (liveDocumentKeys.TryGetValue(path, out var current))
-                {
-                    AddDeadDocument(current, deadBySegment, deadContentBytesBySegment);
+                    newlyDead.Add(current);
                 }
             }
 
             foreach (var segment in existingManifest.Segments)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // Preserve both the entry and its dead-ordinal array when this
+                // batch did not replace or delete anything in the segment.
+                if (!newlyDeadBySegment.TryGetValue(segment.SegmentId, out var newlyDead))
+                {
+                    newSegments.Add(segment);
+                    continue;
+                }
+
+                newlyDead.Sort(static (left, right) => left.Ordinal.CompareTo(right.Ordinal));
+                var deadContentBytes = segment.DeadContentBytes;
+                if (deadContentBytes >= 0)
+                {
+                    foreach (var document in newlyDead)
+                    {
+                        deadContentBytes = checked(deadContentBytes + document.ContentLength);
+                    }
+                }
+
                 newSegments.Add(segment with
                 {
-                    DeadOrdinals = deadBySegment[segment.SegmentId].OrderBy(static value => value).ToArray(),
-                    DeadContentBytes = deadContentBytesBySegment[segment.SegmentId]
+                    DeadOrdinals = MergeDeadOrdinals(segment.DeadOrdinals, newlyDead),
+                    DeadContentBytes = deadContentBytes
                 });
             }
 
@@ -928,42 +964,58 @@ public sealed class Sift : ISift
             return live;
         }
 
+        var sortedPaths = affectedPaths.ToArray();
+        Array.Sort(sortedPaths, StringComparer.Ordinal);
         foreach (var entry in manifest.Segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var segment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
-            foreach (var path in affectedPaths)
+            // Both inputs are ordinal-sorted, so one merge pass replaces a
+            // binary search—and its former path decoding—for every changed path.
+            var pathIndex = 0;
+            var ordinal = 0u;
+            var deadIndex = 0;
+            var comparisons = 0;
+            while (pathIndex < sortedPaths.Length && ordinal < segment.DocumentCount)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!segment.TryFindDocumentOrdinal(path, out var ordinal) ||
-                    Array.BinarySearch(entry.DeadOrdinals, ordinal) >= 0)
+                if ((comparisons++ & 0xFFF) == 0)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                var document = segment.GetDocument(ordinal);
+                var comparison = segment.ComparePathOrdinal(document, sortedPaths[pathIndex]);
+                if (comparison < 0)
+                {
+                    ordinal++;
                     continue;
                 }
 
-                live[path] = new LiveDocumentKey(
-                    entry.SegmentId,
-                    ordinal,
-                    segment.GetDocument(ordinal).ContentLength);
+                if (comparison > 0)
+                {
+                    pathIndex++;
+                    continue;
+                }
+
+                while (deadIndex < entry.DeadOrdinals.Length && entry.DeadOrdinals[deadIndex] < ordinal)
+                {
+                    deadIndex++;
+                }
+
+                if (deadIndex >= entry.DeadOrdinals.Length || entry.DeadOrdinals[deadIndex] != ordinal)
+                {
+                    live[sortedPaths[pathIndex]] = new LiveDocumentKey(
+                        entry.SegmentId,
+                        ordinal,
+                        document.ContentLength);
+                }
+
+                ordinal++;
+                pathIndex++;
             }
         }
 
         return live;
-    }
-
-    private static void AddDeadDocument(
-        in LiveDocumentKey document,
-        Dictionary<ulong, HashSet<uint>> deadBySegment,
-        Dictionary<ulong, long> deadContentBytesBySegment)
-    {
-        if (!deadBySegment[document.SegmentId].Add(document.Ordinal) ||
-            deadContentBytesBySegment[document.SegmentId] < 0)
-        {
-            return;
-        }
-
-        deadContentBytesBySegment[document.SegmentId] = checked(
-            deadContentBytesBySegment[document.SegmentId] + document.ContentLength);
     }
 
     private CompactionPublication PublishCompactedSegments(
