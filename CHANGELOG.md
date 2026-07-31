@@ -20,6 +20,8 @@
 
 - Reduced allocation and segment-handle churn in broad, sequential, and
   parallel searches, including repeated hit materialization from one snapshot.
+- Bounded parallel hit buffering and propagated collector cancellation to
+  in-flight segment producers instead of finishing the entire batch first.
 - Avoided rescanning lexicons and legacy document tables whenever a previously
   validated segment is mapped by a new snapshot.
 - Kept normal search and update opens to structural validation instead of

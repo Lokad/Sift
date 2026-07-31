@@ -1940,6 +1940,36 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task SegmentParallelSearchPropagatesCollectorCancellation()
+    {
+        var repeatedMatches = string.Join(' ', Enumerable.Repeat("needle", 2_000));
+        var documents = Enumerable.Range(0, 8)
+            .Select(i => ($"src/{i:D2}.txt", repeatedMatches))
+            .ToArray();
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 4));
+
+        var stats = snapshot.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
+            {
+                MaxHits = int.MaxValue,
+                MaxDocuments = int.MaxValue,
+                MaxBytesScanned = long.MaxValue
+            },
+            new PathFilter(),
+            new StopAfterFirstHitCollector());
+
+        Assert.Equal(SearchStopReason.Cancelled, stats.StopReason);
+        Assert.Equal(1, stats.VerifiedDocuments);
+        Assert.Equal(1, stats.HitsReturned);
+    }
+
+    [Fact]
     public async Task SegmentParallelSearchHonorsGlobalSearchLimits()
     {
         var documents = Enumerable.Range(0, 96)
