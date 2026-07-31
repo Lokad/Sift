@@ -48,8 +48,7 @@ internal static class RegexVerifier
         }
         var matched = false;
         var isAscii = (document.Flags & (1 << 1)) != 0;
-        var mappedCharIndex = 0;
-        var mappedByteOffset = 0;
+        var offsetCursor = new Utf8OffsetCursor();
 
         try
         {
@@ -71,8 +70,8 @@ internal static class RegexVerifier
                 else
                 {
                     // Regex matches are ordered, so one cursor maps their UTF-16 offsets without a document-sized array.
-                    startByte = MapUtf8Offset(text, match.Index, ref mappedCharIndex, ref mappedByteOffset);
-                    endByte = MapUtf8Offset(text, match.Index + match.Length, ref mappedCharIndex, ref mappedByteOffset);
+                    startByte = offsetCursor.Map(text, match.Index);
+                    endByte = offsetCursor.Map(text, match.Index + match.Length);
                 }
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
@@ -103,47 +102,6 @@ internal static class RegexVerifier
         }
 
         return matched;
-
-        static int MapUtf8Offset(
-            ReadOnlySpan<char> text,
-            int targetCharIndex,
-            ref int mappedCharIndex,
-            ref int mappedByteOffset)
-        {
-            if (targetCharIndex < mappedCharIndex)
-            {
-                throw new InvalidOperationException("Regex matches must be returned in source order.");
-            }
-
-            while (mappedCharIndex < targetCharIndex)
-            {
-                var current = text[mappedCharIndex];
-                if (char.IsHighSurrogate(current) &&
-                    mappedCharIndex + 1 < text.Length &&
-                    char.IsLowSurrogate(text[mappedCharIndex + 1]))
-                {
-                    if (mappedCharIndex + 1 == targetCharIndex)
-                    {
-                        // A UTF-16 match may split a scalar; both halves still share its UTF-8 boundary.
-                        return mappedByteOffset;
-                    }
-
-                    mappedByteOffset += 4;
-                    mappedCharIndex += 2;
-                    continue;
-                }
-
-                mappedByteOffset += current switch
-                {
-                    <= '\u007F' => 1,
-                    <= '\u07FF' => 2,
-                    _ => 3
-                };
-                mappedCharIndex++;
-            }
-
-            return mappedByteOffset;
-        }
     }
 
     public static string BuildPattern(in SearchQuery query)

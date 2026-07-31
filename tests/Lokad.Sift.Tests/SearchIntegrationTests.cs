@@ -2323,6 +2323,23 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task UnicodeLiteralMatchesMapOverlappingOffsetsInOnePass()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "\u00E9\u00E9\u00E9\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(new SearchQuery("\u00E9\u00E9", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), collector);
+
+        Assert.Equal(2, collector.Hits.Count);
+        var materialized = collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0)).ToArray();
+        Assert.Equal(["\u00E9\u00E9", "\u00E9\u00E9"], materialized.Select(static hit => hit.MatchText).ToArray());
+        Assert.Equal([1, 2], materialized.Select(static hit => hit.StartColumn).ToArray());
+    }
+
+    [Fact]
     public async Task UnicodeRegexMatchesReportStableByteOffsetsAcrossSupplementaryCharacters()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "\uD83D\uDE00x \uD83D\uDE00x\n"));

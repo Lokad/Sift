@@ -1130,6 +1130,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
         var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var searchIndex = 0;
+        var offsetCursor = new Utf8OffsetCursor();
 
         while (searchIndex <= text.Length)
         {
@@ -1157,7 +1158,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 continue;
             }
 
-            var startByte = Encoding.UTF8.GetByteCount(text.AsSpan(0, found));
+            var startByte = offsetCursor.Map(text, found);
             var endByte = startByte + Encoding.UTF8.GetByteCount(text.AsSpan(found, pattern.Length));
             var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
