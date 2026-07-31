@@ -365,7 +365,8 @@ public sealed class Sift : ISift
 
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
-        var existingManifest = _storage.HasManifest
+        var hadManifest = _storage.HasManifest;
+        var existingManifest = hadManifest
             ? _storage.ReadManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
 
@@ -382,6 +383,7 @@ public sealed class Sift : ISift
 
         var publishedSegments = new List<SegmentManifestEntry>();
         var attemptedSegmentIds = new List<ulong>();
+        var deletedDocuments = 0;
         StreamedDocuments upsertLoad;
         try
         {
@@ -410,58 +412,74 @@ public sealed class Sift : ISift
                 existingManifest,
                 affectedPaths,
                 cancellationToken);
-            var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
-            var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
-
-            // A rejected replacement never became durable, so keep the prior
-            // searchable version until a valid upsert or explicit deletion arrives.
-            foreach (var path in affectedPaths)
+            foreach (var path in deletionSet)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (liveDocumentKeys.TryGetValue(path, out var current))
+                if (liveDocumentKeys.ContainsKey(path))
                 {
-                    if (!newlyDeadBySegment.TryGetValue(current.SegmentId, out var newlyDead))
-                    {
-                        newlyDead = [];
-                        newlyDeadBySegment.Add(current.SegmentId, newlyDead);
-                    }
-
-                    newlyDead.Add(current);
+                    deletedDocuments++;
                 }
             }
 
-            foreach (var segment in existingManifest.Segments)
+            var requiresManifestMigration = existingManifest.Segments.Any(
+                static segment => segment.DeadContentBytes < 0);
+            if (!hadManifest ||
+                publishedSegments.Count > 0 ||
+                liveDocumentKeys.Count > 0 ||
+                requiresManifestMigration)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                // Preserve both the entry and its dead-ordinal array when this
-                // batch did not replace or delete anything in the segment.
-                if (!newlyDeadBySegment.TryGetValue(segment.SegmentId, out var newlyDead))
-                {
-                    newSegments.Add(segment);
-                    continue;
-                }
+                var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
+                var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
 
-                newlyDead.Sort(static (left, right) => left.Ordinal.CompareTo(right.Ordinal));
-                var deadContentBytes = segment.DeadContentBytes;
-                if (deadContentBytes >= 0)
+                // A rejected replacement never became durable, so keep the prior
+                // searchable version until a valid upsert or explicit deletion arrives.
+                foreach (var path in affectedPaths)
                 {
-                    foreach (var document in newlyDead)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (liveDocumentKeys.TryGetValue(path, out var current))
                     {
-                        deadContentBytes = checked(deadContentBytes + document.ContentLength);
+                        if (!newlyDeadBySegment.TryGetValue(current.SegmentId, out var newlyDead))
+                        {
+                            newlyDead = [];
+                            newlyDeadBySegment.Add(current.SegmentId, newlyDead);
+                        }
+
+                        newlyDead.Add(current);
                     }
                 }
 
-                newSegments.Add(segment with
+                foreach (var segment in existingManifest.Segments)
                 {
-                    DeadOrdinals = MergeDeadOrdinals(segment.DeadOrdinals, newlyDead),
-                    DeadContentBytes = deadContentBytes
-                });
+                    cancellationToken.ThrowIfCancellationRequested();
+                    // Preserve both the entry and its dead-ordinal array when this
+                    // batch did not replace or delete anything in the segment.
+                    if (!newlyDeadBySegment.TryGetValue(segment.SegmentId, out var newlyDead))
+                    {
+                        newSegments.Add(segment);
+                        continue;
+                    }
+
+                    newlyDead.Sort(static (left, right) => left.Ordinal.CompareTo(right.Ordinal));
+                    var deadContentBytes = segment.DeadContentBytes;
+                    if (deadContentBytes >= 0)
+                    {
+                        foreach (var document in newlyDead)
+                        {
+                            deadContentBytes = checked(deadContentBytes + document.ContentLength);
+                        }
+                    }
+
+                    newSegments.Add(segment with
+                    {
+                        DeadOrdinals = MergeDeadOrdinals(segment.DeadOrdinals, newlyDead),
+                        DeadContentBytes = deadContentBytes
+                    });
+                }
+
+                newSegments.AddRange(publishedSegments);
+
+                var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
+                _storage.PublishManifest(manifest);
             }
-
-            newSegments.AddRange(publishedSegments);
-
-            var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
-            _storage.PublishManifest(manifest);
         }
         catch
         {
@@ -474,7 +492,7 @@ public sealed class Sift : ISift
             SubmittedUpserts: upsertLoad.Submitted,
             UpsertedDocuments: upsertLoad.Accepted,
             RejectedUpserts: upsertLoad.Rejected,
-            DeletedDocuments: deletionSet.Count,
+            DeletedDocuments: deletedDocuments,
             PublishedSegments: publishedSegments.Count,
             SubmittedBytes: upsertLoad.SubmittedBytes,
             ContentBytes: upsertLoad.AcceptedBytes,

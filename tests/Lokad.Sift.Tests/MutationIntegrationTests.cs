@@ -190,14 +190,17 @@ public sealed class MutationIntegrationTests
             MaxDocumentBytes = 8
         });
         await index.Build(fixture.CreateSource());
+        var before = index.Storage.ReadManifest();
 
         var stats = await index.Update(
             new InMemoryDocumentSource([("src/a.txt", "replacement is too large\n")]),
             []);
+        var after = index.Storage.ReadManifest();
 
         Assert.Equal(1, stats.SubmittedUpserts);
         Assert.Equal(0, stats.UpsertedDocuments);
         Assert.Equal(1, stats.RejectedUpserts);
+        Assert.Equal(before.Generation, after.Generation);
 
         using var snapshot = index.OpenSnapshot();
         var oldContent = new HitBuffer();
@@ -213,6 +216,24 @@ public sealed class MutationIntegrationTests
             new PathFilter(),
             replacement);
         Assert.Empty(replacement.Hits);
+    }
+
+    [Fact]
+    public async Task IneffectiveDeletionDoesNotPublishManifest()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var before = index.Storage.ReadManifest();
+
+        var stats = await index.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/missing.txt")]);
+        var after = index.Storage.ReadManifest();
+
+        Assert.Equal(0, stats.DeletedDocuments);
+        Assert.Equal(0, stats.PublishedSegments);
+        Assert.Equal(before.Generation, after.Generation);
     }
 
     [Fact]

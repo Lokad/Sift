@@ -282,6 +282,7 @@ public readonly record struct UpdateStats(
     int SubmittedUpserts,
     int UpsertedDocuments,
     int RejectedUpserts,
+    // Explicit deletions that removed a live document; missing paths are not counted.
     int DeletedDocuments,
     int PublishedSegments,
     long SubmittedBytes,
