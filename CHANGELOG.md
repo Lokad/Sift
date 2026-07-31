@@ -8,6 +8,13 @@
   actionable compaction work, avoiding false recommendations based on aggregate
   segment count alone.
 
+### Changed
+
+- Reduced allocation and segment-handle churn in broad, sequential, and
+  parallel searches, including repeated hit materialization from one snapshot.
+- Reduced update, indexing, and compaction memory pressure by avoiding decoded
+  path copies, streaming compacted documents, and pooling large index workspaces.
+
 ### Breaking changes
 
 - Replaced optional method and constructor parameters with explicit overloads and
