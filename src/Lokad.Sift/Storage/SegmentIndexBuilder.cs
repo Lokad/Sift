@@ -778,7 +778,6 @@ internal sealed class DirectIndexedGramBuilder
             return empty;
         }
 
-        var entries = new List<IndexEntry>(_touchedCount);
         var bucketStarts = GC.AllocateUninitializedArray<int>(SegmentFormat.LexiconBucketCount);
         Array.Fill(bucketStarts, -1);
 
@@ -796,16 +795,15 @@ internal sealed class DirectIndexedGramBuilder
             var bucket = SegmentIndexBuilder.GetBucket(gram, gramLength);
             if (bucketStarts[bucket] < 0)
             {
-                bucketStarts[bucket] = entries.Count;
+                bucketStarts[bucket] = i;
             }
 
             var postingsBytes = PostingsCodec.GetEncodedLength(_ordinals.AsSpan(ordinalsOffset, docFreq));
-            entries.Add(new IndexEntry(gram, totalBytes, postingsBytes, docFreq));
             totalBytes = checked(totalBytes + postingsBytes);
             ordinalsOffset += docFreq;
         }
 
-        bucketStarts[^1] = entries.Count;
+        bucketStarts[^1] = _touchedCount;
         for (var bucket = bucketStarts.Length - 2; bucket >= 0; bucket--)
         {
             if (bucketStarts[bucket] < 0)
@@ -814,59 +812,47 @@ internal sealed class DirectIndexedGramBuilder
             }
         }
 
-        for (var i = 0; i < _touchedCount; i++)
-        {
-            if ((i & 0x3FF) == 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            var gram = _touched[i];
-            _counts[gram] = 0;
-        }
-
-        _overflowCounts?.Clear();
-        _touchedCount = 0;
-
         var suffixSize = gramLength == 2 ? 1 : 2;
         var entrySize = suffixSize + 12;
-        var lexiconLength = SegmentFormat.LexiconHeaderSize + entries.Count * entrySize;
+        var lexiconLength = SegmentFormat.LexiconHeaderSize + _touchedCount * entrySize;
         var index = BuiltIndex.Rent(lexiconLength, totalBytes);
-        var lexicon = index.Lexicon;
-        LittleEndianCodec.WriteInt32(lexicon, entries.Count);
-        SegmentIndexBuilder.WriteBucketTable(lexicon, bucketStarts, entries.Count);
-        for (var i = 0; i < entries.Count; i++)
+        try
         {
-            if ((i & 0x3FF) == 0)
+            var lexicon = index.Lexicon;
+            LittleEndianCodec.WriteInt32(lexicon, _touchedCount);
+            SegmentIndexBuilder.WriteBucketTable(lexicon, bucketStarts, _touchedCount);
+            var postingsBlob = index.Postings;
+            var postingsOffset = 0;
+            ordinalsOffset = 0;
+            for (var i = 0; i < _touchedCount; i++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if ((i & 0x3FF) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                var gram = _touched[i];
+                var docFreq = _docFrequencies[i];
+                var postingsBytes = PostingsCodec.GetEncodedLength(_ordinals.AsSpan(ordinalsOffset, docFreq));
+                var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
+                SegmentIndexBuilder.WriteSuffix(lexicon.Slice(entryOffset, suffixSize), gram, suffixSize);
+                LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize, 4), postingsOffset);
+                LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4), postingsBytes);
+                LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4), docFreq);
+                PostingsCodec.Encode(
+                    _ordinals.AsSpan(ordinalsOffset, docFreq),
+                    postingsBlob.Slice(postingsOffset, postingsBytes));
+                postingsOffset = checked(postingsOffset + postingsBytes);
+                ordinalsOffset += docFreq;
             }
 
-            var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
-            var entry = entries[i];
-            SegmentIndexBuilder.WriteSuffix(lexicon.Slice(entryOffset, suffixSize), entry.Gram, suffixSize);
-            LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize, 4), entry.PostingsOffset);
-            LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4), entry.PostingsBytes);
-            LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4), entry.DocFreq);
+            return index;
         }
-
-        var postingsBlob = index.Postings;
-        ordinalsOffset = 0;
-        for (var i = 0; i < entries.Count; i++)
+        catch
         {
-            if ((i & 0x3FF) == 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            var entry = entries[i];
-            PostingsCodec.Encode(
-                _ordinals.AsSpan(ordinalsOffset, entry.DocFreq),
-                postingsBlob.Slice(entry.PostingsOffset, entry.PostingsBytes));
-            ordinalsOffset += entry.DocFreq;
+            index.Dispose();
+            throw;
         }
-
-        return index;
     }
 
     private void AddTouched(int gram)
@@ -994,10 +980,4 @@ internal sealed class BuiltIndex : IDisposable
         }
     }
 }
-
-internal readonly record struct IndexEntry(
-    int Gram,
-    int PostingsOffset,
-    int PostingsBytes,
-    int DocFreq);
 
