@@ -45,6 +45,7 @@ internal sealed class IndexBuilder
                 _options,
                 operationName: "build",
                 forbiddenPaths: null,
+                collectAcceptedPaths: false,
                 partition =>
                 {
                     var segmentId = segmentSeed + (ulong)entries.Count;
@@ -84,6 +85,7 @@ internal sealed class IndexBuilder
         SiftOptions options,
         string operationName,
         IReadOnlySet<string>? forbiddenPaths,
+        bool collectAcceptedPaths,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         var submitted = 0;
@@ -93,7 +95,9 @@ internal sealed class IndexBuilder
         var rejected = 0;
         long rejectedBytes = 0;
         var submittedPaths = new HashSet<string>(StringComparer.Ordinal);
-        var acceptedPaths = new HashSet<string>(StringComparer.Ordinal);
+        var acceptedPaths = collectAcceptedPaths
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : null;
         var partition = new List<StoredDocument>();
         long partitionBytes = 0;
 
@@ -149,7 +153,7 @@ internal sealed class IndexBuilder
 
             partition.Add(document);
             partitionBytes += document.Content.Length;
-            acceptedPaths.Add(normalizedPath);
+            acceptedPaths?.Add(normalizedPath);
             accepted++;
             acceptedBytes = checked(acceptedBytes + document.Content.Length);
         }
@@ -162,7 +166,7 @@ internal sealed class IndexBuilder
             submittedBytes,
             acceptedBytes,
             rejectedBytes,
-            acceptedPaths);
+            acceptedPaths ?? []);
     }
 
     public static LoadedDocuments LoadDocuments(

@@ -392,6 +392,7 @@ public sealed class Sift : ISift
                 _options,
                 operationName: "update",
                 forbiddenPaths: deletionSet,
+                collectAcceptedPaths: true,
                 partition =>
                 {
                     var segmentId = segmentSeed + (ulong)publishedSegments.Count;
