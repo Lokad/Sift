@@ -21,6 +21,14 @@ internal static class SearchPlanCandidateBuilder
         }
 
         candidates.Add(CreateDirectRegexCandidate(in features, scope));
+        if (features.ResolvedCaseMode == CaseMode.Insensitive && !features.RegexPlan.UsesUtf8Regex)
+        {
+            // RegexOptions.IgnoreCase has Unicode equivalences that the byte indexes
+            // do not encode. Only a byte-compiled pattern can safely prune ASCII
+            // documents while the search separately retains every non-ASCII document.
+            return candidates;
+        }
+
         var structuralUnion = TryCreateStructuredLeadingLiteralPlan(segment, scope, features.ResolvedCaseMode, features.Anchors.GetMandatoryTexts(), features.RegexPlan, options);
         if (structuralUnion.HasValue)
         {

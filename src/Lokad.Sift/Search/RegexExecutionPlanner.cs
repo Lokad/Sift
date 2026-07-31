@@ -12,7 +12,10 @@ internal static class RegexExecutionPlanner
             return RegexExecutionPlan.Literal;
         }
 
-        if (RegexFragmentAnalyzer.TryExtractExactLiteral(query.Pattern, out var exactLiteral))
+        // Invariant regex case folding is not equivalent to ordinal or ASCII folding.
+        // Only sensitive regexes can therefore be replaced by the literal verifier.
+        if (resolvedCaseMode == CaseMode.Sensitive &&
+            RegexFragmentAnalyzer.TryExtractExactLiteral(query.Pattern, out var exactLiteral))
         {
             return RegexExecutionPlan.ForExactLiteral(exactLiteral);
         }

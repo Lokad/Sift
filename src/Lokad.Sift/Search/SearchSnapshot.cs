@@ -65,7 +65,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var resolvedCaseMode = ResolveCaseMode(query);
         var matcher = new PathFilterMatcher(pathFilter);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
-        var anchors = BuildQueryAnchors(query, regexPlan);
+        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
         var mandatoryFragments = anchors.GetMandatoryTexts();
         var advisorySeeds = anchors.GetAdvisoryTexts();
         var scopeDocuments = 0;
@@ -229,7 +229,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matcher = new PathFilterMatcher(pathFilter);
         var resolvedCaseMode = ResolveCaseMode(query);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
-        var anchors = BuildQueryAnchors(query, regexPlan);
+        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
         var mandatoryFragments = anchors.GetMandatoryTexts();
         var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
         var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
@@ -280,6 +280,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 scopeBytes += segmentPlan.Scope.Bytes;
 
                 var candidates = CandidateGenerator.Generate(cache.Segment, segmentPlan.Scope.Ordinals, segmentPlan.ContentPlan.ChosenPlan.CandidatePlan);
+                if (ShouldIncludeNonAsciiRegexCandidates(query, resolvedCaseMode, regexPlan, segmentPlan.ContentPlan.ChosenPlan))
+                {
+                    candidates = CandidateGenerator.IncludeNonAsciiDocuments(cache.Segment, segmentPlan.Scope.Ordinals, candidates);
+                }
                 cancellationToken.ThrowIfCancellationRequested();
                 var byteRegexStartPrecheckGroups = segmentPlan.ContentPlan.ChosenPlan.CandidateKind == SearchCandidateKind.DirectScan
                     ? preparedOrderedAnchorGroups
@@ -328,12 +332,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
                         bytesScanned += document.ContentLength;
                         var contentBytes = cache.Segment.GetContentBytes(document);
-                        if (!PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out var predecodedText))
+                        var needsUnicodeCaseFoldVerification =
+                            query.PatternMode == PatternMode.Regex &&
+                            resolvedCaseMode == CaseMode.Insensitive &&
+                            !CanUseUtf8RegexForDocument(document);
+                        string? predecodedText = null;
+                        if (!needsUnicodeCaseFoldVerification &&
+                            !PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out predecodedText))
                         {
                             continue;
                         }
 
-                        if (useOrderedAnchorPrecheck && !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
+                        if (!needsUnicodeCaseFoldVerification &&
+                            useOrderedAnchorPrecheck &&
+                            !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
                         {
                             continue;
                         }
@@ -429,7 +441,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matcher = new PathFilterMatcher(pathFilter);
         var resolvedCaseMode = ResolveCaseMode(query);
         var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
-        var anchors = BuildQueryAnchors(query, regexPlan);
+        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
         var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
         var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
         var preparedOrderedAnchorGroups = PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups);
@@ -894,6 +906,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var postingsBytesRead = 0L;
         var candidateDocumentsAfterIndex = 0;
         var candidates = CandidateGenerator.Generate(cache.Segment, scope.Ordinals, segmentPlan.ContentPlan.ChosenPlan.CandidatePlan);
+        if (ShouldIncludeNonAsciiRegexCandidates(query, resolvedCaseMode, regexPlan, segmentPlan.ContentPlan.ChosenPlan))
+        {
+            candidates = CandidateGenerator.IncludeNonAsciiDocuments(cache.Segment, scope.Ordinals, candidates);
+        }
         var byteRegexStartPrecheckGroups = segmentPlan.ContentPlan.ChosenPlan.CandidateKind == SearchCandidateKind.DirectScan
             ? preparedOrderedAnchorGroups
             : [];
@@ -955,12 +971,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
             segmentBytesScanned += document.ContentLength;
             var contentBytes = cache.Segment.GetContentBytes(document);
-            if (!PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out var predecodedText))
+            var needsUnicodeCaseFoldVerification =
+                query.PatternMode == PatternMode.Regex &&
+                resolvedCaseMode == CaseMode.Insensitive &&
+                !CanUseUtf8RegexForDocument(document);
+            string? predecodedText = null;
+            if (!needsUnicodeCaseFoldVerification &&
+                !PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out predecodedText))
             {
                 continue;
             }
 
-            if (useOrderedAnchorPrecheck && !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
+            if (!needsUnicodeCaseFoldVerification &&
+                useOrderedAnchorPrecheck &&
+                !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
             {
                 continue;
             }
@@ -1500,8 +1524,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return prepared;
     }
 
-    private static SearchQueryAnchors BuildQueryAnchors(in SearchQuery query, in RegexExecutionPlan regexPlan)
+    private static SearchQueryAnchors BuildQueryAnchors(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        in RegexExecutionPlan regexPlan)
     {
+        if (query.PatternMode == PatternMode.Regex &&
+            resolvedCaseMode == CaseMode.Insensitive &&
+            !regexPlan.UsesUtf8Regex)
+        {
+            // A mandatory byte fragment is not mandatory under invariant Unicode
+            // regex folding unless the pattern has byte-safe semantics for ASCII documents.
+            return new SearchQueryAnchors([], [], CaseMode.Sensitive, []);
+        }
+
         var mandatoryFragments = GetMandatoryFragments(query, regexPlan.ExactLiteral);
         var advisorySeeds = GetAdvisorySeeds(query, regexPlan.ExactLiteral, mandatoryFragments, out var advisoryCaseMode);
         var mandatoryAnchors = new SearchLiteralAnchor[mandatoryFragments.Length];
@@ -1724,6 +1760,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private static bool CanUseUtf8RegexForDocument(SegmentDocument document)
     {
         return (document.Flags & (1 << 1)) != 0;
+    }
+
+    private static bool ShouldIncludeNonAsciiRegexCandidates(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        in RegexExecutionPlan regexPlan,
+        in SearchPlanCandidate plan)
+    {
+        return query.PatternMode == PatternMode.Regex &&
+            resolvedCaseMode == CaseMode.Insensitive &&
+            regexPlan.UsesUtf8Regex &&
+            plan.CandidatePlan.UsesIndex;
     }
 
     private static int GetUtf16Column(ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> encodedLineIndex, int byteOffset, int oneBasedLine, bool asciiDocument)

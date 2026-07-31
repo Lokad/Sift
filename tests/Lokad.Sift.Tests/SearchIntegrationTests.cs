@@ -1127,6 +1127,87 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task CaseInsensitiveRegexPreservesInvariantUnicodeSemantics()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/ascii.txt", "K\n"),
+            ("src/kelvin.txt", "\u212A\n"),
+            ("src/final-sigma.txt", "\u03C2\n"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            DirectScanCandidateDensityThreshold = 0
+        });
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        foreach (var pattern in new[] { "K", "K+" })
+        {
+            var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Insensitive);
+            var plan = snapshot.Explain(query, new PathFilter());
+            var collector = new HitBuffer();
+            var stats = snapshot.Search(query, new PathFilter(), collector);
+
+            Assert.False(plan.UsesIndex);
+            Assert.False(plan.CanUseLiteralVerifier);
+            if (pattern == "K")
+            {
+                Assert.Empty(plan.MandatoryFragments);
+            }
+            else
+            {
+                Assert.Contains("K", plan.MandatoryFragments);
+            }
+            Assert.Equal(2, stats.HitsReturned);
+            Assert.Equal(
+                ["src/ascii.txt", "src/kelvin.txt"],
+                collector.Hits
+                    .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
+                    .OrderBy(static path => path, StringComparer.Ordinal)
+                    .ToArray());
+        }
+
+        var sigmaCollector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("\u03A3", PatternMode.Regex, CaseMode.Insensitive),
+            new PathFilter(),
+            sigmaCollector);
+        Assert.Empty(sigmaCollector.Hits);
+    }
+
+    [Fact]
+    public async Task IndexedCaseInsensitiveRegexRetainsNonAsciiDocuments()
+    {
+        var documents = Enumerable.Range(0, 5_000)
+            .Select(index => ($"src/{index:D5}.txt", $"ordinary filler number {index:D5}\n"))
+            .Append(("src/ascii.txt", "KKK\n"))
+            .Append(("src/kelvin.txt", "\u212A\u212A\u212A\n"))
+            .ToArray();
+        using var fixture = new CorpusFixture(documents);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0,
+            DirectScanCandidateDensityThreshold = 1.1
+        });
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery("KKK+", PatternMode.Regex, CaseMode.Insensitive);
+        var plan = snapshot.Explain(query, new PathFilter());
+        var collector = new HitBuffer();
+        var stats = snapshot.Search(query, new PathFilter(), collector);
+
+        Assert.True(plan.UsesIndex);
+        Assert.True(stats.CandidateDocumentsAfterIndex < stats.ScopeDocuments);
+        Assert.Equal(
+            ["src/ascii.txt", "src/kelvin.txt"],
+            collector.Hits
+                .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
+                .OrderBy(static path => path, StringComparer.Ordinal)
+                .ToArray());
+    }
+
+    [Fact]
     public async Task RegexVerifierExposesCacheHitAndMissCounters()
     {
         using var fixture = new CorpusFixture(

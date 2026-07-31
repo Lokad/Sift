@@ -30,6 +30,28 @@ internal static class CandidateGenerator
             : Generate(segment, scopeOrdinals, plan.IndexPair, grams);
     }
 
+    public static CandidateResult IncludeNonAsciiDocuments(
+        MappedSegment segment,
+        OrdinalSet scopeOrdinals,
+        in CandidateResult candidates)
+    {
+        using var candidateBits = new PooledBitSet(segment.DocumentCount);
+        candidates.Ordinals.CopyTo(candidateBits);
+        foreach (var ordinal in scopeOrdinals)
+        {
+            // ASCII-insensitive postings cannot represent the additional Unicode
+            // equivalences of RegexOptions.IgnoreCase, so those documents need verification.
+            if ((segment.GetDocument(ordinal).Flags & (1 << 1)) == 0)
+            {
+                candidateBits.Set((int)ordinal);
+            }
+        }
+
+        return new CandidateResult(
+            OrdinalSet.FromSorted(candidateBits.ToOrdinals()),
+            candidates.PostingsBytesRead);
+    }
+
     public static CandidateResult Generate(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
     {
         var postingsBytesRead = 0L;
