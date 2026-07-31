@@ -129,6 +129,22 @@ public sealed class BuildPipelineTests
     }
 
     [Fact]
+    public async Task BuildCopiesBorrowedContentBeforeReadingNextDocument()
+    {
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath);
+
+        var stats = await index.Build(new ReusingBufferDocumentSource());
+
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var first));
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out var second));
+        Assert.Equal("alpha"u8.ToArray(), first.ToArray());
+        Assert.Equal("bravo"u8.ToArray(), second.ToArray());
+        Assert.Equal(2, stats.IndexedDocuments);
+    }
+
+    [Fact]
     public async Task FailedStreamingBuildRemovesAlreadyPublishedPartitions()
     {
         using var fixture = new CorpusFixture();
@@ -230,6 +246,27 @@ public sealed class BuildPipelineTests
             }
 
             document = _documents[_index++];
+            return true;
+        }
+    }
+
+    private sealed class ReusingBufferDocumentSource : IDocumentSource
+    {
+        private readonly byte[] _buffer = new byte[5];
+        private int _index;
+
+        public bool TryReadNext(out SubmittedDocument document)
+        {
+            if (_index >= 2)
+            {
+                document = default;
+                return false;
+            }
+
+            var path = _index == 0 ? "src/a.txt" : "src/b.txt";
+            (_index == 0 ? "alpha"u8 : "bravo"u8).CopyTo(_buffer);
+            _index++;
+            document = new SubmittedDocument(path, _buffer);
             return true;
         }
     }

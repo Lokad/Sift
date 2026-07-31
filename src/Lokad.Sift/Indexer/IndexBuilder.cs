@@ -293,11 +293,12 @@ internal sealed class IndexBuilder
         }
 
         var lineStarts = LineMap.BuildLineStarts(span);
+        var ownedContent = content.ToArray();
         storedDocument = new StoredDocument
         {
             Path = normalizedPath,
             PathUtf8 = Encoding.UTF8.GetBytes(normalizedPath),
-            Content = content,
+            Content = ownedContent,
             LineCount = lineStarts.Length,
             EncodedLineIndex = LineMap.EncodeLineIndex(lineStarts),
             Flags = flags,
