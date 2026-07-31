@@ -836,6 +836,20 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public void OrderedAnchorGapOverflowBecomesUnbounded()
+    {
+        var query = new SearchQuery(
+            "foo.{0,1500000000}.{0,1500000000}bar",
+            PatternMode.Regex,
+            CaseMode.Sensitive);
+
+        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+
+        var group = Assert.Single(program.OrderedAnchorGroups!);
+        Assert.Null(group.Anchors[1].MaxGapBytesFromPrevious);
+    }
+
+    [Fact]
     public async Task AnchorOnlyAlternationDisablesLiteralPrechecks()
     {
         var query = new SearchQuery("foo|^$", PatternMode.Regex, CaseMode.Sensitive);
@@ -932,6 +946,27 @@ public sealed class SearchIntegrationTests
 
         Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
         Assert.Equal(300, stats.HitsReturned);
+    }
+
+    [Theory]
+    [InlineData("foo.{0,1}bar", "fooXX\nfoo bar")]
+    [InlineData("foo[^\\r\\n]*bar", "foo\nmissing\nfoo bar")]
+    public async Task ConstrainedOrderedPrecheckRetriesLaterAnchorOccurrences(
+        string pattern,
+        string content)
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", content)]));
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+
+        var stats = snapshot.Search(
+            new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+
+        Assert.Equal(1, stats.HitsReturned);
+        Assert.Single(collector.Hits);
     }
 
     [Fact]

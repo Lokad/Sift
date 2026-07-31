@@ -1288,9 +1288,11 @@ internal static class Utf8RegexEngine
             {
                 maxGap = null;
             }
-            else if (maxGap is not null)
+            else if (maxGap is { } boundedGap)
             {
-                maxGap *= repeat.Max;
+                maxGap = boundedGap == 0 || repeat.Max <= int.MaxValue / boundedGap
+                    ? boundedGap * repeat.Max
+                    : null;
             }
 
             separator = new OrderedAnchorSeparator(maxGap, child.SameLineOnly);
@@ -1362,7 +1364,9 @@ internal static class Utf8RegexEngine
             return new OrderedAnchorSeparator(
                 left.MaxGapBytes is null || right.MaxGapBytes is null
                     ? null
-                    : left.MaxGapBytes.Value + right.MaxGapBytes.Value,
+                    : left.MaxGapBytes.Value <= int.MaxValue - right.MaxGapBytes.Value
+                        ? left.MaxGapBytes.Value + right.MaxGapBytes.Value
+                        : null,
                 left.SameLineOnly && right.SameLineOnly);
         }
 

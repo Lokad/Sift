@@ -1483,61 +1483,90 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         for (var groupIndex = 0; groupIndex < preparedOrderedAnchorGroups.Length; groupIndex++)
         {
             var group = preparedOrderedAnchorGroups[groupIndex];
-            var position = 0;
-            var matched = true;
+            Span<int> nextStarts = stackalloc int[group.Length];
+            Span<int> latestReachableEnds = stackalloc int[group.Length];
+            latestReachableEnds.Fill(-1);
+            // A later reachable prefix end is never worse for an upper-gap or same-line constraint.
             for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
             {
                 var anchor = group[anchorIndex];
-                if (position > contentBytes.Length)
-                {
-                    matched = false;
-                    break;
-                }
-
-                var sliceLength = contentBytes.Length - position;
-                if (anchorIndex > 0)
-                {
-                    if (anchor.MaxGapBytesFromPrevious is { } maxGap)
-                    {
-                        sliceLength = Math.Min(sliceLength, maxGap + anchor.Utf8Bytes.Length);
-                    }
-
-                    if (anchor.SameLineFromPrevious)
-                    {
-                        var newlineOffset = IndexOfLineBreak(contentBytes[position..(position + sliceLength)]);
-                        if (newlineOffset >= 0)
-                        {
-                            sliceLength = newlineOffset;
-                        }
-                    }
-                }
-
-                if (sliceLength < anchor.Utf8Bytes.Length)
-                {
-                    matched = false;
-                    break;
-                }
-
-                var slice = contentBytes.Slice(position, sliceLength);
-                var offset = anchor.LoweredAsciiBytes is null
-                    ? slice.IndexOf(anchor.Utf8Bytes)
-                    : IndexOfAsciiInsensitive(slice, anchor.LoweredAsciiBytes);
-                if (offset < 0)
-                {
-                    matched = false;
-                    break;
-                }
-
-                position += offset + anchor.Utf8Bytes.Length;
+                nextStarts[anchorIndex] = FindOrderedAnchor(contentBytes, anchor, searchStart: 0);
             }
 
-            if (matched)
+            while (true)
             {
-                return true;
+                var nextStart = int.MaxValue;
+                for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
+                {
+                    if (nextStarts[anchorIndex] >= 0)
+                    {
+                        nextStart = Math.Min(nextStart, nextStarts[anchorIndex]);
+                    }
+                }
+
+                if (nextStart == int.MaxValue)
+                {
+                    break;
+                }
+
+                for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
+                {
+                    if (nextStarts[anchorIndex] != nextStart)
+                    {
+                        continue;
+                    }
+
+                    var anchor = group[anchorIndex];
+                    var reachable = anchorIndex == 0;
+                    if (anchorIndex > 0)
+                    {
+                        var previousEnd = latestReachableEnds[anchorIndex - 1];
+                        reachable = previousEnd >= 0 && previousEnd <= nextStart;
+                        if (reachable && anchor.MaxGapBytesFromPrevious is { } maxGap)
+                        {
+                            reachable = nextStart - previousEnd <= maxGap;
+                        }
+
+                        if (reachable && anchor.SameLineFromPrevious)
+                        {
+                            reachable = IndexOfLineBreak(contentBytes[previousEnd..nextStart]) < 0;
+                        }
+                    }
+
+                    if (reachable)
+                    {
+                        latestReachableEnds[anchorIndex] = nextStart + anchor.Utf8Bytes.Length;
+                        if (anchorIndex == group.Length - 1)
+                        {
+                            return true;
+                        }
+                    }
+
+                    nextStarts[anchorIndex] = FindOrderedAnchor(
+                        contentBytes,
+                        anchor,
+                        searchStart: nextStart + 1);
+                }
             }
         }
 
         return false;
+    }
+
+    private static int FindOrderedAnchor(
+        ReadOnlySpan<byte> contentBytes,
+        PreparedOrderedAnchor anchor,
+        int searchStart)
+    {
+        if (searchStart > contentBytes.Length - anchor.Utf8Bytes.Length)
+        {
+            return -1;
+        }
+
+        var relative = anchor.LoweredAsciiBytes is null
+            ? contentBytes[searchStart..].IndexOf(anchor.Utf8Bytes)
+            : IndexOfAsciiInsensitive(contentBytes[searchStart..], anchor.LoweredAsciiBytes);
+        return relative < 0 ? -1 : searchStart + relative;
     }
 
     private static bool ShouldUseOrderedAnchorPrecheck(PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, int candidateCount)
