@@ -43,6 +43,7 @@ public sealed class Sift : ISift
     private int _reclamationRequests;
     private int _reclamationWorkerActive;
     private int _disposed;
+    private long _validationStatsRevision;
     private Exception? _rebuildCause;
     internal ISiftStorage Storage => _storage;
     public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;
@@ -179,6 +180,7 @@ public sealed class Sift : ISift
         try
         {
             var stats = _builder.Build(documents, isRecovery, cancellationToken);
+            ResetValidationStats();
             Volatile.Write(ref _rebuildCause, null);
             return stats;
         }
@@ -223,26 +225,35 @@ public sealed class Sift : ISift
                 cancellationToken,
                 _validationCancellation.Token);
             var acquiredGate = false;
+            var validationRevision = 0L;
             try
             {
                 _validationGate.Wait(operationCancellation.Token);
                 acquiredGate = true;
-                SetValidationState(IndexValidationState.Running, failure: null);
-                return ValidateCore(operationCancellation.Token);
+                validationRevision = BeginValidationAttempt();
+                return ValidateCore(operationCancellation.Token, validationRevision);
             }
             catch (OperationCanceledException)
             {
                 if (acquiredGate)
                 {
-                    SetValidationState(IndexValidationState.Cancelled, failure: null);
+                    TrySetValidationState(
+                        validationRevision,
+                        IndexValidationState.Cancelled,
+                        failure: null);
                 }
 
                 throw;
             }
             catch (Exception exception)
             {
-                MarkRequiresRebuild(exception);
-                SetValidationState(IndexValidationState.Failed, exception.Message);
+                if (acquiredGate)
+                {
+                    TryFailValidationAttempt(
+                        validationRevision,
+                        exception);
+                }
+
                 throw;
             }
             finally
@@ -257,10 +268,11 @@ public sealed class Sift : ISift
         });
     }
 
-    private IndexValidationStats ValidateCore(CancellationToken cancellationToken)
+    private IndexValidationStats ValidateCore(
+        CancellationToken cancellationToken,
+        long validationRevision)
     {
         var watch = Stopwatch.StartNew();
-        using var writerLock = _storage.AcquireWriterLock(cancellationToken);
         using var snapshot = _storage.OpenReadSnapshot();
         var manifest = snapshot.Manifest;
         var segmentBytes = new long[manifest.Segments.Count];
@@ -272,7 +284,7 @@ public sealed class Sift : ISift
             totalBytes = checked(totalBytes + segmentBytes[i]);
         }
 
-        SetValidationStats(new IndexValidationStats(
+        if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
             IndexValidationState.Running,
             manifest.Generation,
             manifest.Segments.Count,
@@ -280,7 +292,10 @@ public sealed class Sift : ISift
             totalBytes,
             ValidatedBytes: 0,
             ElapsedMilliseconds: 0,
-            Failure: null));
+            Failure: null)))
+        {
+            return GetValidationStats();
+        }
 
         long validatedBytes = 0;
         for (var i = 0; i < manifest.Segments.Count; i++)
@@ -290,7 +305,7 @@ public sealed class Sift : ISift
                 manifest.Segments[i].SegmentId,
                 cancellationToken);
             validatedBytes += segmentBytes[i];
-            SetValidationStats(new IndexValidationStats(
+            if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
                 IndexValidationState.Running,
                 manifest.Generation,
                 manifest.Segments.Count,
@@ -298,7 +313,10 @@ public sealed class Sift : ISift
                 totalBytes,
                 validatedBytes,
                 watch.ElapsedMilliseconds,
-                Failure: null));
+                Failure: null)))
+            {
+                return GetValidationStats();
+            }
         }
 
         watch.Stop();
@@ -311,8 +329,9 @@ public sealed class Sift : ISift
             totalBytes,
             watch.ElapsedMilliseconds,
             Failure: null);
-        SetValidationStats(completed);
-        return completed;
+        return TrySetValidationStats(validationRevision, completed)
+            ? completed
+            : GetValidationStats();
     }
 
     public MaintenanceStats GetMaintenanceStats()
@@ -636,6 +655,7 @@ public sealed class Sift : ISift
                 var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
                 ResetValidationStats();
                 _storage.PublishManifest(manifest);
+                ResetValidationStats();
             }
         }
         catch
@@ -749,6 +769,7 @@ public sealed class Sift : ISift
             var newManifest = new CorpusManifest(manifest.CorpusId, manifest.Generation + 1UL, mergedSegments);
             ResetValidationStats();
             _storage.PublishManifest(newManifest);
+            ResetValidationStats();
             manifest = newManifest;
         }
         catch
@@ -1059,34 +1080,90 @@ public sealed class Sift : ISift
 
     private void ResetValidationStats()
     {
-        SetValidationStats(new IndexValidationStats(
-            IndexValidationState.NotStarted,
-            Generation: null,
-            TotalSegments: 0,
-            ValidatedSegments: 0,
-            TotalBytes: 0,
-            ValidatedBytes: 0,
-            ElapsedMilliseconds: 0,
-            Failure: null));
+        lock (_validationStatsSync)
+        {
+            _validationStatsRevision++;
+            _validationStats = new IndexValidationStats(
+                IndexValidationState.NotStarted,
+                Generation: null,
+                TotalSegments: 0,
+                ValidatedSegments: 0,
+                TotalBytes: 0,
+                ValidatedBytes: 0,
+                ElapsedMilliseconds: 0,
+                Failure: null);
+        }
     }
 
-    private void SetValidationState(IndexValidationState state, string? failure)
+    private long BeginValidationAttempt()
     {
         lock (_validationStatsSync)
         {
+            var revision = ++_validationStatsRevision;
+            _validationStats = _validationStats with
+            {
+                State = IndexValidationState.Running,
+                Failure = null
+            };
+            return revision;
+        }
+    }
+
+    private bool TrySetValidationState(
+        long validationRevision,
+        IndexValidationState state,
+        string? failure)
+    {
+        lock (_validationStatsSync)
+        {
+            if (_validationStatsRevision != validationRevision)
+            {
+                return false;
+            }
+
             _validationStats = _validationStats with
             {
                 State = state,
                 Failure = failure
             };
+            return true;
         }
     }
 
-    private void SetValidationStats(IndexValidationStats stats)
+    private bool TrySetValidationStats(
+        long validationRevision,
+        IndexValidationStats stats)
     {
         lock (_validationStatsSync)
         {
+            if (_validationStatsRevision != validationRevision)
+            {
+                return false;
+            }
+
             _validationStats = stats;
+            return true;
+        }
+    }
+
+    private bool TryFailValidationAttempt(
+        long validationRevision,
+        Exception exception)
+    {
+        lock (_validationStatsSync)
+        {
+            if (_validationStatsRevision != validationRevision)
+            {
+                return false;
+            }
+
+            MarkRequiresRebuild(exception);
+            _validationStats = _validationStats with
+            {
+                State = IndexValidationState.Failed,
+                Failure = exception.Message
+            };
+            return true;
         }
     }
 

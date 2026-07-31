@@ -538,6 +538,46 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task RepeatedExplicitValidationRechecksSegmentChecksums()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        Assert.True((await reopened.Validate()).IsReady);
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        CorruptContentByte(segmentPath);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+        Assert.True(reopened.RequiresRebuild);
+    }
+
+    [Fact]
+    public async Task ExplicitValidationDoesNotAcquireTheWriterLock()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        var storage = TestHelpers.GetStorage(reopened);
+        using var writerLock = storage.AcquireWriterLock();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var validation = await reopened.Validate(cancellation.Token);
+
+        Assert.True(validation.IsReady);
+    }
+
+    [Fact]
     public async Task MutationInvalidatesReportedValidationReadiness()
     {
         using var index = SiftIndex.CreateInMemory();
