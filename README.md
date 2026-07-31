@@ -57,6 +57,11 @@ var initialDocuments = new InMemoryDocumentSource(
 var build = await index.Build(initialDocuments);
 Console.WriteLine($"Indexed {build.IndexedDocuments} documents in {build.ElapsedMilliseconds} ms.");
 
+// On process restart, await this before serving queries to move full pack
+// checksum validation off the first request path.
+var validation = await index.Validate();
+Console.WriteLine($"Validated {validation.ValidatedSegments} segment(s) in {validation.ElapsedMilliseconds} ms.");
+
 // 2. Query the index through a snapshot.
 using var snapshot = index.OpenSnapshot();
 

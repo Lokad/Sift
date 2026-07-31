@@ -63,18 +63,9 @@ switch (command)
         }
     case "verify":
         {
-            var storage = new CorpusStorage(corpusPath);
-            var manifest = storage.ReadManifest();
-            var segmentCount = 0;
-            var documentCount = 0;
-            foreach (var entry in manifest.Segments)
-            {
-                using var segment = storage.OpenSegment(entry.SegmentId);
-                segmentCount++;
-                documentCount += segment.DocumentCount;
-            }
-
-            Console.WriteLine($"verifiedManifestGeneration={manifest.Generation} verifiedSegments={segmentCount} verifiedDocuments={documentCount}");
+            var validation = await index.Validate();
+            var maintenance = index.GetMaintenanceStats();
+            Console.WriteLine($"state={validation.State} generation={validation.Generation} verifiedSegments={validation.ValidatedSegments} verifiedDocuments={maintenance.TotalDocuments} totalSegments={validation.TotalSegments} validatedBytes={validation.ValidatedBytes} totalBytes={validation.TotalBytes} ms={validation.ElapsedMilliseconds}");
             return 0;
         }
     case "explain":

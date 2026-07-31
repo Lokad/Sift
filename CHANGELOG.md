@@ -9,6 +9,8 @@
   segment count alone.
 - Exposed total corpus usage, quota headroom, and exceptional reclamation
   failures through `StorageStats`.
+- Added asynchronous full-index validation with progress and readiness telemetry
+  so applications can warm checksum verification before serving queries.
 
 ### Changed
 

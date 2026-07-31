@@ -99,6 +99,35 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task ExplicitValidationSurfacesCorruptionBeforeQueries()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Position = stream.Length / 2;
+            var current = stream.ReadByte();
+            stream.Position--;
+            stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+
+        Assert.True(reopened.RequiresRebuild);
+        Assert.Equal(IndexValidationState.Failed, reopened.GetValidationStats().State);
+        Assert.NotNull(reopened.GetValidationStats().Failure);
+    }
+
+    [Fact]
     public async Task UpdateValidatesExistingSegmentBeforeReadingIt()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
@@ -463,6 +492,47 @@ public sealed class StorageIntegrityTests
         }
 
         Assert.Equal(1, storage.ValidatedSegmentCount);
+    }
+
+    [Fact]
+    public async Task ExplicitValidationWarmsEverySegmentAndReportsReadiness()
+    {
+        using var fixture = new CorpusFixture();
+        var options = new SiftOptions { TargetSegmentContentBytes = 5 };
+        using (var index = new SiftIndex(fixture.CorpusPath, options))
+        {
+            await index.Build(new InMemoryDocumentSource([
+                ("src/a.txt", "alpha"),
+                ("src/b.txt", "bravo"),
+                ("src/c.txt", "cello")
+            ]));
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath, options);
+        var storage = TestHelpers.GetStorage(reopened);
+        Assert.Equal(IndexValidationState.NotStarted, reopened.GetValidationStats().State);
+        Assert.Equal(0, storage.ValidatedSegmentCount);
+
+        var validation = await reopened.Validate();
+
+        Assert.True(validation.IsReady);
+        Assert.Equal(3, validation.TotalSegments);
+        Assert.Equal(validation.TotalSegments, validation.ValidatedSegments);
+        Assert.Equal(validation.TotalBytes, validation.ValidatedBytes);
+        Assert.Equal(3, storage.ValidatedSegmentCount);
+        Assert.Equal(validation, reopened.GetValidationStats());
+    }
+
+    [Fact]
+    public async Task MutationInvalidatesReportedValidationReadiness()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        Assert.True((await index.Validate()).IsReady);
+
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
+
+        Assert.Equal(IndexValidationState.NotStarted, index.GetValidationStats().State);
     }
 
     [Fact]

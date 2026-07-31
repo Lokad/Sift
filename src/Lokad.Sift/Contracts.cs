@@ -362,6 +362,36 @@ public readonly record struct ActivityStats(
     bool IsWriteBusy,
     SiftActivity CurrentActivity);
 
+public enum IndexValidationState
+{
+    NotStarted,
+    Running,
+    Ready,
+    Failed,
+    Cancelled
+}
+
+public readonly record struct IndexValidationStats(
+    // Lifecycle state of the latest explicit integrity-validation attempt.
+    IndexValidationState State,
+    // Manifest generation being validated, or null before a manifest is opened.
+    ulong? Generation,
+    // Immutable packs referenced by that generation.
+    int TotalSegments,
+    // Packs whose full checksums have been verified in this attempt.
+    int ValidatedSegments,
+    // Physical bytes across all packs in the generation.
+    long TotalBytes,
+    // Physical bytes whose packs have completed validation.
+    long ValidatedBytes,
+    // Wall-clock time spent by the current or latest attempt.
+    long ElapsedMilliseconds,
+    // Latest exceptional failure message, or null outside Failed state.
+    string? Failure)
+{
+    public bool IsReady => State == IndexValidationState.Ready;
+}
+
 public readonly record struct MaintenanceStats(
     // Manifest generation observed by this snapshot.
     ulong Generation,
@@ -481,10 +511,13 @@ public interface ISift : IDisposable
     IOverlaySnapshot OpenOverlaySnapshot();
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
     ActivityStats GetActivityStats();
+    IndexValidationStats GetValidationStats();
     MaintenanceStats GetMaintenanceStats();
     StorageStats GetStorageStats();
     // Reports whether the current generation contains work selectable by this policy.
     bool ShouldCompact(CompactOptions options);
+    Task<IndexValidationStats> Validate();
+    Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
     Task<BuildStats> Build(IDocumentSource documents);
     Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);

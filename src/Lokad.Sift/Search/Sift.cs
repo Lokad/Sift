@@ -18,12 +18,26 @@ public sealed class Sift : ISift
     private readonly ManualResetEventSlim _writersIdle = new(initialState: true);
     private readonly CancellationTokenSource _reclamationCancellation = new();
     private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
+    private readonly CancellationTokenSource _validationCancellation = new();
+    private readonly ManualResetEventSlim _validationsIdle = new(initialState: true);
+    private readonly SemaphoreSlim _validationGate = new(1, 1);
     private readonly ConcurrentDictionary<LegacyMaintenanceKey, long> _legacyDeadContentBytes = new();
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
     private readonly object _reclamationSync = new();
     // Prevents Dispose from racing a mutation between its disposed check and activity registration.
     private readonly object _activitySync = new();
+    private readonly object _validationStatsSync = new();
+    private IndexValidationStats _validationStats = new(
+        IndexValidationState.NotStarted,
+        Generation: null,
+        TotalSegments: 0,
+        ValidatedSegments: 0,
+        TotalBytes: 0,
+        ValidatedBytes: 0,
+        ElapsedMilliseconds: 0,
+        Failure: null);
     private int _activeWriters;
+    private int _activeValidations;
     private int _currentActivity;
     private int _reclamationRequests;
     private int _reclamationWorkerActive;
@@ -154,6 +168,7 @@ public sealed class Sift : ISift
     private BuildStats BuildCore(IDocumentSource documents, CancellationToken cancellationToken)
     {
         var isRecovery = RequiresRebuild;
+        ResetValidationStats();
         try
         {
             var stats = _builder.Build(documents, isRecovery, cancellationToken);
@@ -175,6 +190,122 @@ public sealed class Sift : ISift
         var isBusy = Volatile.Read(ref _activeWriters) > 0;
         var currentActivity = (SiftActivity)Volatile.Read(ref _currentActivity);
         return new ActivityStats(isBusy, isBusy ? currentActivity : SiftActivity.Idle);
+    }
+
+    public IndexValidationStats GetValidationStats()
+    {
+        ThrowIfDisposed();
+        lock (_validationStatsSync)
+        {
+            return _validationStats;
+        }
+    }
+
+    public Task<IndexValidationStats> Validate()
+    {
+        return Validate(CancellationToken.None);
+    }
+
+    public Task<IndexValidationStats> Validate(CancellationToken cancellationToken)
+    {
+        ThrowIfRebuildRequired();
+        var validation = BeginValidation();
+        return Task.Run(() =>
+        {
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _validationCancellation.Token);
+            var acquiredGate = false;
+            try
+            {
+                _validationGate.Wait(operationCancellation.Token);
+                acquiredGate = true;
+                SetValidationState(IndexValidationState.Running, failure: null);
+                return ValidateCore(operationCancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                if (acquiredGate)
+                {
+                    SetValidationState(IndexValidationState.Cancelled, failure: null);
+                }
+
+                throw;
+            }
+            catch (Exception exception)
+            {
+                MarkRequiresRebuild(exception);
+                SetValidationState(IndexValidationState.Failed, exception.Message);
+                throw;
+            }
+            finally
+            {
+                if (acquiredGate)
+                {
+                    _validationGate.Release();
+                }
+
+                validation.Dispose();
+            }
+        });
+    }
+
+    private IndexValidationStats ValidateCore(CancellationToken cancellationToken)
+    {
+        var watch = Stopwatch.StartNew();
+        using var writerLock = _storage.AcquireWriterLock(cancellationToken);
+        using var snapshot = _storage.OpenReadSnapshot();
+        var manifest = snapshot.Manifest;
+        var segmentBytes = new long[manifest.Segments.Count];
+        long totalBytes = 0;
+        for (var i = 0; i < manifest.Segments.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            segmentBytes[i] = _storage.GetSegmentBytes(manifest.Segments[i].SegmentId);
+            totalBytes = checked(totalBytes + segmentBytes[i]);
+        }
+
+        SetValidationStats(new IndexValidationStats(
+            IndexValidationState.Running,
+            manifest.Generation,
+            manifest.Segments.Count,
+            ValidatedSegments: 0,
+            totalBytes,
+            ValidatedBytes: 0,
+            ElapsedMilliseconds: 0,
+            Failure: null));
+
+        long validatedBytes = 0;
+        for (var i = 0; i < manifest.Segments.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var segment = _storage.OpenSegment(
+                manifest.Segments[i].SegmentId,
+                cancellationToken);
+            validatedBytes += segmentBytes[i];
+            SetValidationStats(new IndexValidationStats(
+                IndexValidationState.Running,
+                manifest.Generation,
+                manifest.Segments.Count,
+                i + 1,
+                totalBytes,
+                validatedBytes,
+                watch.ElapsedMilliseconds,
+                Failure: null));
+        }
+
+        watch.Stop();
+        var completed = new IndexValidationStats(
+            IndexValidationState.Ready,
+            manifest.Generation,
+            manifest.Segments.Count,
+            manifest.Segments.Count,
+            totalBytes,
+            totalBytes,
+            watch.ElapsedMilliseconds,
+            Failure: null);
+        SetValidationStats(completed);
+        return completed;
     }
 
     public MaintenanceStats GetMaintenanceStats()
@@ -489,6 +620,7 @@ public sealed class Sift : ISift
                 newSegments.AddRange(publishedSegments);
 
                 var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
+                ResetValidationStats();
                 _storage.PublishManifest(manifest);
             }
         }
@@ -601,6 +733,7 @@ public sealed class Sift : ISift
             }
 
             var newManifest = new CorpusManifest(manifest.CorpusId, manifest.Generation + 1UL, mergedSegments);
+            ResetValidationStats();
             _storage.PublishManifest(newManifest);
             manifest = newManifest;
         }
@@ -635,9 +768,11 @@ public sealed class Sift : ISift
 
             Volatile.Write(ref _disposed, 1);
             _writerCancellation.Cancel();
+            _validationCancellation.Cancel();
         }
 
         _writersIdle.Wait();
+        _validationsIdle.Wait();
         lock (_reclamationSync)
         {
             _reclamationCancellation.Cancel();
@@ -646,6 +781,9 @@ public sealed class Sift : ISift
         _reclamationIdle.Wait();
         _writerCancellation.Dispose();
         _writersIdle.Dispose();
+        _validationCancellation.Dispose();
+        _validationsIdle.Dispose();
+        _validationGate.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
     }
@@ -857,6 +995,53 @@ public sealed class Sift : ISift
         }
 
         return new ActivityScope(this);
+    }
+
+    private IDisposable BeginValidation()
+    {
+        lock (_activitySync)
+        {
+            ThrowIfDisposed();
+            if (++_activeValidations == 1)
+            {
+                _validationsIdle.Reset();
+            }
+        }
+
+        return new ValidationScope(this);
+    }
+
+    private void ResetValidationStats()
+    {
+        SetValidationStats(new IndexValidationStats(
+            IndexValidationState.NotStarted,
+            Generation: null,
+            TotalSegments: 0,
+            ValidatedSegments: 0,
+            TotalBytes: 0,
+            ValidatedBytes: 0,
+            ElapsedMilliseconds: 0,
+            Failure: null));
+    }
+
+    private void SetValidationState(IndexValidationState state, string? failure)
+    {
+        lock (_validationStatsSync)
+        {
+            _validationStats = _validationStats with
+            {
+                State = state,
+                Failure = failure
+            };
+        }
+    }
+
+    private void SetValidationStats(IndexValidationStats stats)
+    {
+        lock (_validationStatsSync)
+        {
+            _validationStats = stats;
+        }
     }
 
     private void ThrowIfDisposed()
@@ -1083,6 +1268,28 @@ public sealed class Sift : ISift
         }
 
         return live;
+    }
+
+    private sealed class ValidationScope(Sift owner) : IDisposable
+    {
+        private Sift? _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            if (owner is null)
+            {
+                return;
+            }
+
+            lock (owner._activitySync)
+            {
+                if (--owner._activeValidations == 0)
+                {
+                    owner._validationsIdle.Set();
+                }
+            }
+        }
     }
 
     private void RemoveUnchangedDocuments(
