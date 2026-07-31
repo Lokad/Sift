@@ -313,6 +313,33 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task BackslashIncludeGlobUsesCanonicalPathAcceleration()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/special/a.txt", "alpha"),
+            ("src/other/b.txt", "beta"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var filter = new PathFilter(IncludeGlobs: [@"src\special\*.txt"]);
+        var plan = snapshot.Explain(
+            new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive),
+            filter);
+        var collector = new HitBuffer();
+
+        snapshot.Search(
+            new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive),
+            filter,
+            collector);
+
+        Assert.True(plan.UsesPathIndex);
+        Assert.Single(collector.Hits);
+        Assert.Equal(
+            "src/special/a.txt",
+            snapshot.Materialize(collector.Hits[0], 0, 0).Path);
+    }
+
+    [Fact]
     public async Task AlternativeIncludeGlobsDoNotIntersectTheirPathLiterals()
     {
         var documents = Enumerable.Range(0, 9000)

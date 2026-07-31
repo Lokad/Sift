@@ -245,7 +245,9 @@ internal sealed class PathFilterMatcher
                 onlyIncludeGlob = filter.IncludeGlobs[i];
             }
 
-            var fragment = ExtractGlobLiteral(onlyIncludeGlob ?? string.Empty);
+            // Glob verification canonicalizes separators; acceleration must index the same form.
+            var fragment = ExtractGlobLiteral(
+                (onlyIncludeGlob ?? string.Empty).Replace('\\', '/'));
             if (fragment.Length >= 3)
             {
                 fragments.Add(fragment);
