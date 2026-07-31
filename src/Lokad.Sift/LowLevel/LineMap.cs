@@ -48,6 +48,54 @@ public static class LineMap
         return bytes;
     }
 
+    public static byte[] EncodeLineIndex(ReadOnlySpan<byte> content, out int lineCount)
+    {
+        lineCount = 1;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == (byte)'\n')
+            {
+                lineCount++;
+            }
+        }
+
+        var anchorCount = ((lineCount - 1) / AnchorStride) + 1;
+        var bytes = GC.AllocateUninitializedArray<byte>(8 + anchorCount * 8 + lineCount * 4);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0, 4), lineCount);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4, 4), anchorCount);
+
+        var anchorsOffset = 8;
+        var deltasOffset = anchorsOffset + anchorCount * 8;
+        var lineIndex = 0;
+        var anchorStart = 0;
+        WriteLineStart(0);
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == (byte)'\n')
+            {
+                WriteLineStart(i + 1);
+            }
+        }
+
+        return bytes;
+
+        void WriteLineStart(int lineStart)
+        {
+            if (lineIndex % AnchorStride == 0)
+            {
+                anchorStart = lineStart;
+                var anchorOffset = anchorsOffset + lineIndex / AnchorStride * 8;
+                BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(anchorOffset, 4), lineIndex);
+                BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(anchorOffset + 4, 4), anchorStart);
+            }
+
+            BinaryPrimitives.WriteInt32LittleEndian(
+                bytes.AsSpan(deltasOffset + lineIndex * 4, 4),
+                lineStart - anchorStart);
+            lineIndex++;
+        }
+    }
+
     public static int[] DecodeLineIndex(ReadOnlySpan<byte> encoded)
     {
         if (encoded.Length < 8)

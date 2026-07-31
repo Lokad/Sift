@@ -8,6 +8,7 @@ namespace Lokad.Sift.Indexer;
 
 internal sealed class IndexBuilder
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     internal const int DefaultMaxDocumentBytes = 32 * 1024 * 1024;
     internal const int DefaultTargetSegmentDocumentCount = 50_000;
     internal const long DefaultTargetSegmentContentBytes = 64L * 1024 * 1024;
@@ -270,7 +271,7 @@ internal sealed class IndexBuilder
             return null;
         }
 
-        var hasBom = span.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF });
+        var hasBom = span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
         if (hasBom)
         {
             content = content[3..];
@@ -279,7 +280,7 @@ internal sealed class IndexBuilder
 
         try
         {
-            _ = new UTF8Encoding(false, true).GetCharCount(span);
+            _ = StrictUtf8.GetCharCount(span);
         }
         catch (DecoderFallbackException)
         {
@@ -297,15 +298,15 @@ internal sealed class IndexBuilder
             flags |= 1 << 2;
         }
 
-        var lineStarts = LineMap.BuildLineStarts(span);
+        var encodedLineIndex = LineMap.EncodeLineIndex(span, out var lineCount);
         var ownedContent = content.ToArray();
         return new StoredDocument
         {
             Path = normalizedPath,
-            PathUtf8 = Encoding.UTF8.GetBytes(normalizedPath),
+            PathUtf8 = StrictUtf8.GetBytes(normalizedPath),
             Content = ownedContent,
-            LineCount = lineStarts.Length,
-            EncodedLineIndex = LineMap.EncodeLineIndex(lineStarts),
+            LineCount = lineCount,
+            EncodedLineIndex = encodedLineIndex,
             Flags = flags,
             MTimeUtcTicks = document.LastModifiedUtc?.UtcTicks ?? 0,
             ContentHash64 = Hashing.Fnv1A64(span)
@@ -348,15 +349,21 @@ internal sealed class IndexBuilder
             throw new ArgumentException("Document path must be relative.", nameof(path));
         }
 
-        if (path.Contains("//", StringComparison.Ordinal))
+        var segmentStart = 0;
+        for (var i = 0; i <= path.Length; i++)
         {
-            throw new ArgumentException("Document path contains repeated separators.", nameof(path));
-        }
+            if (i < path.Length && path[i] != '/')
+            {
+                continue;
+            }
 
-        var segments = path.Split('/');
-        if (segments.Any(static segment => segment.Length == 0 || segment == "." || segment == ".."))
-        {
-            throw new ArgumentException("Document path contains invalid segments.", nameof(path));
+            var segment = path.AsSpan(segmentStart, i - segmentStart);
+            if (segment.Length == 0 || segment.SequenceEqual(".") || segment.SequenceEqual(".."))
+            {
+                throw new ArgumentException("Document path contains invalid segments.", nameof(path));
+            }
+
+            segmentStart = i + 1;
         }
 
         return path;
