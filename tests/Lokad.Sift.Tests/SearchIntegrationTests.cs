@@ -2258,6 +2258,24 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task UnicodeRegexOffsetsDoNotSplitUtf8Scalars()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "\uD83D\uDE00"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(new SearchQuery(".", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
+
+        Assert.Equal(2, collector.Hits.Count);
+        Assert.Equal([(0, 0), (0, 4)], collector.Hits.Select(static hit => (hit.StartByte, hit.EndByte)).ToArray());
+        Assert.Equal(
+            [string.Empty, "\uD83D\uDE00"],
+            collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).MatchText).ToArray());
+    }
+
+    [Fact]
     public async Task RegexTimeoutStopsSearchSafely()
     {
         var content = new string('a', 50_000) + "b";

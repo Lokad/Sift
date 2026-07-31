@@ -118,8 +118,33 @@ internal static class RegexVerifier
                 throw new InvalidOperationException("Regex matches must be returned in source order.");
             }
 
-            mappedByteOffset += Encoding.UTF8.GetByteCount(text[mappedCharIndex..targetCharIndex]);
-            mappedCharIndex = targetCharIndex;
+            while (mappedCharIndex < targetCharIndex)
+            {
+                var current = text[mappedCharIndex];
+                if (char.IsHighSurrogate(current) &&
+                    mappedCharIndex + 1 < text.Length &&
+                    char.IsLowSurrogate(text[mappedCharIndex + 1]))
+                {
+                    if (mappedCharIndex + 1 == targetCharIndex)
+                    {
+                        // A UTF-16 match may split a scalar; both halves still share its UTF-8 boundary.
+                        return mappedByteOffset;
+                    }
+
+                    mappedByteOffset += 4;
+                    mappedCharIndex += 2;
+                    continue;
+                }
+
+                mappedByteOffset += current switch
+                {
+                    <= '\u007F' => 1,
+                    <= '\u07FF' => 2,
+                    _ => 3
+                };
+                mappedCharIndex++;
+            }
+
             return mappedByteOffset;
         }
     }
