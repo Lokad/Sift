@@ -34,6 +34,25 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task SearchRejectsDeeplyNestedRegexesBeforeCompilation()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            MaxPatternNesting = 8
+        });
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var snapshot = index.OpenSnapshot();
+        var nested = string.Concat(Enumerable.Repeat("(", 9)) + "alpha" + string.Concat(Enumerable.Repeat(")", 9));
+
+        Assert.Throws<ArgumentException>(() => snapshot.Explain(
+            new SearchQuery(nested, PatternMode.Regex, CaseMode.Sensitive),
+            new PathFilter()));
+        Assert.Throws<ArgumentException>(() => snapshot.Explain(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter { PathRegex = nested }));
+    }
+
+    [Fact]
     public async Task LiteralSearchMatchesBruteForceBaseline()
     {
         using var fixture = new CorpusFixture(

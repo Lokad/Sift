@@ -28,6 +28,8 @@
   scans instead of scanning the entire corpus unconditionally.
 - Bounded query and path-filter pattern preparation, included preparation in
   search elapsed limits, and capped regex caches by retained pattern size.
+- Rejected regexes deeper than the configured structural limit and lowered the
+  default pattern limit to 2,048 characters.
 - Increased the default post-mutation reserve to preserve enough space for one
   default compaction pass.
 

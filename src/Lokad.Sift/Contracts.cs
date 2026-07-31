@@ -205,7 +205,9 @@ public sealed class SiftOptions
     public int MaxMaterializedContextBytes { get; init; } = 256 * 1024;
     public int MaxMaterializedContextLines { get; init; } = 1000;
     // Rejects pathological parser and compiler inputs before allocating regex state.
-    public int MaxPatternCharacters { get; init; } = 16 * 1024;
+    public int MaxPatternCharacters { get; init; } = 2 * 1024;
+    // Prevents recursive regex analysis from exhausting the process stack.
+    public int MaxPatternNesting { get; init; } = 64;
     // Bounds aggregate include/exclude matcher construction per search.
     public int MaxPathFilterPatterns { get; init; } = 256;
     // Prevents consumers from checkpointing an event whose replacement was not indexed.

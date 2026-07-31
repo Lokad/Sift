@@ -879,6 +879,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 nameof(query));
         }
 
+        if (query.PatternMode == PatternMode.Regex &&
+            RegexStructure.ExceedsNestingLimit(query.Pattern, _options.MaxPatternNesting))
+        {
+            throw new ArgumentException(
+                $"Search pattern exceeds the {_options.MaxPatternNesting}-level nesting limit.",
+                nameof(query));
+        }
+
         if (query.MaxHits <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(query), "MaxHits must be positive.");
@@ -909,6 +917,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ValidatePathPattern(pathFilter.PathPrefix);
         ValidatePathPattern(pathFilter.PathRegex);
+        if (pathFilter.PathRegex is { } pathRegex &&
+            RegexStructure.ExceedsNestingLimit(pathRegex, _options.MaxPatternNesting))
+        {
+            throw new ArgumentException(
+                $"Path regex exceeds the {_options.MaxPatternNesting}-level nesting limit.",
+                nameof(pathFilter));
+        }
 
         var includeCount = pathFilter.IncludeGlobs?.Length ?? 0;
         var excludeCount = pathFilter.ExcludeGlobs?.Length ?? 0;

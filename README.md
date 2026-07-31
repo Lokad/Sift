@@ -28,7 +28,8 @@ using var index = new Sift(indexPath, new SiftOptions
     TargetSegmentContentBytes = 64L * 1024 * 1024, // Or once a segment reaches about 64 MiB of content.
     MaximumPhysicalBytes = 128L * 1024 * 1024 * 1024, // Optional corpus quota, including lifecycle metadata.
     MinimumFreeBytesAfterMutation = 1536L * 1024 * 1024, // Preserve room for one default compaction pass.
-    MaxPatternCharacters = 16 * 1024 // Bound query and path-filter compilation work.
+    MaxPatternCharacters = 2 * 1024, // Bound query and path-filter compilation work.
+    MaxPatternNesting = 64 // Bound recursive regex analysis.
 });
 // Alternative in-memory form:
 // using var index = Sift.CreateInMemory();
