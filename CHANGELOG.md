@@ -31,6 +31,8 @@
   searches use ASCII n-gram indexes.
 - Prevented rejected-only and ineffective deletion updates from publishing
   redundant manifest generations while preserving legacy-manifest migration.
+- Avoided publishing replacement segments for byte-identical upserts and
+  reported skipped documents and bytes in `UpdateStats`.
 
 ### Breaking changes
 

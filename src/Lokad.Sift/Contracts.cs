@@ -281,12 +281,16 @@ public readonly record struct BuildStats(
 public readonly record struct UpdateStats(
     int SubmittedUpserts,
     int UpsertedDocuments,
+    // Valid replacements omitted because both indexed metadata and body bytes already match.
+    int SkippedUpserts,
     int RejectedUpserts,
     // Explicit deletions that removed a live document; missing paths are not counted.
     int DeletedDocuments,
     int PublishedSegments,
     long SubmittedBytes,
     long ContentBytes,
+    // Normalized body bytes proven identical to their current indexed versions.
+    long SkippedBytes,
     long RejectedBytes,
     long ElapsedMilliseconds);
 

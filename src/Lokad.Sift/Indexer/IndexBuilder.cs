@@ -46,6 +46,7 @@ internal sealed class IndexBuilder
                 operationName: "build",
                 forbiddenPaths: null,
                 collectAcceptedPaths: false,
+                preparePartition: static _ => { },
                 partition =>
                 {
                     var segmentId = segmentSeed + (ulong)entries.Count;
@@ -86,12 +87,15 @@ internal sealed class IndexBuilder
         string operationName,
         IReadOnlySet<string>? forbiddenPaths,
         bool collectAcceptedPaths,
+        Action<List<StoredDocument>> preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         var submitted = 0;
         long submittedBytes = 0;
         var accepted = 0;
         long acceptedBytes = 0;
+        var skipped = 0;
+        long skippedBytes = 0;
         var rejected = 0;
         long rejectedBytes = 0;
         var submittedPaths = new HashSet<string>(StringComparer.Ordinal);
@@ -109,7 +113,27 @@ internal sealed class IndexBuilder
             }
 
             partition.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
-            publishPartition(partition);
+            var candidateCount = partition.Count;
+            var candidateBytes = partitionBytes;
+            preparePartition(partition);
+            partitionBytes = partition.Sum(static document => (long)document.Content.Length);
+            skipped += candidateCount - partition.Count;
+            skippedBytes = checked(skippedBytes + candidateBytes - partitionBytes);
+            accepted += partition.Count;
+            acceptedBytes = checked(acceptedBytes + partitionBytes);
+            if (acceptedPaths is not null)
+            {
+                foreach (var document in partition)
+                {
+                    acceptedPaths.Add(document.Path);
+                }
+            }
+
+            if (partition.Count > 0)
+            {
+                publishPartition(partition);
+            }
+
             partition = [];
             partitionBytes = 0;
         }
@@ -153,18 +177,17 @@ internal sealed class IndexBuilder
 
             partition.Add(document);
             partitionBytes += document.Content.Length;
-            acceptedPaths?.Add(normalizedPath);
-            accepted++;
-            acceptedBytes = checked(acceptedBytes + document.Content.Length);
         }
 
         FlushPartition();
         return new StreamedDocuments(
             submitted,
             accepted,
+            skipped,
             rejected,
             submittedBytes,
             acceptedBytes,
+            skippedBytes,
             rejectedBytes,
             acceptedPaths ?? []);
     }
@@ -386,9 +409,11 @@ internal readonly record struct LoadedDocuments(
 internal readonly record struct StreamedDocuments(
     int Submitted,
     int Accepted,
+    int Skipped,
     int Rejected,
     long SubmittedBytes,
     long AcceptedBytes,
+    long SkippedBytes,
     long RejectedBytes,
     HashSet<string> AcceptedPaths);
 

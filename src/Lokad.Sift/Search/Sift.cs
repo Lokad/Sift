@@ -402,6 +402,10 @@ public sealed class Sift : ISift
                 operationName: "update",
                 forbiddenPaths: deletionSet,
                 collectAcceptedPaths: true,
+                preparePartition: partition => RemoveUnchangedDocuments(
+                    existingManifest,
+                    partition,
+                    cancellationToken),
                 partition =>
                 {
                     var segmentId = segmentSeed + (ulong)publishedSegments.Count;
@@ -498,11 +502,13 @@ public sealed class Sift : ISift
         return new UpdateStats(
             SubmittedUpserts: upsertLoad.Submitted,
             UpsertedDocuments: upsertLoad.Accepted,
+            SkippedUpserts: upsertLoad.Skipped,
             RejectedUpserts: upsertLoad.Rejected,
             DeletedDocuments: deletedDocuments,
             PublishedSegments: publishedSegments.Count,
             SubmittedBytes: upsertLoad.SubmittedBytes,
             ContentBytes: upsertLoad.AcceptedBytes,
+            SkippedBytes: upsertLoad.SkippedBytes,
             RejectedBytes: upsertLoad.RejectedBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds);
     }
@@ -1011,10 +1017,13 @@ public sealed class Sift : ISift
                         continue;
                     }
 
+                    var document = segment.GetDocument(foundOrdinal);
                     live[path] = new LiveDocumentKey(
                         entry.SegmentId,
                         foundOrdinal,
-                        segment.GetDocument(foundOrdinal).ContentLength);
+                        document.ContentLength,
+                        document.MTimeUtcTicks,
+                        document.ContentHash64);
                 }
 
                 continue;
@@ -1063,7 +1072,9 @@ public sealed class Sift : ISift
                     live[sortedPaths[pathIndex]] = new LiveDocumentKey(
                         entry.SegmentId,
                         ordinal,
-                        document.ContentLength);
+                        document.ContentLength,
+                        document.MTimeUtcTicks,
+                        document.ContentHash64);
                 }
 
                 ordinal++;
@@ -1072,6 +1083,48 @@ public sealed class Sift : ISift
         }
 
         return live;
+    }
+
+    private void RemoveUnchangedDocuments(
+        CorpusManifest manifest,
+        List<StoredDocument> documents,
+        CancellationToken cancellationToken)
+    {
+        if (documents.Count == 0 || manifest.Segments.Count == 0)
+        {
+            return;
+        }
+
+        var byPath = documents.ToDictionary(static document => document.Path, StringComparer.Ordinal);
+        var paths = byPath.Keys.ToHashSet(StringComparer.Ordinal);
+        var current = FindLiveDocumentKeys(manifest, paths, cancellationToken);
+        var unchangedPaths = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in current.GroupBy(static pair => pair.Value.SegmentId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var segment = _storage.OpenSegment(group.Key, cancellationToken);
+            foreach (var pair in group)
+            {
+                var incoming = byPath[pair.Key];
+                var indexed = pair.Value;
+                if (indexed.ContentLength != incoming.Content.Length ||
+                    indexed.ContentHash64 != incoming.ContentHash64 ||
+                    indexed.MTimeUtcTicks != incoming.MTimeUtcTicks)
+                {
+                    continue;
+                }
+
+                // The persisted hash is only a fast rejection filter; byte equality
+                // is required before suppressing a replacement.
+                var indexedDocument = segment.GetDocument(indexed.Ordinal);
+                if (segment.GetContentBytes(indexedDocument).SequenceEqual(incoming.Content.Span))
+                {
+                    unchangedPaths.Add(pair.Key);
+                }
+            }
+        }
+
+        documents.RemoveAll(document => unchangedPaths.Contains(document.Path));
     }
 
     private CompactionPublication PublishCompactedSegments(
@@ -1338,7 +1391,9 @@ public sealed class Sift : ISift
     private readonly record struct LiveDocumentKey(
         ulong SegmentId,
         uint Ordinal,
-        int ContentLength);
+        int ContentLength,
+        long MTimeUtcTicks,
+        ulong ContentHash64);
 
     private readonly record struct LegacyMaintenanceKey(
         ulong SegmentId,

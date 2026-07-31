@@ -119,12 +119,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         return new UpdateStats(
             load.Submitted,
-            load.Documents.Count,
+            overlayUpdate.UpsertedDocuments,
+            overlayUpdate.SkippedUpserts,
             load.Rejected,
             deletionSet.Count,
             overlayUpdate.PublishedSegments,
             load.SubmittedBytes,
-            load.AcceptedBytes,
+            overlayUpdate.ContentBytes,
+            overlayUpdate.SkippedBytes,
             load.RejectedBytes,
             overlayUpdate.ElapsedMilliseconds);
     }

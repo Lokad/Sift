@@ -26,7 +26,7 @@ switch (command)
             var root = args.Length >= 3 ? args[2] : Environment.CurrentDirectory;
             var deletions = args.Skip(3).Select(static path => new DocumentKey(path)).ToArray();
             var update = await index.Update(new FileSystemDocumentSource(root), deletions);
-            Console.WriteLine($"submittedUpserts={update.SubmittedUpserts} upserts={update.UpsertedDocuments} rejectedUpserts={update.RejectedUpserts} deletions={update.DeletedDocuments} segments={update.PublishedSegments} submittedBytes={update.SubmittedBytes} bytes={update.ContentBytes} rejectedBytes={update.RejectedBytes} ms={update.ElapsedMilliseconds}");
+            Console.WriteLine($"submittedUpserts={update.SubmittedUpserts} upserts={update.UpsertedDocuments} skippedUpserts={update.SkippedUpserts} rejectedUpserts={update.RejectedUpserts} deletions={update.DeletedDocuments} segments={update.PublishedSegments} submittedBytes={update.SubmittedBytes} bytes={update.ContentBytes} skippedBytes={update.SkippedBytes} rejectedBytes={update.RejectedBytes} ms={update.ElapsedMilliseconds}");
             return 0;
         }
     case "search":

@@ -237,6 +237,57 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task IdenticalUpsertDoesNotPublishSegmentOrManifest()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var beforeManifest = index.Storage.ReadManifest();
+        var beforeStorage = index.GetStorageStats();
+
+        var stats = await index.Update(
+            new InMemoryDocumentSource([("src/a.txt", "alpha\n")]),
+            []);
+
+        var afterManifest = index.Storage.ReadManifest();
+        var afterStorage = index.GetStorageStats();
+        Assert.Equal(1, stats.SubmittedUpserts);
+        Assert.Equal(0, stats.UpsertedDocuments);
+        Assert.Equal(1, stats.SkippedUpserts);
+        Assert.Equal("alpha\n".Length, stats.SkippedBytes);
+        Assert.Equal(0, stats.ContentBytes);
+        Assert.Equal(0, stats.PublishedSegments);
+        Assert.Equal(beforeManifest.Generation, afterManifest.Generation);
+        Assert.Equal(beforeStorage.ManifestSegmentBytes, afterStorage.ManifestSegmentBytes);
+        Assert.Equal(0, index.GetMaintenanceStats().DeadDocuments);
+    }
+
+    [Fact]
+    public async Task MixedUpdateSkipsOnlyIdenticalUpserts()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "alpha"),
+            ("src/b.txt", "beta")
+        ]));
+
+        var stats = await index.Update(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "alpha"),
+                ("src/b.txt", "omega"),
+                ("src/c.txt", "gamma")
+            ]),
+            []);
+
+        Assert.Equal(3, stats.SubmittedUpserts);
+        Assert.Equal(2, stats.UpsertedDocuments);
+        Assert.Equal(1, stats.SkippedUpserts);
+        Assert.Equal("omega".Length + "gamma".Length, stats.ContentBytes);
+        Assert.Equal("alpha".Length, stats.SkippedBytes);
+        Assert.Equal(1, index.GetMaintenanceStats().DeadDocuments);
+    }
+
+    [Fact]
     public async Task DuplicateRejectedUpsertPathsAreRejected()
     {
         using var fixture = new CorpusFixture();

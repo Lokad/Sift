@@ -112,7 +112,7 @@ ReadOnlySpan<DocumentKey> deletions =
 ];
 
 var update = await index.Update(upserts, deletions);
-Console.WriteLine($"Upserted {update.UpsertedDocuments} document(s), deleted {update.DeletedDocuments} in {update.ElapsedMilliseconds} ms.");
+Console.WriteLine($"Upserted {update.UpsertedDocuments}, skipped {update.SkippedUpserts} unchanged, deleted {update.DeletedDocuments} in {update.ElapsedMilliseconds} ms.");
 
 // 4. Query again from a fresh snapshot.
 using var updatedSnapshot = index.OpenSnapshot();
