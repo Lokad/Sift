@@ -137,11 +137,12 @@ public sealed class CorpusStorage : ISiftStorage
 
     IDisposable ISiftStorage.AcquireWriterLock(CancellationToken cancellationToken) => AcquireWriterLock(cancellationToken);
 
-    public SegmentManifestEntry PublishSegment(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    public SegmentManifestEntry PublishSegment<TDocument>(
+        IReadOnlyList<TDocument> documents,
         ulong segmentId,
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         EnsureLayout();
         // A crash can leave this pack published but absent from the manifest; startup must sweep it.

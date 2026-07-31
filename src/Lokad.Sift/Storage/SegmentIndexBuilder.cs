@@ -8,11 +8,12 @@ internal static class SegmentIndexBuilder
     private static DirectIndexedGramBuilder? s_bigramBuilder;
     private static DirectIndexedGramBuilder? s_trigramBuilder;
 
-    public static BuiltIndex BuildContentIndex(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    public static BuiltIndex BuildContentIndex<TDocument>(
+        IReadOnlyList<TDocument> documents,
         int gramLength,
         bool caseInsensitive,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         return (gramLength, caseInsensitive) switch
         {
@@ -24,9 +25,10 @@ internal static class SegmentIndexBuilder
         };
     }
 
-    private static BuiltIndex BuildContentIndexSensitiveBigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static BuiltIndex BuildContentIndexSensitiveBigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var builder = RentBuilder(2);
         try
@@ -42,9 +44,10 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static BuiltIndex BuildContentIndexInsensitiveBigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static BuiltIndex BuildContentIndexInsensitiveBigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var builder = RentBuilder(2);
         try
@@ -60,9 +63,10 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static BuiltIndex BuildContentIndexSensitiveTrigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static BuiltIndex BuildContentIndexSensitiveTrigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var builder = RentBuilder(3);
         try
@@ -78,9 +82,10 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static BuiltIndex BuildContentIndexInsensitiveTrigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static BuiltIndex BuildContentIndexInsensitiveTrigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var builder = RentBuilder(3);
         try
@@ -96,10 +101,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    public static BuiltIndex BuildPathTrigramIndex(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    public static BuiltIndex BuildPathTrigramIndex<TDocument>(
+        IReadOnlyList<TDocument> documents,
         bool caseInsensitive,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var builder = RentBuilder(3);
         try
@@ -115,10 +121,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsSensitiveBigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountContentIndexPairsSensitiveBigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -143,10 +150,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsSensitiveBigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillContentIndexPairsSensitiveBigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -171,10 +179,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsInsensitiveBigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountContentIndexPairsInsensitiveBigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -199,10 +208,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsInsensitiveBigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillContentIndexPairsInsensitiveBigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -227,10 +237,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsSensitiveTrigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountContentIndexPairsSensitiveTrigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -255,10 +266,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsSensitiveTrigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillContentIndexPairsSensitiveTrigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -283,10 +295,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountContentIndexPairsInsensitiveTrigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountContentIndexPairsInsensitiveTrigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -311,10 +324,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillContentIndexPairsInsensitiveTrigram(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillContentIndexPairsInsensitiveTrigram<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -339,11 +353,12 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountPathIndexPairs(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountPathIndexPairs<TDocument>(
+        IReadOnlyList<TDocument> documents,
         bool caseInsensitive,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         if (caseInsensitive)
         {
@@ -355,11 +370,12 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillPathIndexPairs(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillPathIndexPairs<TDocument>(
+        IReadOnlyList<TDocument> documents,
         bool caseInsensitive,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         if (caseInsensitive)
         {
@@ -371,10 +387,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountPathIndexPairsSensitive(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountPathIndexPairsSensitive<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -399,10 +416,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillPathIndexPairsSensitive(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillPathIndexPairsSensitive<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -427,10 +445,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void CountPathIndexPairsInsensitive(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void CountPathIndexPairsInsensitive<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {
@@ -455,10 +474,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillPathIndexPairsInsensitive(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static void FillPathIndexPairsInsensitive<TDocument>(
+        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
         {

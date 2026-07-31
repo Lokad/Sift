@@ -211,52 +211,95 @@ public sealed unsafe class MappedSegment : IDisposable
     // lookup does not allocate a string for every binary-search probe.
     internal int ComparePathOrdinal(SegmentDocument document, string normalizedPath)
     {
-        var utf8 = GetPathBytes(document);
-        var utf16 = normalizedPath.AsSpan();
-        var byteIndex = 0;
+        var left = new Utf8OrdinalEnumerator(GetPathBytes(document));
         var charIndex = 0;
-        Span<char> decoded = stackalloc char[2];
-        while (byteIndex < utf8.Length && charIndex < utf16.Length)
+        while (left.MoveNext(out var leftChar))
         {
-            if (utf8[byteIndex] <= 0x7F)
+            if (charIndex >= normalizedPath.Length)
             {
-                var comparison = ((char)utf8[byteIndex]).CompareTo(utf16[charIndex]);
-                if (comparison != 0)
-                {
-                    return comparison;
-                }
-
-                byteIndex++;
-                charIndex++;
-                continue;
+                return 1;
             }
 
-            if (Rune.DecodeFromUtf8(utf8[byteIndex..], out var rune, out var consumed) != OperationStatus.Done)
+            var comparison = leftChar.CompareTo(normalizedPath[charIndex++]);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+        }
+
+        return charIndex < normalizedPath.Length ? -1 : 0;
+    }
+
+    internal static int ComparePathOrdinal(ReadOnlySpan<byte> leftUtf8, ReadOnlySpan<byte> rightUtf8)
+    {
+        var left = new Utf8OrdinalEnumerator(leftUtf8);
+        var right = new Utf8OrdinalEnumerator(rightUtf8);
+        while (true)
+        {
+            var hasLeft = left.MoveNext(out var leftChar);
+            var hasRight = right.MoveNext(out var rightChar);
+            if (!hasLeft || !hasRight)
+            {
+                return hasLeft ? 1 : hasRight ? -1 : 0;
+            }
+
+            var comparison = leftChar.CompareTo(rightChar);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+        }
+    }
+
+    private ref struct Utf8OrdinalEnumerator
+    {
+        private ReadOnlySpan<byte> _remaining;
+        private char _pendingLowSurrogate;
+
+        public Utf8OrdinalEnumerator(ReadOnlySpan<byte> utf8)
+        {
+            _remaining = utf8;
+        }
+
+        public bool MoveNext(out char value)
+        {
+            if (_pendingLowSurrogate != 0)
+            {
+                value = _pendingLowSurrogate;
+                _pendingLowSurrogate = (char)0;
+                return true;
+            }
+
+            if (_remaining.Length == 0)
+            {
+                value = default;
+                return false;
+            }
+
+            if (_remaining[0] <= 0x7F)
+            {
+                value = (char)_remaining[0];
+                _remaining = _remaining[1..];
+                return true;
+            }
+
+            if (Rune.DecodeFromUtf8(_remaining, out var rune, out var consumed) != OperationStatus.Done)
             {
                 throw new InvalidDataException("Sift segment contains an invalid UTF-8 path.");
             }
 
-            var written = rune.EncodeToUtf16(decoded);
-            for (var i = 0; i < written; i++)
+            _remaining = _remaining[consumed..];
+            if (rune.IsBmp)
             {
-                if (charIndex >= utf16.Length)
-                {
-                    return 1;
-                }
-
-                var comparison = decoded[i].CompareTo(utf16[charIndex++]);
-                if (comparison != 0)
-                {
-                    return comparison;
-                }
+                value = (char)rune.Value;
+                return true;
             }
 
-            byteIndex += consumed;
+            var supplementary = rune.Value - 0x10000;
+            value = (char)(0xD800 + (supplementary >> 10));
+            _pendingLowSurrogate = (char)(0xDC00 + (supplementary & 0x3FF));
+            return true;
         }
-
-        return byteIndex < utf8.Length
-            ? 1
-            : charIndex < utf16.Length ? -1 : 0;
     }
 
     public int[] GetLineStarts(SegmentDocument document)

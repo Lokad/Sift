@@ -6,11 +6,12 @@ public interface ISiftStorage
     bool IsReclamationPending { get; }
     IDisposable AcquireWriterLock();
     IDisposable AcquireWriterLock(CancellationToken cancellationToken);
-    SegmentManifestEntry PublishSegment(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    SegmentManifestEntry PublishSegment<TDocument>(
+        IReadOnlyList<TDocument> documents,
         ulong segmentId,
         long minimumFreeBytesAfterPublication,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument;
     void PublishManifest(CorpusManifest manifest);
     CorpusManifest ReadManifest();
     MappedSegment OpenSegment(ulong segmentId);

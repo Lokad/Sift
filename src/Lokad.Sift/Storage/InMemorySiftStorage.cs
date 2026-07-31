@@ -39,11 +39,12 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    public SegmentManifestEntry PublishSegment(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    public SegmentManifestEntry PublishSegment<TDocument>(
+        IReadOnlyList<TDocument> documents,
         ulong segmentId,
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);
         using var _ = new MappedSegment(bytes, validateChecksums: true);

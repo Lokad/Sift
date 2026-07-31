@@ -1053,7 +1053,7 @@ public sealed class Sift : ISift
             var queue = new PriorityQueue<CompactionCursor, CompactionPriority>(CompactionPriorityComparer.Instance);
             for (var i = 0; i < cursors.Count; i++)
             {
-                queue.Enqueue(cursors[i], new CompactionPriority(cursors[i].Current.Path));
+                queue.Enqueue(cursors[i], new CompactionPriority(cursors[i].Current));
             }
 
             var currentPartition = new List<CompactionDocument>();
@@ -1086,7 +1086,7 @@ public sealed class Sift : ISift
 
                 if (cursor.MoveNext())
                 {
-                    queue.Enqueue(cursor, new CompactionPriority(cursor.Current.Path));
+                    queue.Enqueue(cursor, new CompactionPriority(cursor.Current));
                 }
             }
 
@@ -1272,7 +1272,7 @@ public sealed class Sift : ISift
         }
     }
 
-    private readonly record struct CompactionPriority(string Path);
+    private readonly record struct CompactionPriority(CompactionDocument Document);
 
     private sealed class CompactionPriorityComparer : IComparer<CompactionPriority>
     {
@@ -1281,7 +1281,9 @@ public sealed class Sift : ISift
         public int Compare(CompactionPriority left, CompactionPriority right)
         {
             // Segment lookup uses UTF-16 ordinal ordering, which differs from UTF-8 byte order.
-            return string.CompareOrdinal(left.Path, right.Path);
+            return MappedSegment.ComparePathOrdinal(
+                left.Document.GetPathUtf8(),
+                right.Document.GetPathUtf8());
         }
     }
 
@@ -1317,7 +1319,7 @@ public sealed class Sift : ISift
                     continue;
                 }
 
-                _current = CreateCompactionDocument(Segment, Segment.GetDocument(ordinal));
+                _current = new CompactionDocument(Segment, Segment.GetDocument(ordinal));
                 return true;
             }
 
@@ -1330,19 +1332,6 @@ public sealed class Sift : ISift
         }
     }
 
-    private static CompactionDocument CreateCompactionDocument(MappedSegment segment, SegmentDocument document)
-    {
-        return new CompactionDocument
-        {
-            Segment = segment,
-            Document = document,
-            Path = segment.GetPath(document),
-            LineCount = document.LineCount,
-            Flags = document.Flags,
-            MTimeUtcTicks = document.MTimeUtcTicks,
-            ContentHash64 = document.ContentHash64
-        };
-    }
 }
 
 internal readonly record struct CompactionPublication(
@@ -1350,15 +1339,14 @@ internal readonly record struct CompactionPublication(
     int MergedDocuments,
     long ContentBytes);
 
-internal sealed class CompactionDocument : ISegmentBuildDocument
+internal readonly record struct CompactionDocument(
+    MappedSegment Segment,
+    SegmentDocument Document) : ISegmentBuildDocument
 {
-    public required MappedSegment Segment { get; init; }
-    public required SegmentDocument Document { get; init; }
-    public required string Path { get; init; }
-    public required int LineCount { get; init; }
-    public required ushort Flags { get; init; }
-    public required long MTimeUtcTicks { get; init; }
-    public required ulong ContentHash64 { get; init; }
+    public int LineCount => Document.LineCount;
+    public ushort Flags => Document.Flags;
+    public long MTimeUtcTicks => Document.MTimeUtcTicks;
+    public ulong ContentHash64 => Document.ContentHash64;
     public int ContentLength => Document.ContentLength;
 
     public ReadOnlySpan<byte> GetPathUtf8()

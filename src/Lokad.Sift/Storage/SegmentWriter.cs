@@ -5,13 +5,14 @@ namespace Lokad.Sift.Storage;
 
 internal static unsafe class SegmentWriter
 {
-    public static long Write(
+    public static long Write<TDocument>(
         string path,
         string tempPath,
         ulong segmentId,
-        IReadOnlyList<ISegmentBuildDocument> documents,
+        IReadOnlyList<TDocument> documents,
         Action<long> ensureCapacity,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         _ = tempPath;
         var prepared = Prepare(documents, cancellationToken);
@@ -53,7 +54,8 @@ internal static unsafe class SegmentWriter
         return prepared.ContentBlobLength;
     }
 
-    public static (byte[] Bytes, long ContentBytes) WriteToBytes(ulong segmentId, IReadOnlyList<ISegmentBuildDocument> documents, CancellationToken cancellationToken)
+    public static (byte[] Bytes, long ContentBytes) WriteToBytes<TDocument>(ulong segmentId, IReadOnlyList<TDocument> documents, CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         var prepared = Prepare(documents, cancellationToken);
         var bytes = GC.AllocateUninitializedArray<byte>(prepared.TotalLength);
@@ -61,9 +63,10 @@ internal static unsafe class SegmentWriter
         return (bytes, prepared.ContentBlobLength);
     }
 
-    private static PreparedSegment Prepare(
-        IReadOnlyList<ISegmentBuildDocument> documents,
+    private static PreparedSegment Prepare<TDocument>(
+        IReadOnlyList<TDocument> documents,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         // Build indexes sequentially so one segment cannot retain four 64 MiB trigram
         // workspaces plus their variable postings state at the same time.
@@ -129,12 +132,13 @@ internal static unsafe class SegmentWriter
             totalLength);
     }
 
-    private static void WritePrepared(
+    private static void WritePrepared<TDocument>(
         Span<byte> bytes,
         ulong segmentId,
-        IReadOnlyList<ISegmentBuildDocument> documents,
+        IReadOnlyList<TDocument> documents,
         PreparedSegment prepared,
         CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument
     {
         if (bytes.Length != prepared.TotalLength)
         {
