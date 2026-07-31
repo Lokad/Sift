@@ -404,14 +404,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                             !CanUseUtf8RegexForDocument(document);
                         string? predecodedText = null;
                         if (!needsUnicodeCaseFoldVerification &&
-                            !PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out predecodedText))
+                            !PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, cancellationToken, ref decodedChars, out predecodedText))
                         {
                             continue;
                         }
 
                         if (!needsUnicodeCaseFoldVerification &&
                             useOrderedAnchorPrecheck &&
-                            !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
+                            !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups, cancellationToken))
                         {
                             continue;
                         }
@@ -421,7 +421,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         var documentHitLimit = GetDocumentHitLimit(hitsReturned, query);
                         if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
                         {
-                            SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
+                            SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, cancellationToken, ref decodedChars, ref hitsReturned, ref stopReason, predecodedText, regexPlan.ExactLiteral);
                         }
                         else if (preparedRegex.Utf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
                         {
@@ -594,7 +594,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                     pathVisibility,
                                     watch,
                                     bufferedCollector,
-                                    batchCancellation.Token);
+                                    batchCancellation.Token,
+                                    cancellationToken);
+                            }
+                            catch (OperationCanceledException) when (
+                                batchCancellation.IsCancellationRequested &&
+                                !cancellationToken.IsCancellationRequested)
+                            {
+                                // The ordering thread cancels the private batch token when
+                                // the caller collector asks the search to stop.
                             }
                             catch (Exception exception)
                             {
@@ -1154,7 +1162,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IPathVisibility? pathVisibility,
         Stopwatch watch,
         IHitCollector collector,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken operationCancellationToken)
     {
         var segmentPlan = SearchPlanner.CreateSegmentPlan(
             cache,
@@ -1197,7 +1206,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         foreach (var ordinal in candidates.Ordinals)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                operationCancellationToken.ThrowIfCancellationRequested();
+                segmentStopReason = SearchStopReason.Cancelled;
+                break;
+            }
+
             if (HasElapsed(query, watch))
             {
                 segmentStopReason = SearchStopReason.MaxElapsedTime;
@@ -1247,14 +1262,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 !CanUseUtf8RegexForDocument(document);
             string? predecodedText = null;
             if (!needsUnicodeCaseFoldVerification &&
-                !PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, ref decodedChars, out predecodedText))
+                !PassesMandatoryPrecheck(contentBytes, mandatoryFragments, preparedMandatoryFragments, resolvedCaseMode, operationCancellationToken, ref decodedChars, out predecodedText))
             {
                 continue;
             }
 
             if (!needsUnicodeCaseFoldVerification &&
                 useOrderedAnchorPrecheck &&
-                !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups))
+                !PassesOrderedAnchorPrecheck(contentBytes, preparedOrderedAnchorGroups, operationCancellationToken))
             {
                 continue;
             }
@@ -1266,7 +1281,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var documentStopReason = SearchStopReason.None;
             if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)
             {
-                SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref documentStopReason, predecodedText, regexPlan.ExactLiteral);
+                SearchLiteralDocument(cache.Segment, document, query, resolvedCaseMode, preparedLiteral, documentHitLimit, collector, operationCancellationToken, ref decodedChars, ref hitsReturned, ref documentStopReason, predecodedText, regexPlan.ExactLiteral);
             }
             else if (preparedRegex.Utf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
             {
@@ -1331,6 +1346,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         PreparedLiteralQuery? preparedLiteral,
         int hitLimit,
         IHitCollector collector,
+        CancellationToken cancellationToken,
         ref long decodedChars,
         ref int hitsReturned,
         ref SearchStopReason stopReason,
@@ -1360,7 +1376,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             asciiNeedle &&
             (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
         {
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, hitLimit, collector, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, prefixTable: null, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1369,7 +1385,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
         {
             var loweredNeedle = preparedLiteral?.LoweredAsciiNeedle ?? LowerAscii(needle);
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, hitLimit, collector, ref hitsReturned, ref stopReason);
+            var prefixTable = preparedLiteral?.AsciiPrefixTable ?? BuildPrefixTable(loweredNeedle);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1384,6 +1401,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         while (searchIndex <= text.Length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (hitsReturned >= hitLimit)
             {
                 return;
@@ -1430,7 +1448,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, bool wholeWord, bool wholeLine, bool caseSensitive, int hitLimit, IHitCollector collector, ref int hitsReturned, ref SearchStopReason stopReason)
+    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[]? prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ref int hitsReturned, ref SearchStopReason stopReason)
     {
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)
@@ -1442,7 +1460,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
             var relativeIndex = caseSensitive
                 ? contentBytes[offset..].IndexOf(needle)
-                : IndexOfAsciiInsensitive(contentBytes[offset..], needle);
+                : IndexOfAsciiInsensitive(contentBytes[offset..], needle, prefixTable!, cancellationToken);
             if (relativeIndex < 0)
             {
                 return;
@@ -1482,7 +1500,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, string[] mandatoryFragments, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, ref long decodedChars, out string? predecodedText)
+    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, string[] mandatoryFragments, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken, ref long decodedChars, out string? predecodedText)
     {
         predecodedText = null;
         if (mandatoryFragments.Length == 0)
@@ -1494,6 +1512,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             foreach (var fragment in preparedMandatoryFragments)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (contentBytes.IndexOf(fragment.Utf8Bytes) < 0)
                 {
                     return false;
@@ -1519,6 +1538,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             decodedChars += predecodedText.Length;
             foreach (var fragment in mandatoryFragments)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (predecodedText.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     return false;
@@ -1530,30 +1550,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         foreach (var fragment in preparedMandatoryFragments)
         {
-            var loweredAsciiBytes = fragment.LoweredAsciiBytes;
-            var found = false;
-            for (var i = 0; i <= contentBytes.Length - loweredAsciiBytes.Length; i++)
-            {
-                var matches = true;
-                for (var j = 0; j < loweredAsciiBytes.Length; j++)
-                {
-                    var current = contentBytes[i + j];
-                    current = current is >= (byte)'A' and <= (byte)'Z' ? (byte)(current + 32) : current;
-                    if (current != loweredAsciiBytes[j])
-                    {
-                        matches = false;
-                        break;
-                    }
-                }
-
-                if (matches)
-                {
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found)
+            if (IndexOfAsciiInsensitive(
+                    contentBytes,
+                    fragment.LoweredAsciiBytes,
+                    fragment.AsciiPrefixTable,
+                    cancellationToken) < 0)
             {
                 return false;
             }
@@ -1562,28 +1563,33 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return true;
     }
 
-    private static bool PassesOrderedAnchorPrecheck(ReadOnlySpan<byte> contentBytes, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups)
+    private static bool PassesOrderedAnchorPrecheck(ReadOnlySpan<byte> contentBytes, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, CancellationToken cancellationToken)
     {
         if (preparedOrderedAnchorGroups.Length == 0)
         {
             return true;
         }
 
+        var maximumGroupLength = preparedOrderedAnchorGroups.Max(static group => group.Length);
+        Span<int> nextStartsBuffer = stackalloc int[maximumGroupLength];
+        Span<int> latestReachableEndsBuffer = stackalloc int[maximumGroupLength];
         for (var groupIndex = 0; groupIndex < preparedOrderedAnchorGroups.Length; groupIndex++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var group = preparedOrderedAnchorGroups[groupIndex];
-            Span<int> nextStarts = stackalloc int[group.Length];
-            Span<int> latestReachableEnds = stackalloc int[group.Length];
+            var nextStarts = nextStartsBuffer[..group.Length];
+            var latestReachableEnds = latestReachableEndsBuffer[..group.Length];
             latestReachableEnds.Fill(-1);
             // A later reachable prefix end is never worse for an upper-gap or same-line constraint.
             for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
             {
                 var anchor = group[anchorIndex];
-                nextStarts[anchorIndex] = FindOrderedAnchor(contentBytes, anchor, searchStart: 0);
+                nextStarts[anchorIndex] = FindOrderedAnchor(contentBytes, anchor, searchStart: 0, cancellationToken);
             }
 
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var nextStart = int.MaxValue;
                 for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
                 {
@@ -1598,7 +1604,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     break;
                 }
 
-                for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
+                // Process downstream anchors first so equal-position occurrences
+                // observe the preceding anchor state from before this event.
+                for (var anchorIndex = group.Length - 1; anchorIndex >= 0; anchorIndex--)
                 {
                     if (nextStarts[anchorIndex] != nextStart)
                     {
@@ -1618,7 +1626,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
                         if (reachable && anchor.SameLineFromPrevious)
                         {
-                            reachable = IndexOfLineBreak(contentBytes[previousEnd..nextStart]) < 0;
+                            reachable = IndexOfLineBreak(contentBytes[previousEnd..nextStart], cancellationToken) < 0;
                         }
                     }
 
@@ -1634,7 +1642,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     nextStarts[anchorIndex] = FindOrderedAnchor(
                         contentBytes,
                         anchor,
-                        searchStart: nextStart + 1);
+                        searchStart: nextStart + 1,
+                        cancellationToken);
                 }
             }
         }
@@ -1645,7 +1654,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private static int FindOrderedAnchor(
         ReadOnlySpan<byte> contentBytes,
         PreparedOrderedAnchor anchor,
-        int searchStart)
+        int searchStart,
+        CancellationToken cancellationToken)
     {
         if (searchStart > contentBytes.Length - anchor.Utf8Bytes.Length)
         {
@@ -1654,7 +1664,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         var relative = anchor.LoweredAsciiBytes is null
             ? contentBytes[searchStart..].IndexOf(anchor.Utf8Bytes)
-            : IndexOfAsciiInsensitive(contentBytes[searchStart..], anchor.LoweredAsciiBytes);
+            : IndexOfAsciiInsensitive(contentBytes[searchStart..], anchor.LoweredAsciiBytes, anchor.AsciiPrefixTable!, cancellationToken);
         return relative < 0 ? -1 : searchStart + relative;
     }
 
@@ -1703,10 +1713,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return true;
     }
 
-    private static int IndexOfLineBreak(ReadOnlySpan<byte> haystack)
+    private static int IndexOfLineBreak(ReadOnlySpan<byte> haystack, CancellationToken cancellationToken)
     {
         for (var i = 0; i < haystack.Length; i++)
         {
+            if ((i & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             if (haystack[i] is (byte)'\r' or (byte)'\n')
             {
                 return i;
@@ -1716,32 +1731,61 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return -1;
     }
 
-    private static int IndexOfAsciiInsensitive(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle)
+    private static int IndexOfAsciiInsensitive(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle, ReadOnlySpan<int> prefixTable, CancellationToken cancellationToken)
     {
         if (loweredNeedle.Length == 0)
         {
             return 0;
         }
 
-        for (var start = 0; start <= haystack.Length - loweredNeedle.Length; start++)
+        cancellationToken.ThrowIfCancellationRequested();
+        var matched = 0;
+        for (var i = 0; i < haystack.Length; i++)
         {
-            var matches = true;
-            for (var i = 0; i < loweredNeedle.Length; i++)
+            if ((i & 0xFFF) == 0)
             {
-                if (FoldAscii(haystack[start + i]) != loweredNeedle[i])
-                {
-                    matches = false;
-                    break;
-                }
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
-            if (matches)
+            var current = FoldAscii(haystack[i]);
+            while (matched > 0 && current != loweredNeedle[matched])
             {
-                return start;
+                matched = prefixTable[matched - 1];
+            }
+
+            if (current == loweredNeedle[matched])
+            {
+                matched++;
+                if (matched == loweredNeedle.Length)
+                {
+                    return i - loweredNeedle.Length + 1;
+                }
             }
         }
 
         return -1;
+    }
+
+    private static int[] BuildPrefixTable(ReadOnlySpan<byte> needle)
+    {
+        var prefixTable = new int[needle.Length];
+        var matched = 0;
+        for (var i = 1; i < needle.Length; i++)
+        {
+            while (matched > 0 && needle[i] != needle[matched])
+            {
+                matched = prefixTable[matched - 1];
+            }
+
+            if (needle[i] == needle[matched])
+            {
+                matched++;
+            }
+
+            prefixTable[i] = matched;
+        }
+
+        return prefixTable;
     }
 
     private static byte FoldAscii(byte value)
@@ -1776,7 +1820,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var loweredAsciiNeedle = resolvedCaseMode == CaseMode.Insensitive && isAscii
             ? LowerAscii(needle)
             : null;
-        return new PreparedLiteralQuery(needle, loweredAsciiNeedle, isAscii);
+        return new PreparedLiteralQuery(
+            needle,
+            loweredAsciiNeedle,
+            loweredAsciiNeedle is null ? null : BuildPrefixTable(loweredAsciiNeedle),
+            isAscii);
     }
 
     private static PreparedMandatoryFragment[] PrepareMandatoryFragments(
@@ -1794,10 +1842,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var text = mandatoryAnchors[i].Text;
             var utf8Bytes = Encoding.UTF8.GetBytes(text);
             var isAscii = utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
+            var loweredAsciiBytes = resolvedCaseMode == CaseMode.Insensitive && isAscii
+                ? LowerAscii(utf8Bytes)
+                : [];
             prepared[i] = new PreparedMandatoryFragment(
                 text,
                 utf8Bytes,
-                resolvedCaseMode == CaseMode.Insensitive && isAscii ? LowerAscii(utf8Bytes) : [],
+                loweredAsciiBytes,
+                BuildPrefixTable(loweredAsciiBytes),
                 isAscii);
         }
 
@@ -1820,7 +1872,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             {
                 var anchor = group[anchorIndex];
                 var lowered = anchor.IgnoreCase ? LowerAscii(anchor.Utf8Bytes) : null;
-                prepared[groupIndex][anchorIndex] = new PreparedOrderedAnchor(anchor.Utf8Bytes, lowered, anchor.MaxGapBytesFromPrevious, anchor.SameLineFromPrevious);
+                prepared[groupIndex][anchorIndex] = new PreparedOrderedAnchor(
+                    anchor.Utf8Bytes,
+                    lowered,
+                    lowered is null ? null : BuildPrefixTable(lowered),
+                    anchor.MaxGapBytesFromPrevious,
+                    anchor.SameLineFromPrevious);
             }
         }
 
@@ -2234,15 +2291,17 @@ internal readonly struct SnapshotOperation : IDisposable
 
 internal sealed class PreparedLiteralQuery
 {
-    public PreparedLiteralQuery(byte[] needle, byte[]? loweredAsciiNeedle, bool isAscii)
+    public PreparedLiteralQuery(byte[] needle, byte[]? loweredAsciiNeedle, int[]? asciiPrefixTable, bool isAscii)
     {
         Needle = needle;
         LoweredAsciiNeedle = loweredAsciiNeedle;
+        AsciiPrefixTable = asciiPrefixTable;
         IsAscii = isAscii;
     }
 
     public byte[] Needle { get; }
     public byte[]? LoweredAsciiNeedle { get; }
+    public int[]? AsciiPrefixTable { get; }
     public bool IsAscii { get; }
 }
 
@@ -2252,26 +2311,29 @@ internal readonly record struct PreparedRegexExecution(
 
 internal sealed class PreparedMandatoryFragment
 {
-    public PreparedMandatoryFragment(string text, byte[] utf8Bytes, byte[] loweredAsciiBytes, bool isAscii)
+    public PreparedMandatoryFragment(string text, byte[] utf8Bytes, byte[] loweredAsciiBytes, int[] asciiPrefixTable, bool isAscii)
     {
         Text = text;
         Utf8Bytes = utf8Bytes;
         LoweredAsciiBytes = loweredAsciiBytes;
+        AsciiPrefixTable = asciiPrefixTable;
         IsAscii = isAscii;
     }
 
     public string Text { get; }
     public byte[] Utf8Bytes { get; }
     public byte[] LoweredAsciiBytes { get; }
+    public int[] AsciiPrefixTable { get; }
     public bool IsAscii { get; }
 }
 
 internal sealed class PreparedOrderedAnchor
 {
-    public PreparedOrderedAnchor(byte[] utf8Bytes, byte[]? loweredAsciiBytes, int? maxGapBytesFromPrevious, bool sameLineFromPrevious)
+    public PreparedOrderedAnchor(byte[] utf8Bytes, byte[]? loweredAsciiBytes, int[]? asciiPrefixTable, int? maxGapBytesFromPrevious, bool sameLineFromPrevious)
     {
         Utf8Bytes = utf8Bytes;
         LoweredAsciiBytes = loweredAsciiBytes;
+        AsciiPrefixTable = asciiPrefixTable;
         MaxGapBytesFromPrevious = maxGapBytesFromPrevious;
         SameLineFromPrevious = sameLineFromPrevious;
     }
@@ -2279,6 +2341,8 @@ internal sealed class PreparedOrderedAnchor
     public byte[] Utf8Bytes { get; }
 
     public byte[]? LoweredAsciiBytes { get; }
+
+    public int[]? AsciiPrefixTable { get; }
 
     public int? MaxGapBytesFromPrevious { get; }
 

@@ -1974,8 +1974,10 @@ public sealed class SearchIntegrationTests
         Assert.Equal(1, stats.HitsReturned);
     }
 
-    [Fact]
-    public async Task SegmentParallelSearchPropagatesCollectorCancellation()
+    [Theory]
+    [InlineData(CaseMode.Sensitive)]
+    [InlineData(CaseMode.Insensitive)]
+    public async Task SegmentParallelSearchPropagatesCollectorCancellation(CaseMode caseMode)
     {
         var repeatedMatches = string.Join(' ', Enumerable.Repeat("needle", 2_000));
         var documents = Enumerable.Range(0, 8)
@@ -1990,7 +1992,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 4));
 
         var stats = snapshot.Search(
-            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
+            new SearchQuery("needle", PatternMode.Literal, caseMode)
             {
                 MaxHits = int.MaxValue,
                 MaxDocuments = int.MaxValue,
@@ -2002,6 +2004,33 @@ public sealed class SearchIntegrationTests
         Assert.Equal(SearchStopReason.Cancelled, stats.StopReason);
         Assert.Equal(1, stats.VerifiedDocuments);
         Assert.Equal(1, stats.HitsReturned);
+    }
+
+    [Fact]
+    public async Task AsciiInsensitivePrecheckObservesTheSearchDeadlineWithinADocument()
+    {
+        const int contentLength = 16 * 1024 * 1024;
+        var pattern = new string('a', 2_047) + 'b';
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            MaxDocumentBytes = contentLength,
+            DirectScanScopeBytesThreshold = long.MaxValue
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/large.txt", new string('a', contentLength))
+        ]));
+        using var snapshot = index.OpenSnapshot();
+
+        var stats = snapshot.Search(
+            new SearchQuery(pattern, PatternMode.Literal, CaseMode.Insensitive)
+            {
+                MaxElapsedMilliseconds = 1,
+                MaxBytesScanned = long.MaxValue
+            },
+            new PathFilter(),
+            new HitBuffer());
+
+        Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
     }
 
     [Fact]
