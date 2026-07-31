@@ -1,5 +1,6 @@
 using System.Text;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
@@ -15,9 +16,12 @@ internal static class Utf8RegexEngine
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
     internal static int CacheCount => Cache.Count;
 
-    public static bool TryCompile(in SearchQuery query, CaseMode resolvedCaseMode, out Utf8RegexProgram program)
+    public static bool TryCompile(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        [NotNullWhen(true)] out Utf8RegexProgram? program)
     {
-        program = default!;
+        program = null;
         var pattern = RegexVerifier.BuildPattern(query);
         if (query.PatternMode != PatternMode.Regex ||
             resolvedCaseMode == CaseMode.Smart ||
@@ -165,10 +169,14 @@ internal static class Utf8RegexEngine
             _ignoreCase = ignoreCase;
         }
 
-        public bool TryParse(out Utf8RegexNode root, out bool multiline, out bool dotAll, out bool ignoreCase)
+        public bool TryParse(
+            [NotNullWhen(true)] out Utf8RegexNode? root,
+            out bool multiline,
+            out bool dotAll,
+            out bool ignoreCase)
         {
-            root = default!;
-            if (!TryParseExpression(out root))
+            root = null;
+            if (!TryParseExpression(out var parsedRoot))
             {
                 multiline = default;
                 dotAll = default;
@@ -184,15 +192,16 @@ internal static class Utf8RegexEngine
                 return false;
             }
 
+            root = parsedRoot;
             multiline = _multiline;
             dotAll = _dotAll;
             ignoreCase = _ignoreCase;
             return true;
         }
 
-        private bool TryParseExpression(out Utf8RegexNode node)
+        private bool TryParseExpression([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             if (!TryParseSequence(out var first))
             {
                 return false;
@@ -214,9 +223,9 @@ internal static class Utf8RegexEngine
             return true;
         }
 
-        private bool TryParseSequence(out Utf8RegexNode node)
+        private bool TryParseSequence([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             var children = new List<Utf8RegexNode>();
             while (_index < _pattern.Length &&
                    _pattern[_index] != ')' &&
@@ -239,9 +248,9 @@ internal static class Utf8RegexEngine
             return true;
         }
 
-        private bool TryParseQuantified(out Utf8RegexNode node)
+        private bool TryParseQuantified([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             if (!TryParseAtom(out var atom))
             {
                 return false;
@@ -256,9 +265,9 @@ internal static class Utf8RegexEngine
             return true;
         }
 
-        private bool TryParseAtom(out Utf8RegexNode node)
+        private bool TryParseAtom([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             if (_index >= _pattern.Length)
             {
                 return false;
@@ -314,9 +323,9 @@ internal static class Utf8RegexEngine
             }
         }
 
-        private bool TryParseGroup(out Utf8RegexNode node)
+        private bool TryParseGroup([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             if (_index < _pattern.Length && _pattern[_index] == '?')
             {
                 if (_index + 1 >= _pattern.Length || _pattern[_index + 1] != ':')
@@ -335,9 +344,9 @@ internal static class Utf8RegexEngine
             return Consume(')');
         }
 
-        private bool TryParseCharClass(out Utf8RegexNode node)
+        private bool TryParseCharClass([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             if (_index >= _pattern.Length)
             {
                 return false;
@@ -603,9 +612,9 @@ internal static class Utf8RegexEngine
             return true;
         }
 
-        private bool TryParseBoundary(out Utf8RegexNode node)
+        private bool TryParseBoundary([NotNullWhen(true)] out Utf8RegexNode? node)
         {
-            node = default!;
+            node = null;
             if (_index >= _pattern.Length)
             {
                 return false;
@@ -1234,9 +1243,15 @@ internal static class Utf8RegexEngine
             {
                 case Utf8RegexAtomKind.CharClass:
                     {
+                        if (atom.AsciiSet is not { } asciiSet)
+                        {
+                            separator = default;
+                            return false;
+                        }
+
                         var excludesNewline = atom.Negated
-                            ? atom.AsciiSet![(byte)'\r'] && atom.AsciiSet[(byte)'\n']
-                            : !atom.AsciiSet![(byte)'\r'] && !atom.AsciiSet[(byte)'\n'];
+                            ? asciiSet[(byte)'\r'] && asciiSet[(byte)'\n']
+                            : !asciiSet[(byte)'\r'] && !asciiSet[(byte)'\n'];
                         separator = new OrderedAnchorSeparator(1, excludesNewline);
                         return true;
                     }

@@ -98,10 +98,10 @@ switch (command)
         return 1;
 }
 
-static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments, PatternMode defaultPatternMode = PatternMode.Regex)
+static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
 {
     var pattern = arguments[0];
-    var patternMode = defaultPatternMode;
+    var patternMode = PatternMode.Regex;
     var caseMode = CaseMode.Smart;
     var wholeWord = false;
     var wholeLine = false;
@@ -243,8 +243,24 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments, Patte
     }
 
     return new SearchCliOptions(
-        new SearchQuery(pattern, patternMode, caseMode, wholeWord, wholeLine, multiline, dotAll, maxHits, maxDocuments, maxBytesScanned, timeoutPolicy),
-        new PathFilter(pathPrefix, includeGlobs.Count == 0 ? null : [.. includeGlobs], excludeGlobs.Count == 0 ? null : [.. excludeGlobs], pathRegex),
+        new SearchQuery(pattern, patternMode, caseMode)
+        {
+            WholeWord = wholeWord,
+            WholeLine = wholeLine,
+            Multiline = multiline,
+            DotAll = dotAll,
+            MaxHits = maxHits,
+            MaxDocuments = maxDocuments,
+            MaxBytesScanned = maxBytesScanned,
+            TimeoutPolicy = timeoutPolicy
+        },
+        new PathFilter
+        {
+            PathPrefix = pathPrefix,
+            IncludeGlobs = includeGlobs.Count == 0 ? null : [.. includeGlobs],
+            ExcludeGlobs = excludeGlobs.Count == 0 ? null : [.. excludeGlobs],
+            PathRegex = pathRegex
+        },
         contextBefore,
         contextAfter);
 }

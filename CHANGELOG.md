@@ -1,0 +1,16 @@
+# Changelog
+
+## 0.2.0 - Unreleased
+
+### Breaking changes
+
+- Replaced optional method and constructor parameters with explicit overloads and
+  mandatory full signatures.
+- Reworked `SearchQuery`, `SearchOptions`, `PathFilter`, and
+  `SubmittedDocument` as explicit-constructor contracts with init-only
+  properties. Callers using the former positional-record named arguments must
+  use the new constructors or object initializers.
+- Changed `CompactOptions` from a value type to a reference type and moved
+  partial configuration to object initializers.
+- Removed nullable `SiftOptions` entry points; callers either omit the options
+  through the dedicated overload or provide a non-null instance.

@@ -277,12 +277,65 @@ internal readonly record struct LiteralPlan(
     SelectedGram[] SelectedGrams,
     IndexRegionPair IndexPair,
     int GramLength,
-    int[]? UnionGroupLengths = null)
+    int[]? UnionGroupLengths)
 {
     public static LiteralPlan Direct(CaseMode resolvedCaseMode, int scopeDocuments, long scopeBytes)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, false, false, false, string.Empty, [], default, 0);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, false, false, false, string.Empty, [], default, 0, null);
 
-    public static LiteralPlan Indexed(CaseMode resolvedCaseMode, int scopeDocuments, long scopeBytes, string mandatoryFragment, SelectedGram[] selectedGrams, IndexRegionPair pair, int gramLength, bool isMissing, bool unionCandidates = false, int[]? unionGroupLengths = null)
+    public static LiteralPlan Indexed(
+        CaseMode resolvedCaseMode,
+        int scopeDocuments,
+        long scopeBytes,
+        string mandatoryFragment,
+        SelectedGram[] selectedGrams,
+        IndexRegionPair pair,
+        int gramLength,
+        bool isMissing)
+        => Indexed(
+            resolvedCaseMode,
+            scopeDocuments,
+            scopeBytes,
+            mandatoryFragment,
+            selectedGrams,
+            pair,
+            gramLength,
+            isMissing,
+            unionCandidates: false,
+            unionGroupLengths: null);
+
+    public static LiteralPlan Indexed(
+        CaseMode resolvedCaseMode,
+        int scopeDocuments,
+        long scopeBytes,
+        string mandatoryFragment,
+        SelectedGram[] selectedGrams,
+        IndexRegionPair pair,
+        int gramLength,
+        bool isMissing,
+        bool unionCandidates)
+        => Indexed(
+            resolvedCaseMode,
+            scopeDocuments,
+            scopeBytes,
+            mandatoryFragment,
+            selectedGrams,
+            pair,
+            gramLength,
+            isMissing,
+            unionCandidates,
+            unionGroupLengths: null);
+
+    public static LiteralPlan Indexed(
+        CaseMode resolvedCaseMode,
+        int scopeDocuments,
+        long scopeBytes,
+        string mandatoryFragment,
+        SelectedGram[] selectedGrams,
+        IndexRegionPair pair,
+        int gramLength,
+        bool isMissing,
+        bool unionCandidates,
+        int[]? unionGroupLengths)
         => new(resolvedCaseMode, scopeDocuments, scopeBytes, true, unionCandidates, isMissing, mandatoryFragment, selectedGrams, pair, gramLength, unionGroupLengths);
 }
 

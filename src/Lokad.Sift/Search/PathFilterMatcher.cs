@@ -15,7 +15,9 @@ internal sealed class PathFilterMatcher
 
     public PathFilterMatcher(in PathFilter filter)
     {
-        _pathPrefix = string.IsNullOrWhiteSpace(filter.PathPrefix) ? null : filter.PathPrefix!.Replace('\\', '/');
+        _pathPrefix = filter.PathPrefix is { } pathPrefix && !string.IsNullOrWhiteSpace(pathPrefix)
+            ? pathPrefix.Replace('\\', '/')
+            : null;
         _pathPrefixUtf8 = _pathPrefix is null ? [] : System.Text.Encoding.UTF8.GetBytes(_pathPrefix);
         _includes = CompileGlobs(filter.IncludeGlobs);
         _excludes = CompileGlobs(filter.ExcludeGlobs);
@@ -407,7 +409,9 @@ internal sealed class GlobMatcher
             GlobMatcherKind.PrefixRecursive => path.StartsWith(_value, StringComparison.Ordinal),
             GlobMatcherKind.SingleSegmentWildcard => MatchSingleSegmentWildcard(path),
             GlobMatcherKind.RecursiveSuffix => MatchRecursiveSuffix(path),
-            _ => _regex!.IsMatch(path)
+            GlobMatcherKind.Regex => (_regex
+                ?? throw new InvalidOperationException("A regex glob must have a compiled expression.")).IsMatch(path),
+            _ => throw new InvalidOperationException($"Unsupported glob matcher kind '{_kind}'.")
         };
     }
 

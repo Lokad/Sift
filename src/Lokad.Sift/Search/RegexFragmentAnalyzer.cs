@@ -25,7 +25,12 @@ internal static class RegexFragmentAnalyzer
         return true;
     }
 
-    public static string[] ExtractMandatoryFragments(string pattern, int limit = 8)
+    public static string[] ExtractMandatoryFragments(string pattern)
+    {
+        return ExtractMandatoryFragments(pattern, limit: 8);
+    }
+
+    public static string[] ExtractMandatoryFragments(string pattern, int limit)
     {
         if (string.IsNullOrEmpty(pattern))
         {
@@ -42,12 +47,22 @@ internal static class RegexFragmentAnalyzer
         return SelectBestFragments(result.Fragments, limit);
     }
 
-    public static string[] ExtractAdvisorySeeds(string pattern, int limit = 8)
+    public static string[] ExtractAdvisorySeeds(string pattern)
+    {
+        return ExtractAdvisorySeeds(pattern, limit: 8);
+    }
+
+    public static string[] ExtractAdvisorySeeds(string pattern, int limit)
     {
         return AnalyzeAdvisorySeeds(pattern, limit).Seeds;
     }
 
-    public static AdvisorySeedPlan AnalyzeAdvisorySeeds(string pattern, int limit = 8)
+    public static AdvisorySeedPlan AnalyzeAdvisorySeeds(string pattern)
+    {
+        return AnalyzeAdvisorySeeds(pattern, limit: 8);
+    }
+
+    public static AdvisorySeedPlan AnalyzeAdvisorySeeds(string pattern, int limit)
     {
         if (string.IsNullOrEmpty(pattern))
         {
@@ -162,7 +177,12 @@ internal static class RegexFragmentAnalyzer
         private bool _unsupported;
         private bool _requiresIgnoreCase;
 
-        public Parser(string pattern, int limit, bool advisoryMode = false)
+        public Parser(string pattern, int limit)
+            : this(pattern, limit, advisoryMode: false)
+        {
+        }
+
+        public Parser(string pattern, int limit, bool advisoryMode)
         {
             _pattern = pattern;
             _limit = limit;

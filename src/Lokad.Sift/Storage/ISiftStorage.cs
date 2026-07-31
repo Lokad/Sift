@@ -4,7 +4,8 @@ public interface ISiftStorage
 {
     bool HasManifest { get; }
     bool IsReclamationPending { get; }
-    IDisposable AcquireWriterLock(CancellationToken cancellationToken = default);
+    IDisposable AcquireWriterLock();
+    IDisposable AcquireWriterLock(CancellationToken cancellationToken);
     SegmentManifestEntry PublishSegment(
         IReadOnlyList<ISegmentBuildDocument> documents,
         ulong segmentId,
@@ -12,7 +13,8 @@ public interface ISiftStorage
         CancellationToken cancellationToken);
     void PublishManifest(CorpusManifest manifest);
     CorpusManifest ReadManifest();
-    MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken = default);
+    MappedSegment OpenSegment(ulong segmentId);
+    MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken);
     long GetSegmentBytes(ulong segmentId);
     long? GetAvailableBytes();
     void EnsureSnapshotMetadata();

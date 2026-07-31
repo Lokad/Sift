@@ -244,7 +244,7 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
         await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), [new DocumentKey("src/b.txt")]);
 
-        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        var compact = await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
         Assert.Equal(1, compact.InputSegments);
         Assert.Equal(0, compact.OutputSegments);
         Assert.Equal(0, compact.ContentBytes);
@@ -402,7 +402,7 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
         await index.Update(new InMemoryDocumentSource([("src/000000.txt", "omega\n")]), []);
 
-        var compact = await index.Compact(new CompactOptions(MaxMergedSegments: 1, SegmentCountTrigger: 1));
+        var compact = await index.Compact(new CompactOptions { MaxMergedSegments = 1, SegmentCountTrigger = 1 });
 
         Assert.Equal(0, compact.InputSegments);
 
@@ -431,7 +431,7 @@ public sealed class MutationIntegrationTests
             ("src/050000.txt", "theta\n")
         ]), [new DocumentKey("src/099999.txt")]);
 
-        await index.Compact(new CompactOptions(MaxMergedSegments: 2));
+        await index.Compact(new CompactOptions { MaxMergedSegments = 2 });
 
         using var snapshot = index.OpenSnapshot();
         var omega = new HitBuffer();
@@ -443,7 +443,7 @@ public sealed class MutationIntegrationTests
         Assert.Single(theta.Hits);
 
         var removed = new HitBuffer();
-        snapshot.Search(new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive), new PathFilter(PathPrefix: "src/099999"), removed);
+        snapshot.Search(new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive), new PathFilter { PathPrefix = "src/099999" }, removed);
         Assert.Empty(removed.Hits);
     }
 
@@ -513,7 +513,7 @@ public sealed class MutationIntegrationTests
         ]));
         var before = index.Storage.ReadManifest();
 
-        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        var compact = await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
         var after = index.Storage.ReadManifest();
 
         Assert.Equal(0, compact.InputSegments);
@@ -537,7 +537,7 @@ public sealed class MutationIntegrationTests
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "def")]), []);
         await index.Update(new InMemoryDocumentSource([("src/c.txt", "ghi")]), []);
 
-        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        var compact = await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
 
         Assert.Equal(3, compact.InputSegments);
         Assert.Equal(1, compact.OutputSegments);
@@ -555,7 +555,7 @@ public sealed class MutationIntegrationTests
             new InMemoryDocumentSource([(privateUsePath, "beta")]),
             []);
 
-        var compact = await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        var compact = await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
 
         Assert.Equal(2, compact.InputSegments);
         using var snapshot = index.OpenSnapshot();
@@ -584,9 +584,7 @@ public sealed class MutationIntegrationTests
         var before = index.Storage.ReadManifest();
 
         var exception = await Assert.ThrowsAsync<IOException>(() =>
-            index.Compact(new CompactOptions(
-                SegmentCountTrigger: 1,
-                MinimumFreeBytesAfterCompaction: long.MaxValue)));
+            index.Compact(new CompactOptions { SegmentCountTrigger = 1, MinimumFreeBytesAfterCompaction = long.MaxValue }));
 
         Assert.Contains("retaining", exception.Message, StringComparison.Ordinal);
         var after = index.Storage.ReadManifest();
@@ -625,8 +623,7 @@ public sealed class MutationIntegrationTests
             MinimumFreeBytesAfterMutation = 0
         });
 
-        var compact = await constrainedIndex.Compact(new CompactOptions(
-            MinimumFreeBytesAfterCompaction: 0));
+        var compact = await constrainedIndex.Compact(new CompactOptions { MinimumFreeBytesAfterCompaction = 0 });
 
         Assert.Equal(1, compact.InputSegments);
         Assert.Equal(1, compact.OutputSegments);
@@ -669,8 +666,7 @@ public sealed class MutationIntegrationTests
             new InMemoryDocumentSource([]),
             [new DocumentKey("src/a.txt")]);
 
-        var compact = await index.Compact(new CompactOptions(
-            MinimumFreeBytesAfterCompaction: long.MaxValue));
+        var compact = await index.Compact(new CompactOptions { MinimumFreeBytesAfterCompaction = long.MaxValue });
 
         Assert.Equal(1, compact.InputSegments);
         Assert.Equal(0, compact.OutputSegments);
@@ -696,7 +692,7 @@ public sealed class MutationIntegrationTests
             ThrowOnStage = PublicationStage.AfterSegmentFlushBeforePublish
         };
 
-        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions(SegmentCountTrigger: 1)));
+        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions { SegmentCountTrigger = 1 }));
 
         storage.FaultInjector = null;
         storage.EnsureLayout();
@@ -734,7 +730,7 @@ public sealed class MutationIntegrationTests
             ThrowOnStage = PublicationStage.AfterManifestFlushBeforeSwap
         };
 
-        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions(SegmentCountTrigger: 1)));
+        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions { SegmentCountTrigger = 1 }));
 
         storage.FaultInjector = null;
         storage.EnsureLayout();

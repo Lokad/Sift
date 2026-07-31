@@ -58,15 +58,14 @@ var build = await index.Build(initialDocuments);
 Console.WriteLine($"Indexed {build.IndexedDocuments} documents in {build.ElapsedMilliseconds} ms.");
 
 // 2. Query the index through a snapshot.
-using var snapshot = index.OpenSnapshot(new SearchOptions(SegmentParallelism: 1));
-// Or simply: using var snapshot = index.OpenSnapshot();
+using var snapshot = index.OpenSnapshot();
 
 var query = new SearchQuery(
-    Pattern: @"\b(Add|Mul)\b",
-    PatternMode: PatternMode.Regex,
-    CaseMode: CaseMode.Sensitive);
+    @"\b(Add|Mul)\b",
+    PatternMode.Regex,
+    CaseMode.Sensitive);
 
-var filter = new PathFilter(PathPrefix: "src/");
+var filter = new PathFilter { PathPrefix = "src/" };
 var collector = new HitBuffer();
 var stats = snapshot.Search(query, filter, collector);
 
@@ -120,7 +119,7 @@ using var updatedSnapshot = index.OpenSnapshot();
 var updatedCollector = new HitBuffer();
 var updatedStats = updatedSnapshot.Search(
     new SearchQuery("Mul", PatternMode.Literal, CaseMode.Sensitive),
-    new PathFilter(PathPrefix: "src/lib/"),
+    new PathFilter { PathPrefix = "src/lib/" },
     updatedCollector);
 
 Console.WriteLine($"Updated search returned {updatedStats.HitsReturned} hit(s).");
@@ -183,9 +182,11 @@ Console.WriteLine(
 
 if (maintenance.SegmentCount > 16 || maintenance.DeadDocumentFraction >= 0.20)
 {
-    var compact = await index.Compact(new CompactOptions(
-        SegmentCountTrigger: 16,
-        DeadFractionThreshold: 0.20));
+    var compact = await index.Compact(new CompactOptions
+    {
+        SegmentCountTrigger = 16,
+        DeadFractionThreshold = 0.20
+    });
 
     Console.WriteLine($"Compaction merged {compact.MergedDocuments} live documents.");
 }
@@ -260,6 +261,7 @@ For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a fi
 
 ## Related docs
 
+- [CHANGELOG.md](CHANGELOG.md)
 - [SPEC.md](SPEC.md)
 - [BENCH.md](BENCH.md)
 - [DEPENDENCIES.md](DEPENDENCIES.md)

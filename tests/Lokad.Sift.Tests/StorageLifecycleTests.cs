@@ -87,7 +87,7 @@ public sealed class StorageLifecycleTests
         using var oldSnapshot = firstIndex.OpenSnapshot();
 
         using var secondIndex = new SiftIndex(fixture.CorpusPath);
-        await secondIndex.Compact(new CompactOptions(SegmentCountTrigger: 1));
+        await secondIndex.Compact(new CompactOptions { SegmentCountTrigger = 1 });
 
         var whileLeased = secondIndex.GetStorageStats();
         Assert.True(whileLeased.RetiredSegmentCount > 0);
@@ -125,7 +125,7 @@ public sealed class StorageLifecycleTests
         {
             await WaitUntilAsync(() => File.Exists(readyPath), TimeSpan.FromSeconds(10));
 
-            await index.Compact(new CompactOptions(SegmentCountTrigger: 1));
+            await index.Compact(new CompactOptions { SegmentCountTrigger = 1 });
             var whileLeased = index.GetStorageStats();
             Assert.True(whileLeased.LeasedGenerationCount > 0);
             Assert.True(whileLeased.SnapshotDeferredSegmentBytes > 0);
@@ -270,7 +270,7 @@ public sealed class StorageLifecycleTests
         };
 
         await Assert.ThrowsAsync<IOException>(
-            async () => await index.Compact(new CompactOptions(SegmentCountTrigger: 1)));
+            async () => await index.Compact(new CompactOptions { SegmentCountTrigger = 1 }));
         storage.FaultInjector = null;
 
         var manifestBeforeRestart = storage.ReadManifest();
@@ -417,15 +417,15 @@ public sealed class StorageLifecycleTests
         using var index = SiftIndex.CreateInMemory();
         Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
-            _ = index.Compact(new CompactOptions(MaxMergedSegments: 0));
+            _ = index.Compact(new CompactOptions { MaxMergedSegments = 0 });
         });
         Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
-            _ = index.Compact(new CompactOptions(MaxInputSegmentBytes: 0));
+            _ = index.Compact(new CompactOptions { MaxInputSegmentBytes = 0 });
         });
         Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
-            _ = index.Compact(new CompactOptions(DeadContentFractionThreshold: double.NaN));
+            _ = index.Compact(new CompactOptions { DeadContentFractionThreshold = double.NaN });
         });
     }
 
@@ -459,9 +459,7 @@ public sealed class StorageLifecycleTests
             ("src/c.txt", "0123456789")
         ]));
 
-        var compact = await index.Compact(new CompactOptions(
-            DeadFractionThreshold: 0,
-            MaxInputSegmentBytes: 1));
+        var compact = await index.Compact(new CompactOptions { DeadFractionThreshold = 0, MaxInputSegmentBytes = 1 });
 
         Assert.Equal(1, compact.InputSegments);
     }
@@ -485,7 +483,7 @@ public sealed class StorageLifecycleTests
                 new DocumentKey("src/b.txt"),
                 new DocumentKey("src/c.txt")
             ]);
-        var options = new CompactOptions(MaxMergedSegments: 1);
+        var options = new CompactOptions { MaxMergedSegments = 1 };
 
         var first = await index.Compact(options);
         var second = await index.Compact(options);

@@ -80,7 +80,12 @@ public sealed class CorpusStorage : ISiftStorage
         }
     }
 
-    public FileStream AcquireWriterLock(CancellationToken cancellationToken = default)
+    public IDisposable AcquireWriterLock()
+    {
+        return AcquireWriterLock(CancellationToken.None);
+    }
+
+    public IDisposable AcquireWriterLock(CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_rootPath);
         Directory.CreateDirectory(LockPath);
@@ -307,9 +312,12 @@ public sealed class CorpusStorage : ISiftStorage
         return new CorpusManifest(corpusId, generation, segments);
     }
 
-    public MappedSegment OpenSegment(
-        ulong segmentId,
-        CancellationToken cancellationToken = default)
+    public MappedSegment OpenSegment(ulong segmentId)
+    {
+        return OpenSegment(segmentId, CancellationToken.None);
+    }
+
+    public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _segmentOpenCount);
         var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
@@ -573,7 +581,6 @@ public sealed class CorpusStorage : ISiftStorage
 
     void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
-        ArgumentNullException.ThrowIfNull(attemptedSegmentIds);
         // With no current manifest, a flushed initial manifest may still name every
         // attempted pack. Roll it back before making those packs unreachable.
         var canDeleteAttemptedPacks =
@@ -1235,8 +1242,13 @@ public sealed class CorpusStorage : ISiftStorage
             isBlocked);
     }
 
+    private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock()
+    {
+        return ReclaimUnreferencedSegmentsUnderWriterLock(CancellationToken.None);
+    }
+
     private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         EnsureLayout();
         var physicalSegments = EnumeratePhysicalSegments(cancellationToken);
@@ -1556,8 +1568,13 @@ public sealed class CorpusStorage : ISiftStorage
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         int flags);
 
+    private List<PhysicalSegment> EnumeratePhysicalSegments()
+    {
+        return EnumeratePhysicalSegments(CancellationToken.None);
+    }
+
     private List<PhysicalSegment> EnumeratePhysicalSegments(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         var segments = new List<PhysicalSegment>();
         if (!Directory.Exists(SegmentsPath))

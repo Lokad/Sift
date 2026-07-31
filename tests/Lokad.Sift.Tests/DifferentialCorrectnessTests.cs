@@ -10,12 +10,12 @@ public sealed class DifferentialCorrectnessTests
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter() },
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Insensitive), new PathFilter() },
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Smart), new PathFilter() },
-        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive, WholeWord: true), new PathFilter() },
-        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive, WholeLine: true), new PathFilter() },
+        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true }, new PathFilter() },
+        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true }, new PathFilter() },
         { new SearchQuery("b[a-z]+a", PatternMode.Regex, CaseMode.Sensitive), new PathFilter() },
-        { new SearchQuery("alpha\\nbeta", PatternMode.Regex, CaseMode.Sensitive, Multiline: true), new PathFilter() },
-        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(PathRegex: @"src/.+\.txt$") },
-        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(IncludeGlobs: ["src/**/*.txt"], ExcludeGlobs: ["src/generated/**"]) }
+        { new SearchQuery("alpha\\nbeta", PatternMode.Regex, CaseMode.Sensitive) { Multiline = true }, new PathFilter() },
+        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter { PathRegex = @"src/.+\.txt$" } },
+        { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter { IncludeGlobs = ["src/**/*.txt"], ExcludeGlobs = ["src/generated/**"] } }
     };
 
     [Theory]

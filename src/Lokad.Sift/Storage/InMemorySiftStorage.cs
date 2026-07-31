@@ -22,7 +22,12 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    public IDisposable AcquireWriterLock(CancellationToken cancellationToken = default)
+    public IDisposable AcquireWriterLock()
+    {
+        return AcquireWriterLock(CancellationToken.None);
+    }
+
+    public IDisposable AcquireWriterLock(CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -73,17 +78,22 @@ public sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    public MappedSegment OpenSegment(
-        ulong segmentId,
-        CancellationToken cancellationToken = default)
+    public MappedSegment OpenSegment(ulong segmentId)
+    {
+        return OpenSegment(segmentId, CancellationToken.None);
+    }
+
+    public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken)
     {
         byte[] bytes;
         lock (_writerLock)
         {
-            if (!_segments.TryGetValue(segmentId, out bytes!))
+            if (!_segments.TryGetValue(segmentId, out var storedBytes))
             {
                 throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
             }
+
+            bytes = storedBytes;
         }
 
         // Published in-memory packs were checksummed immediately before insertion.
@@ -196,7 +206,6 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
-        ArgumentNullException.ThrowIfNull(attemptedSegmentIds);
         var referencedSegmentIds = _manifest?.Segments
             .Select(static segment => segment.SegmentId)
             .ToHashSet() ?? [];

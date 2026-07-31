@@ -97,23 +97,34 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
             Run("regex-verifier-path", options, () =>
             {
                 var collector = new NullCollector();
-                snapshot.Search(new SearchQuery("^alpha.+needle.+delta$", PatternMode.Regex, CaseMode.Sensitive, Multiline: true), new PathFilter(), collector);
+                snapshot.Search(
+                    new SearchQuery("^alpha.+needle.+delta$", PatternMode.Regex, CaseMode.Sensitive)
+                    {
+                        Multiline = true
+                    },
+                    new PathFilter(),
+                    collector);
             }),
             Run("whole-word", options, () =>
             {
                 var collector = new NullCollector();
-                snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive, WholeWord: true), new PathFilter(), collector);
+                snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true }, new PathFilter(), collector);
             }),
             Run("path-prefix", options, () =>
             {
                 var collector = new NullCollector();
-                snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(PathPrefix: "src/00"), collector);
+                snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new PathFilter { PathPrefix = "src/00" }, collector);
             }),
             Run("parallel-literal", options, () =>
             {
                 var collector = new NullCollector();
                 snapshot.Search(
-                    new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive, MaxHits: int.MaxValue, MaxDocuments: int.MaxValue, MaxBytesScanned: long.MaxValue),
+                    new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
+                    {
+                        MaxHits = int.MaxValue,
+                        MaxDocuments = int.MaxValue,
+                        MaxBytesScanned = long.MaxValue
+                    },
                     new PathFilter(),
                     collector);
             }),
@@ -1285,7 +1296,7 @@ static void RunPostingsStats(BenchmarkOptions options)
 
     if (options.JsonOutputPath is not null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(options.JsonOutputPath)!);
+        EnsureParentDirectory(options.JsonOutputPath);
         File.WriteAllText(options.JsonOutputPath, JsonSerializer.Serialize(run, CreateJsonOptions()));
     }
 }
@@ -1353,7 +1364,7 @@ static void RunRealCorpusBenchmarks(BenchmarkOptions options)
 
     if (options.JsonOutputPath is not null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(options.JsonOutputPath)!);
+        EnsureParentDirectory(options.JsonOutputPath);
         File.WriteAllText(options.JsonOutputPath, JsonSerializer.Serialize(run, CreateJsonOptions()));
     }
 }
@@ -1373,7 +1384,7 @@ static RealCorpusBenchmarkResult RunRealCorpus(DiscoveredCorpus corpus, RealQuer
 
         var mappedBytesBefore = MappedSegment.CurrentMappedBytes;
         var openStart = Stopwatch.GetTimestamp();
-    using var index = new Sift(benchmarkRoot, new SiftOptions());
+        using var index = new Sift(benchmarkRoot, new SiftOptions());
         using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
         var openElapsed = Stopwatch.GetElapsedTime(openStart);
         var mappedBytesDelta = MappedSegment.CurrentMappedBytes - mappedBytesBefore;
@@ -1674,11 +1685,13 @@ static CompactScenarioResult RunCompactScenarioIsolated(
             var beforeManifestBytes = new FileInfo(storage.ManifestPath).Length;
             var beforeSegmentSizes = GetSegmentSizes(storage, beforeManifest);
             var start = Stopwatch.GetTimestamp();
-            var compactMetrics = MeasureCompactionMetrics(() => index.Compact(new CompactOptions(
-                MaxMergedSegments: 16,
-                DeadFractionThreshold: 0.0,
-                SegmentCountTrigger: 1,
-                MetadataBloatDeadOrdinalsThreshold: 1)).GetAwaiter().GetResult());
+            var compactMetrics = MeasureCompactionMetrics(() => index.Compact(new CompactOptions
+            {
+                MaxMergedSegments = 16,
+                DeadFractionThreshold = 0.0,
+                SegmentCountTrigger = 1,
+                MetadataBloatDeadOrdinalsThreshold = 1
+            }).GetAwaiter().GetResult());
             var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             var afterManifest = storage.ReadManifest();
             var afterManifestBytes = new FileInfo(storage.ManifestPath).Length;
@@ -1754,11 +1767,13 @@ static CompactScenarioResult RunCompactScenarioSteadyState(
             var beforeManifestBytes = new FileInfo(storage.ManifestPath).Length;
             var beforeSegmentSizes = GetSegmentSizes(storage, beforeManifest);
             var start = Stopwatch.GetTimestamp();
-            var compactMetrics = MeasureCompactionMetrics(() => index.Compact(new CompactOptions(
-                MaxMergedSegments: 16,
-                DeadFractionThreshold: 0.0,
-                SegmentCountTrigger: 1,
-                MetadataBloatDeadOrdinalsThreshold: 1)).GetAwaiter().GetResult());
+            var compactMetrics = MeasureCompactionMetrics(() => index.Compact(new CompactOptions
+            {
+                MaxMergedSegments = 16,
+                DeadFractionThreshold = 0.0,
+                SegmentCountTrigger = 1,
+                MetadataBloatDeadOrdinalsThreshold = 1
+            }).GetAwaiter().GetResult());
             var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             var afterManifest = storage.ReadManifest();
             var afterManifestBytes = new FileInfo(storage.ManifestPath).Length;
@@ -2100,7 +2115,7 @@ static void CopyDirectory(string sourcePath, string destinationPath)
     {
         var relative = Path.GetRelativePath(sourcePath, file);
         var destinationFile = Path.Combine(destinationPath, relative);
-        Directory.CreateDirectory(Path.GetDirectoryName(destinationFile)!);
+        EnsureParentDirectory(destinationFile);
         File.Copy(file, destinationFile, overwrite: true);
     }
 }
@@ -2283,7 +2298,7 @@ static RealCorpusPlannerSummary BuildPlannerSummary(List<RealQueryResult> querie
         queries
             .Select(static query => GetRunnerUpSummary(query))
             .Where(static summary => summary.HasValue)
-            .Select(static summary => summary!.Value)
+            .Select(static summary => summary.GetValueOrDefault())
             .GroupBy(static summary => summary.PlanFamily, StringComparer.Ordinal)
             .Select(static group => new PlannerRunnerUpSummary(
                 group.Key,
@@ -2489,7 +2504,7 @@ static void RunUpdateBenchmarks(BenchmarkOptions options)
 
     if (options.JsonOutputPath is not null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(options.JsonOutputPath)!);
+        EnsureParentDirectory(options.JsonOutputPath);
         File.WriteAllText(options.JsonOutputPath, JsonSerializer.Serialize(run, CreateJsonOptions()));
     }
 }
@@ -2529,7 +2544,7 @@ static void RunCompactBenchmarks(BenchmarkOptions options)
 
     if (options.JsonOutputPath is not null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(options.JsonOutputPath)!);
+        EnsureParentDirectory(options.JsonOutputPath);
         File.WriteAllText(options.JsonOutputPath, JsonSerializer.Serialize(run, CreateJsonOptions()));
     }
 }
@@ -2774,6 +2789,15 @@ static JsonSerializerOptions CreateJsonOptions()
     };
 }
 
+static void EnsureParentDirectory(string path)
+{
+    var parentDirectory = Path.GetDirectoryName(path);
+    if (!string.IsNullOrEmpty(parentDirectory))
+    {
+        Directory.CreateDirectory(parentDirectory);
+    }
+}
+
 internal enum BenchmarkMode
 {
     Synthetic,
@@ -3010,7 +3034,7 @@ internal readonly record struct RealQueryResult(
     long Utf8RegexCacheMisses,
     int HitsReturned,
     string StopReason,
-    bool TimedOut = false);
+    bool TimedOut);
 
 internal readonly record struct RealQueryPlannerAlternative(
     string PlanFamily,
@@ -3430,9 +3454,12 @@ internal sealed class BenchmarkOptions
             RefreshIndex = refreshIndex,
             PrepareIndexOnly = prepareIndexOnly,
             MaintenanceSteadyState = maintenanceSteadyState
-            ,QueryTimeoutMilliseconds = queryTimeoutMilliseconds
-            ,PostingsBdnFilter = postingsBdnFilter
-            ,PostingsInnerRepeat = postingsInnerRepeat
+            ,
+            QueryTimeoutMilliseconds = queryTimeoutMilliseconds
+            ,
+            PostingsBdnFilter = postingsBdnFilter
+            ,
+            PostingsInnerRepeat = postingsInnerRepeat
         };
     }
 
@@ -3515,7 +3542,7 @@ internal sealed class FileSystemDocumentSource : IDocumentSource
     private readonly int? _maxFiles;
     private int _emittedFiles;
 
-    public FileSystemDocumentSource(string rootPath, int? maxFiles = null)
+    public FileSystemDocumentSource(string rootPath, int? maxFiles)
     {
         _rootPath = rootPath;
         _maxFiles = maxFiles;
@@ -3651,19 +3678,27 @@ internal sealed class RealQueryDefinition
         return new SearchQuery(
             Pattern,
             Enum.Parse<PatternMode>(PatternMode, ignoreCase: true),
-            Enum.Parse<CaseMode>(CaseMode, ignoreCase: true),
-            WholeWord,
-            WholeLine,
-            Multiline,
-            DotAll,
-            MaxHits: int.MaxValue,
-            MaxDocuments: int.MaxValue,
-            MaxBytesScanned: long.MaxValue);
+            Enum.Parse<CaseMode>(CaseMode, ignoreCase: true))
+        {
+            WholeWord = WholeWord,
+            WholeLine = WholeLine,
+            Multiline = Multiline,
+            DotAll = DotAll,
+            MaxHits = int.MaxValue,
+            MaxDocuments = int.MaxValue,
+            MaxBytesScanned = long.MaxValue
+        };
     }
 
     public PathFilter ToPathFilter()
     {
-        return new PathFilter(PathPrefix, IncludeGlobs, ExcludeGlobs, PathRegex);
+        return new PathFilter
+        {
+            PathPrefix = PathPrefix,
+            IncludeGlobs = IncludeGlobs,
+            ExcludeGlobs = ExcludeGlobs,
+            PathRegex = PathRegex
+        };
     }
 }
 

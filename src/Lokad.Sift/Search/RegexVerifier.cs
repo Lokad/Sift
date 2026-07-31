@@ -31,7 +31,7 @@ internal static class RegexVerifier
         ref int regexInvocations,
         ref int nonBacktrackingRegexInvocations,
         ref SearchStopReason stopReason,
-        string? predecodedText = null)
+        string? predecodedText)
     {
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
@@ -63,17 +63,19 @@ internal static class RegexVerifier
                 }
 
                 matched = true;
-                if (!isAscii)
+                int startByte;
+                int endByte;
+                if (isAscii)
                 {
-                    utf8PrefixByteOffsets ??= BuildUtf8PrefixByteOffsets(text);
+                    startByte = match.Index;
+                    endByte = startByte + match.Length;
                 }
-
-                var startByte = isAscii
-                    ? match.Index
-                    : utf8PrefixByteOffsets![match.Index];
-                var endByte = isAscii
-                    ? startByte + match.Length
-                    : utf8PrefixByteOffsets![match.Index + match.Length];
+                else
+                {
+                    var prefixByteOffsets = utf8PrefixByteOffsets ??= BuildUtf8PrefixByteOffsets(text);
+                    startByte = prefixByteOffsets[match.Index];
+                    endByte = prefixByteOffsets[match.Index + match.Length];
+                }
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
                 var shouldContinue = collector.OnHit(
@@ -103,37 +105,37 @@ internal static class RegexVerifier
         }
 
         return matched;
-    }
 
-    private static int[] BuildUtf8PrefixByteOffsets(ReadOnlySpan<char> text)
-    {
-        var offsets = GC.AllocateUninitializedArray<int>(text.Length + 1);
-        var byteOffset = 0;
-        var index = 0;
-        offsets[0] = 0;
-        while (index < text.Length)
+        static int[] BuildUtf8PrefixByteOffsets(ReadOnlySpan<char> text)
         {
-            var current = text[index];
-            if (char.IsHighSurrogate(current) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+            var offsets = GC.AllocateUninitializedArray<int>(text.Length + 1);
+            var byteOffset = 0;
+            var index = 0;
+            offsets[0] = 0;
+            while (index < text.Length)
             {
+                var current = text[index];
+                if (char.IsHighSurrogate(current) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+                {
+                    offsets[index + 1] = byteOffset;
+                    byteOffset += 4;
+                    offsets[index + 2] = byteOffset;
+                    index += 2;
+                    continue;
+                }
+
+                byteOffset += current switch
+                {
+                    <= '\u007F' => 1,
+                    <= '\u07FF' => 2,
+                    _ => 3
+                };
                 offsets[index + 1] = byteOffset;
-                byteOffset += 4;
-                offsets[index + 2] = byteOffset;
-                index += 2;
-                continue;
+                index++;
             }
 
-            byteOffset += current switch
-            {
-                <= '\u007F' => 1,
-                <= '\u07FF' => 2,
-                _ => 3
-            };
-            offsets[index + 1] = byteOffset;
-            index++;
+            return offsets;
         }
-
-        return offsets;
     }
 
     public static string BuildPattern(in SearchQuery query)

@@ -30,18 +30,21 @@ public sealed class Sift : ISift
     internal ISiftStorage Storage => _storage;
     public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;
 
-    public Sift(string rootPath, SiftOptions? options = null)
-        : this(
-            new CorpusStorage(rootPath, options?.MaximumPhysicalBytes ?? long.MaxValue),
-            options)
+    public Sift(string rootPath)
+        : this(rootPath, new SiftOptions())
     {
     }
 
-    internal Sift(ISiftStorage storage, SiftOptions? options = null)
+    public Sift(string rootPath, SiftOptions options)
+        : this(new CorpusStorage(rootPath, options.MaximumPhysicalBytes), options)
     {
-        _options = options ?? new SiftOptions();
+    }
+
+    internal Sift(ISiftStorage storage, SiftOptions options)
+    {
+        _options = options;
         ValidateSiftOptions(_options);
-        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        _storage = storage;
         _builder = new IndexBuilder(_storage, _options);
         try
         {
@@ -56,12 +59,22 @@ public sealed class Sift : ISift
         ScheduleReclamationIfPending();
     }
 
-    public static Sift CreateInMemory(SiftOptions? options = null)
+    public static Sift CreateInMemory()
+    {
+        return CreateInMemory(new SiftOptions());
+    }
+
+    public static Sift CreateInMemory(SiftOptions options)
     {
         return new Sift(new InMemorySiftStorage(), options);
     }
 
-    public IIndexSnapshot OpenSnapshot(SearchOptions options = default)
+    public IIndexSnapshot OpenSnapshot()
+    {
+        return OpenSnapshot(new SearchOptions());
+    }
+
+    public IIndexSnapshot OpenSnapshot(SearchOptions options)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -81,7 +94,12 @@ public sealed class Sift : ISift
         }
     }
 
-    public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default)
+    public IOverlaySnapshot OpenOverlaySnapshot()
+    {
+        return OpenOverlaySnapshot(new SearchOptions());
+    }
+
+    public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -104,7 +122,12 @@ public sealed class Sift : ISift
         }
     }
 
-    public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken = default)
+    public Task<BuildStats> Build(IDocumentSource documents)
+    {
+        return Build(documents, CancellationToken.None);
+    }
+
+    public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken)
     {
         var activity = BeginActivity(SiftActivity.Build);
         return Task.Run(async () =>
@@ -190,7 +213,7 @@ public sealed class Sift : ISift
                 segmentsWithDeletions++;
                 reclaimableContentBytes = checked(
                     reclaimableContentBytes +
-                    GetDeadContentBytes(segment, currentLegacyKeys));
+                    GetDeadContentBytes(segment, currentLegacyKeys, CancellationToken.None));
             }
 
             if (segment.LiveDocumentCount > 0 &&
@@ -245,7 +268,15 @@ public sealed class Sift : ISift
         }
     }
 
-    public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default)
+    public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
+    {
+        return Update(upserts, deletions, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> Update(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -386,7 +417,12 @@ public sealed class Sift : ISift
             ElapsedMilliseconds: watch.ElapsedMilliseconds);
     }
 
-    public Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken = default)
+    public Task<CompactStats> Compact(CompactOptions options)
+    {
+        return Compact(options, CancellationToken.None);
+    }
+
+    public Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -1013,6 +1049,7 @@ public sealed class Sift : ISift
                     ? 0d
                     : (double)GetDeadContentBytes(
                         entry,
+                        currentLegacyKeys: null,
                         cancellationToken: cancellationToken) / entry.ContentBytes,
                 HasMetadataBloat = entry.DeadOrdinals.Length >= options.MetadataBloatDeadOrdinalsThreshold
             })
@@ -1081,8 +1118,8 @@ public sealed class Sift : ISift
 
     private long GetDeadContentBytes(
         SegmentManifestEntry segment,
-        ISet<LegacyMaintenanceKey>? currentLegacyKeys = null,
-        CancellationToken cancellationToken = default)
+        ISet<LegacyMaintenanceKey>? currentLegacyKeys,
+        CancellationToken cancellationToken)
     {
         if (segment.DeadOrdinals.Length == 0)
         {
@@ -1172,6 +1209,7 @@ public sealed class Sift : ISift
     private sealed class CompactionCursor : IDisposable
     {
         private readonly uint[] _deadOrdinals;
+        private CompactionDocument? _current;
         private int _deadIndex;
         private uint _nextOrdinal;
 
@@ -1179,11 +1217,11 @@ public sealed class Sift : ISift
         {
             Segment = segment;
             _deadOrdinals = deadOrdinals;
-            Current = null!;
         }
 
         public MappedSegment Segment { get; }
-        public CompactionDocument Current { get; private set; }
+        public CompactionDocument Current =>
+            _current ?? throw new InvalidOperationException("The cursor has not advanced to a document.");
 
         public bool MoveNext()
         {
@@ -1200,7 +1238,7 @@ public sealed class Sift : ISift
                     continue;
                 }
 
-                Current = CreateCompactionDocument(Segment, Segment.GetDocument(ordinal));
+                _current = CreateCompactionDocument(Segment, Segment.GetDocument(ordinal));
                 return true;
             }
 

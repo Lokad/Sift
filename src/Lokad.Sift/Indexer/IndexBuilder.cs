@@ -14,19 +14,17 @@ internal sealed class IndexBuilder
     private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
 
-    public IndexBuilder(ISiftStorage storage, SiftOptions? options = null)
+    public IndexBuilder(ISiftStorage storage, SiftOptions options)
     {
         _storage = storage;
-        _options = options ?? new SiftOptions();
+        _options = options;
     }
 
     public BuildStats Build(
         IDocumentSource source,
         bool discardCorruptState,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(source);
-
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
         _storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
@@ -87,11 +85,6 @@ internal sealed class IndexBuilder
         IReadOnlySet<string>? forbiddenPaths,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentException.ThrowIfNullOrWhiteSpace(operationName);
-        ArgumentNullException.ThrowIfNull(publishPartition);
-
         var submitted = 0;
         long submittedBytes = 0;
         var accepted = 0;
@@ -122,11 +115,10 @@ internal sealed class IndexBuilder
             submitted++;
             submittedBytes = checked(submittedBytes + submittedDocument.Content.Length);
 
-            var isAccepted = TryNormalize(
+            var document = Normalize(
                 submittedDocument,
                 options,
-                out var normalizedPath,
-                out var storedDocument);
+                out var normalizedPath);
             if (!submittedPaths.Add(normalizedPath))
             {
                 throw new InvalidOperationException(
@@ -139,14 +131,13 @@ internal sealed class IndexBuilder
                     $"Path '{normalizedPath}' cannot appear in both upserts and deletions.");
             }
 
-            if (!isAccepted)
+            if (document is null)
             {
                 rejected++;
                 rejectedBytes = checked(rejectedBytes + submittedDocument.Content.Length);
                 continue;
             }
 
-            var document = storedDocument!;
             var nextPartitionBytes = checked(partitionBytes + document.Content.Length);
             if (partition.Count > 0 &&
                 (partition.Count >= options.TargetSegmentDocumentCount ||
@@ -173,9 +164,11 @@ internal sealed class IndexBuilder
             acceptedPaths);
     }
 
-    public static LoadedDocuments LoadDocuments(IDocumentSource source, CancellationToken cancellationToken, SiftOptions? options = null)
+    public static LoadedDocuments LoadDocuments(
+        IDocumentSource source,
+        CancellationToken cancellationToken,
+        SiftOptions options)
     {
-        options ??= new SiftOptions();
         var submitted = 0;
         long submittedBytes = 0;
         var rejected = 0;
@@ -191,13 +184,13 @@ internal sealed class IndexBuilder
             submitted++;
             submittedBytes += submittedDocument.Content.Length;
 
-            var accepted = TryNormalize(submittedDocument, options, out var normalizedPath, out var storedDocument);
+            var storedDocument = Normalize(submittedDocument, options, out var normalizedPath);
             if (!seenPaths.Add(normalizedPath))
             {
                 throw new InvalidOperationException($"Duplicate canonical path in build batch: '{normalizedPath}'.");
             }
 
-            if (!accepted)
+            if (storedDocument is null)
             {
                 rejected++;
                 rejectedBytes += submittedDocument.Content.Length;
@@ -205,8 +198,8 @@ internal sealed class IndexBuilder
                 continue;
             }
 
-            documents.Add(storedDocument!);
-            acceptedBytes += storedDocument!.Content.Length;
+            documents.Add(storedDocument);
+            acceptedBytes += storedDocument.Content.Length;
         }
 
         return new LoadedDocuments(
@@ -219,9 +212,15 @@ internal sealed class IndexBuilder
             rejectedPaths);
     }
 
-    public static List<List<StoredDocument>> PartitionDocuments(IReadOnlyList<StoredDocument> documents, SiftOptions? options = null)
+    public static List<List<StoredDocument>> PartitionDocuments(IReadOnlyList<StoredDocument> documents)
     {
-        options ??= new SiftOptions();
+        return PartitionDocuments(documents, new SiftOptions());
+    }
+
+    public static List<List<StoredDocument>> PartitionDocuments(
+        IReadOnlyList<StoredDocument> documents,
+        SiftOptions options)
+    {
         var partitions = new List<List<StoredDocument>>();
         if (documents.Count == 0)
         {
@@ -253,21 +252,22 @@ internal sealed class IndexBuilder
         return partitions;
     }
 
-    private static bool TryNormalize(SubmittedDocument document, SiftOptions options, out string normalizedPath, out StoredDocument? storedDocument)
+    private static StoredDocument? Normalize(
+        SubmittedDocument document,
+        SiftOptions options,
+        out string normalizedPath)
     {
         normalizedPath = CanonicalizePath(document.Path);
         var content = document.Content;
         if (content.Length > options.MaxDocumentBytes)
         {
-            storedDocument = null;
-            return false;
+            return null;
         }
 
         var span = content.Span;
         if (LooksBinary(span))
         {
-            storedDocument = null;
-            return false;
+            return null;
         }
 
         var hasBom = span.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF });
@@ -283,8 +283,7 @@ internal sealed class IndexBuilder
         }
         catch (DecoderFallbackException)
         {
-            storedDocument = null;
-            return false;
+            return null;
         }
 
         var flags = (ushort)1;
@@ -300,7 +299,7 @@ internal sealed class IndexBuilder
 
         var lineStarts = LineMap.BuildLineStarts(span);
         var ownedContent = content.ToArray();
-        storedDocument = new StoredDocument
+        return new StoredDocument
         {
             Path = normalizedPath,
             PathUtf8 = Encoding.UTF8.GetBytes(normalizedPath),
@@ -312,7 +311,31 @@ internal sealed class IndexBuilder
             ContentHash64 = Hashing.Fnv1A64(span)
         };
 
-        return true;
+        static bool LooksBinary(ReadOnlySpan<byte> content)
+        {
+            if (content.IndexOf((byte)0) >= 0)
+            {
+                return true;
+            }
+
+            var sampleLength = Math.Min(content.Length, 4096);
+            if (sampleLength == 0)
+            {
+                return false;
+            }
+
+            var suspicious = 0;
+            for (var i = 0; i < sampleLength; i++)
+            {
+                var current = content[i];
+                if (current < 0x20 && current is not (byte)'\r' and not (byte)'\n' and not (byte)'\t' and not (byte)'\f')
+                {
+                    suspicious++;
+                }
+            }
+
+            return suspicious >= 16 && suspicious * 5 >= sampleLength;
+        }
     }
 
     public static string CanonicalizePath(string path)
@@ -337,32 +360,6 @@ internal sealed class IndexBuilder
         }
 
         return path;
-    }
-
-    private static bool LooksBinary(ReadOnlySpan<byte> content)
-    {
-        if (content.IndexOf((byte)0) >= 0)
-        {
-            return true;
-        }
-
-        var sampleLength = Math.Min(content.Length, 4096);
-        if (sampleLength == 0)
-        {
-            return false;
-        }
-
-        var suspicious = 0;
-        for (var i = 0; i < sampleLength; i++)
-        {
-            var current = content[i];
-            if (current < 0x20 && current is not (byte)'\r' and not (byte)'\n' and not (byte)'\t' and not (byte)'\f')
-            {
-                suspicious++;
-            }
-        }
-
-        return suspicious >= 16 && suspicious * 5 >= sampleLength;
     }
 }
 

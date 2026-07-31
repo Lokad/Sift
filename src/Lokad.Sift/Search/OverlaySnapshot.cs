@@ -35,7 +35,15 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseSegmentIds = new HashSet<ulong>(_baseSnapshot.GetSegmentIds());
     }
 
-    public Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default)
+    public Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
+    {
+        return Apply(upserts, deletions, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> Apply(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        CancellationToken cancellationToken)
     {
         var deletionArray = deletions.ToArray();
         return ApplyCore(upserts, deletionArray, cancellationToken);
@@ -121,7 +129,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayUpdate.ElapsedMilliseconds);
     }
 
-    public Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken = default)
+    public Task<UpdateStats> ApplyTo(ISift target)
+    {
+        return ApplyTo(target, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(target);
         using var state = BeginRead();
@@ -164,7 +177,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         };
     }
 
-    public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken = default)
+    public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
+    {
+        return Search(query, pathFilter, collector, CancellationToken.None);
+    }
+
+    public SearchStats Search(
+        in SearchQuery query,
+        in PathFilter pathFilter,
+        IHitCollector collector,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(collector);
         using var state = BeginRead();

@@ -766,7 +766,9 @@ internal sealed class DirectIndexedGramBuilder
         }
 
         _seen[gram] = _documentStamp;
-        _ordinals[_writePositions[_touchedLookup![gram]]++] = ordinal;
+        var touchedLookup = _touchedLookup
+            ?? throw new InvalidOperationException("PrepareForFill must run before ordinals are added.");
+        _ordinals[_writePositions[touchedLookup[gram]]++] = ordinal;
     }
 
     public BuiltIndex BuildIndex(

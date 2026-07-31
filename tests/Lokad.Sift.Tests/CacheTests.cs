@@ -26,10 +26,7 @@ public sealed class CacheTests
     {
         for (var i = 0; i < RegexVerifier.CacheCapacity + 32; i++)
         {
-            var query = new SearchQuery(
-                $"needle(?#bounded-cache-{i})",
-                PatternMode.Regex,
-                CaseMode.Sensitive);
+            var query = new SearchQuery($"needle(?#bounded-cache-{i})", PatternMode.Regex, CaseMode.Sensitive);
             _ = RegexVerifier.GetRegex(query, CaseMode.Sensitive);
         }
 

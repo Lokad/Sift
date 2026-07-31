@@ -52,7 +52,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(IncludeGlobs: ["src/**"], ExcludeGlobs: ["src/generated/**"], PathRegex: @"\.txt$"),
+            new PathFilter { IncludeGlobs = ["src/**"], ExcludeGlobs = ["src/generated/**"], PathRegex = @"\.txt$" },
             collector);
 
         var actualPaths = collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).ToArray();
@@ -75,7 +75,7 @@ public sealed class SearchIntegrationTests
         var singleLevel = new HitBuffer();
         snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(IncludeGlobs: ["src/*.txt"]),
+            new PathFilter { IncludeGlobs = ["src/*.txt"] },
             singleLevel);
         var singleLevelPaths = singleLevel.Hits
             .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
@@ -86,7 +86,7 @@ public sealed class SearchIntegrationTests
         var recursive = new HitBuffer();
         snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(IncludeGlobs: ["src/**/*.txt"]),
+            new PathFilter { IncludeGlobs = ["src/**/*.txt"] },
             recursive);
         var recursivePaths = recursive.Hits
             .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
@@ -110,10 +110,10 @@ public sealed class SearchIntegrationTests
 
         var filters = new[]
         {
-            new PathFilter(PathPrefix: "src/"),
-            new PathFilter(IncludeGlobs: ["src/**/*.txt"]),
-            new PathFilter(PathRegex: @"nested/.+\.txt$"),
-            new PathFilter(PathPrefix: "src/", IncludeGlobs: ["src/**/*.txt"], ExcludeGlobs: ["src/generated/**"], PathRegex: @"\.txt$")
+            new PathFilter { PathPrefix = "src/" },
+            new PathFilter { IncludeGlobs = ["src/**/*.txt"] },
+            new PathFilter { PathRegex = @"nested/.+\.txt$" },
+            new PathFilter { PathPrefix = "src/", IncludeGlobs = ["src/**/*.txt"], ExcludeGlobs = ["src/generated/**"], PathRegex = @"\.txt$" }
         };
 
         using var snapshot = index.OpenSnapshot();
@@ -152,7 +152,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(PathPrefix: "docs/alpha/"),
+            new PathFilter { PathPrefix = "docs/alpha/" },
             collector);
 
         var actualPaths = collector.Hits
@@ -180,7 +180,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(PathPrefix: "src/caf\u00E9"),
+            new PathFilter { PathPrefix = "src/caf\u00E9" },
             collector);
 
         var actualPaths = collector.Hits
@@ -207,7 +207,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(PathPrefix: "src/"),
+            new PathFilter { PathPrefix = "src/" },
             collector);
         var paths = collector.Hits
             .Select(hit => snapshot.Materialize(hit, 0, 0).Path)
@@ -306,7 +306,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(PathRegex: "special/.+\\.txt$"));
+            new PathFilter { PathRegex = "special/.+\\.txt$" });
 
         Assert.True(plan.UsesPathRegexFilter);
         Assert.True(plan.UsesPathIndex);
@@ -321,7 +321,7 @@ public sealed class SearchIntegrationTests
         using var index = new SiftIndex(fixture.CorpusPath);
         await index.Build(fixture.CreateSource());
         using var snapshot = index.OpenSnapshot();
-        var filter = new PathFilter(IncludeGlobs: [@"src\special\*.txt"]);
+        var filter = new PathFilter { IncludeGlobs = [@"src\special\*.txt"] };
         var plan = snapshot.Explain(
             new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive),
             filter);
@@ -353,11 +353,11 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(IncludeGlobs: ["src/special/*.txt", "docs/config/*.txt"]));
+            new PathFilter { IncludeGlobs = ["src/special/*.txt", "docs/config/*.txt"] });
         var collector = new HitBuffer();
         var stats = snapshot.Search(
             new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(IncludeGlobs: ["src/special/*.txt", "docs/config/*.txt"]),
+            new PathFilter { IncludeGlobs = ["src/special/*.txt", "docs/config/*.txt"] },
             collector);
 
         Assert.True(plan.UsesIncludeGlobs);
@@ -591,11 +591,11 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:record|struct|class)\\s+[A-Z][A-Za-z0-9_]+", PatternMode.Regex, CaseMode.Sensitive);
-        var plan = snapshot.Explain(query, new PathFilter(IncludeGlobs: ["**/*.cs"]));
+        var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
         Assert.Equal("Utf8Regex", plan.VerifierKind);
 
         var collector = new HitBuffer();
-        var stats = snapshot.Search(query, new PathFilter(IncludeGlobs: ["**/*.cs"]), collector);
+        var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
         Assert.Equal(3, collector.Hits.Count);
         Assert.Equal(2, stats.Utf8RegexInvocations);
         Assert.Equal(0, stats.FallbackRegexInvocations);
@@ -789,7 +789,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:Get|TryGet|Create)[A-Z][A-Za-z0-9]+Async\\b", PatternMode.Regex, CaseMode.Sensitive);
-        var plan = snapshot.Explain(query, new PathFilter(IncludeGlobs: ["**/*.cs"]));
+        var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
         Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("BranchUnion", StringComparison.Ordinal));
     }
 
@@ -818,7 +818,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:Get|TryGet|Create|Load)[A-Z][A-Za-z0-9]+Async\\s*\\(", PatternMode.Regex, CaseMode.Sensitive);
         var collector = new HitBuffer();
-        var stats = snapshot.Search(query, new PathFilter(IncludeGlobs: ["**/*.cs"]), collector);
+        var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
         Assert.Equal(800, stats.HitsReturned);
@@ -846,9 +846,9 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var snapshot = index.OpenSnapshot();
-        var query = new SearchQuery("\\[(?:Fact|Theory)\\][\\t ]+(?:public|internal)[\\t ]+(?:async[\\t ]+)?Task", PatternMode.Regex, CaseMode.Sensitive, Multiline: true);
+        var query = new SearchQuery("\\[(?:Fact|Theory)\\][\\t ]+(?:public|internal)[\\t ]+(?:async[\\t ]+)?Task", PatternMode.Regex, CaseMode.Sensitive) { Multiline = true };
         var collector = new HitBuffer();
-        var stats = snapshot.Search(query, new PathFilter(IncludeGlobs: ["**/*.cs"]), collector);
+        var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
         Assert.Equal(300, stats.HitsReturned);
@@ -878,7 +878,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:public|internal)[\\t ]+\\[(?:Fact|Theory)\\]", PatternMode.Regex, CaseMode.Sensitive);
         var collector = new HitBuffer();
-        var stats = snapshot.Search(query, new PathFilter(IncludeGlobs: ["**/*.cs"]), collector);
+        var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.True(stats.CandidateDocumentsAfterIndex > 3000);
         Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
@@ -908,7 +908,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("services\\.(?:AddSingleton|AddScoped|AddTransient)\\b", PatternMode.Regex, CaseMode.Sensitive);
-        var plan = snapshot.Explain(query, new PathFilter(IncludeGlobs: ["**/*.cs"]));
+        var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
         Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("BranchUnion", StringComparison.Ordinal));
     }
 
@@ -935,9 +935,9 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:record|struct|class)\\s+[A-Z][A-Za-z0-9_]+", PatternMode.Regex, CaseMode.Sensitive);
-        var plan = snapshot.Explain(query, new PathFilter(IncludeGlobs: ["**/*.cs"]));
+        var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
         var collector = new HitBuffer();
-        var stats = snapshot.Search(query, new PathFilter(IncludeGlobs: ["**/*.cs"]), collector);
+        var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.True(plan.UsesIndex);
         Assert.Contains("Union", plan.PlanFamily, StringComparison.Ordinal);
@@ -996,9 +996,9 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:class|record)\\s+[A-Z][A-Za-z0-9_]+", PatternMode.Regex, CaseMode.Sensitive);
-        var plan = snapshot.Explain(query, new PathFilter(IncludeGlobs: ["**/*.cs"]));
+        var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
         var collector = new HitBuffer();
-        var stats = snapshot.Search(query, new PathFilter(IncludeGlobs: ["**/*.cs"]), collector);
+        var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("Union", StringComparison.Ordinal));
         Assert.Equal(1000, stats.HitsReturned);
@@ -1017,9 +1017,9 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var snapshot = index.OpenSnapshot();
-        var plan = snapshot.Explain(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive, WholeWord: true), new PathFilter());
+        var plan = snapshot.Explain(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive) { WholeWord = true }, new PathFilter());
         var collector = new HitBuffer();
-        var stats = snapshot.Search(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive, WholeWord: true), new PathFilter(), collector);
+        var stats = snapshot.Search(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive) { WholeWord = true }, new PathFilter(), collector);
 
         Assert.Equal("Utf8Regex", plan.VerifierKind);
         Assert.False(plan.NeedsUnicodeDecode);
@@ -1042,9 +1042,9 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var snapshot = index.OpenSnapshot();
-        var plan = snapshot.Explain(new SearchQuery("alpha.*", PatternMode.Regex, CaseMode.Sensitive, WholeLine: true), new PathFilter());
+        var plan = snapshot.Explain(new SearchQuery("alpha.*", PatternMode.Regex, CaseMode.Sensitive) { WholeLine = true }, new PathFilter());
         var collector = new HitBuffer();
-        var stats = snapshot.Search(new SearchQuery("alpha.*", PatternMode.Regex, CaseMode.Sensitive, WholeLine: true), new PathFilter(), collector);
+        var stats = snapshot.Search(new SearchQuery("alpha.*", PatternMode.Regex, CaseMode.Sensitive) { WholeLine = true }, new PathFilter(), collector);
 
         Assert.Equal("Utf8Regex", plan.VerifierKind);
         Assert.False(plan.NeedsUnicodeDecode);
@@ -1230,7 +1230,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(
             new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(IncludeGlobs: ["src/**"]),
+            new PathFilter { IncludeGlobs = ["src/**"] },
             collector);
 
         Assert.Single(collector.Hits);
@@ -1248,11 +1248,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
-            new SearchQuery(
-                "needle",
-                PatternMode.Literal,
-                CaseMode.Sensitive,
-                MaxBytesScanned: 5),
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxBytesScanned = 5 },
             new PathFilter(),
             collector);
 
@@ -1540,7 +1536,7 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var snapshot = index.OpenSnapshot();
-        var plan = snapshot.Explain(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Insensitive, WholeLine: true), new PathFilter());
+        var plan = snapshot.Explain(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Insensitive) { WholeLine = true }, new PathFilter());
 
         Assert.False(plan.NeedsUnicodeDecode);
         Assert.Equal("LiteralDirectScan", plan.PlanFamily);
@@ -1663,7 +1659,7 @@ public sealed class SearchIntegrationTests
         await sequentialIndex.Build(fixture.CreateSource());
 
         using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive, MaxHits: int.MaxValue, MaxDocuments: int.MaxValue, MaxBytesScanned: long.MaxValue);
+        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue };
         var sequentialCollector = new HitBuffer();
         var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
         var expected = sequentialCollector.Hits
@@ -1712,7 +1708,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot(new SearchOptions(4));
         var collector = new HitBuffer();
         snapshot.Search(
-            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive, MaxHits: int.MaxValue, MaxDocuments: int.MaxValue, MaxBytesScanned: long.MaxValue),
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
             new PathFilter(),
             collector);
 
@@ -1738,7 +1734,7 @@ public sealed class SearchIntegrationTests
         await sequentialIndex.Build(fixture.CreateSource());
 
         using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive, MaxHits: 10, MaxDocuments: 6, MaxBytesScanned: 80);
+        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 10, MaxDocuments = 6, MaxBytesScanned = 80 };
         var sequentialCollector = new HitBuffer();
         var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
         var expected = sequentialCollector.Hits
@@ -1782,17 +1778,11 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
         var storage = Assert.IsType<Lokad.Sift.Storage.CorpusStorage>(index.Storage);
         var opensBeforeSearch = storage.SegmentOpenCount;
-        using var snapshot = index.OpenSnapshot(new SearchOptions(SegmentParallelism: 4));
+        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 4));
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
-            new SearchQuery(
-                "needle",
-                PatternMode.Literal,
-                CaseMode.Sensitive,
-                MaxHits: 1,
-                MaxDocuments: int.MaxValue,
-                MaxBytesScanned: long.MaxValue),
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 1, MaxDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
             new PathFilter(),
             collector);
 
@@ -1816,11 +1806,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
-            new SearchQuery(
-                pattern,
-                patternMode,
-                CaseMode.Sensitive,
-                MaxHits: 3),
+            new SearchQuery(pattern, patternMode, CaseMode.Sensitive) { MaxHits = 3 },
             new PathFilter(),
             collector);
 
@@ -1846,12 +1832,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
-            new SearchQuery(
-                "needle",
-                PatternMode.Literal,
-                CaseMode.Sensitive,
-                MaxHits: 10,
-                MaxHitsPerDocument: 1),
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 10, MaxHitsPerDocument = 1 },
             new PathFilter(),
             collector);
         var paths = collector.Hits
@@ -2250,7 +2231,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
         Assert.Throws<RegexMatchTimeoutException>(() => snapshot.Search(
-            new SearchQuery("^(a+)+\\1$", PatternMode.Regex, CaseMode.Sensitive, TimeoutPolicy: TimeoutPolicy.Throw),
+            new SearchQuery("^(a+)+\\1$", PatternMode.Regex, CaseMode.Sensitive) { TimeoutPolicy = TimeoutPolicy.Throw },
             new PathFilter(),
             collector));
     }
@@ -2267,7 +2248,7 @@ public sealed class SearchIntegrationTests
 
         var stats = snapshot.Search(
             new SearchQuery(string.Empty, PatternMode.Literal, CaseMode.Sensitive),
-            new PathFilter(PathRegex: "^(a+)+\\1$"),
+            new PathFilter { PathRegex = "^(a+)+\\1$" },
             collector);
 
         Assert.Equal(SearchStopReason.RegexTimeout, stats.StopReason);
@@ -2285,11 +2266,11 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var wholeWord = new HitBuffer();
-        snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive, WholeWord: true), new PathFilter(), wholeWord);
+        snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true }, new PathFilter(), wholeWord);
         Assert.Equal(2, wholeWord.Hits.Count);
 
         var wholeLine = new HitBuffer();
-        snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive, WholeLine: true), new PathFilter(), wholeLine);
+        snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true }, new PathFilter(), wholeLine);
         Assert.Single(wholeLine.Hits);
     }
 
@@ -2305,7 +2286,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
-        var stats = snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive, WholeWord: true), new PathFilter(), collector);
+        var stats = snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true }, new PathFilter(), collector);
 
         Assert.Equal(3, stats.HitsReturned);
         Assert.Equal(0, stats.DecodedChars);
@@ -2324,7 +2305,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
-        var stats = snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Insensitive, WholeLine: true), new PathFilter(), collector);
+        var stats = snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Insensitive) { WholeLine = true }, new PathFilter(), collector);
 
         Assert.Equal(2, stats.HitsReturned);
         Assert.Equal(0, stats.DecodedChars);
@@ -2342,7 +2323,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
-        snapshot.Search(new SearchQuery("alpha\\nbeta", PatternMode.Regex, CaseMode.Sensitive, Multiline: true), new PathFilter(), collector);
+        snapshot.Search(new SearchQuery("alpha\\nbeta", PatternMode.Regex, CaseMode.Sensitive) { Multiline = true }, new PathFilter(), collector);
 
         Assert.Single(collector.Hits);
         var materialized = snapshot.Materialize(collector.Hits[0], 0, 0);
@@ -2362,11 +2343,7 @@ public sealed class SearchIntegrationTests
         var collector = new SlowHitCollector();
 
         var stats = snapshot.Search(
-            new SearchQuery(
-                "needle",
-                PatternMode.Literal,
-                CaseMode.Sensitive,
-                MaxElapsedMilliseconds: 50),
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxElapsedMilliseconds = 50 },
             new PathFilter(),
             collector);
 
@@ -2386,11 +2363,7 @@ public sealed class SearchIntegrationTests
         var collector = new SlowHitCollector();
 
         var stats = overlay.Search(
-            new SearchQuery(
-                "needle",
-                PatternMode.Literal,
-                CaseMode.Sensitive,
-                MaxElapsedMilliseconds: 50),
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxElapsedMilliseconds = 50 },
             new PathFilter(),
             collector);
 

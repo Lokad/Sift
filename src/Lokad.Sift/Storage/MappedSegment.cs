@@ -21,10 +21,20 @@ public sealed unsafe class MappedSegment : IDisposable
     private readonly Dictionary<SegmentRegionId, (long Offset, long Length)> _regions = new();
     private int _disposed;
 
+    public MappedSegment(string path)
+        : this(path, validateChecksums: true, CancellationToken.None)
+    {
+    }
+
+    public MappedSegment(string path, bool validateChecksums)
+        : this(path, validateChecksums, CancellationToken.None)
+    {
+    }
+
     public MappedSegment(
         string path,
-        bool validateChecksums = true,
-        CancellationToken cancellationToken = default)
+        bool validateChecksums,
+        CancellationToken cancellationToken)
     {
         var accounted = false;
         try
@@ -61,10 +71,20 @@ public sealed unsafe class MappedSegment : IDisposable
         }
     }
 
+    public MappedSegment(ReadOnlyMemory<byte> bytes)
+        : this(bytes, validateChecksums: true, CancellationToken.None)
+    {
+    }
+
+    public MappedSegment(ReadOnlyMemory<byte> bytes, bool validateChecksums)
+        : this(bytes, validateChecksums, CancellationToken.None)
+    {
+    }
+
     public MappedSegment(
         ReadOnlyMemory<byte> bytes,
-        bool validateChecksums = true,
-        CancellationToken cancellationToken = default)
+        bool validateChecksums,
+        CancellationToken cancellationToken)
     {
         var accounted = false;
         try
@@ -671,7 +691,7 @@ internal sealed unsafe class UnmanagedByteMemoryManager : MemoryManager<byte>
 
     public override Span<byte> GetSpan() => new(_pointer, _length);
 
-    public override MemoryHandle Pin(int elementIndex = 0)
+    public override MemoryHandle Pin(int elementIndex)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(elementIndex);
         if (elementIndex > _length)

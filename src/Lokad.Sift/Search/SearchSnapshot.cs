@@ -32,8 +32,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ISiftStorage storage,
         SiftOptions options,
         SearchOptions searchOptions,
-        Action? onDisposed = null,
-        Action<Exception>? onIndexFailure = null)
+        Action? onDisposed,
+        Action<Exception>? onIndexFailure)
     {
         if (searchOptions.SegmentParallelism < 0)
         {
@@ -44,9 +44,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         _storage = storage;
         _options = options;
-        // default(SearchOptions) is the value supplied by the optional API argument.
         _searchOptions = searchOptions.SegmentParallelism == 0
-            ? new SearchOptions(SegmentParallelism: 1)
+            ? new SearchOptions(segmentParallelism: 1)
             : searchOptions;
         _onDisposed = onDisposed;
         _onIndexFailure = onIndexFailure;
@@ -170,12 +169,26 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             plannerAlternatives);
     }
 
-    public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken = default)
+    public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
+    {
+        return Search(query, pathFilter, collector, CancellationToken.None);
+    }
+
+    public SearchStats Search(
+        in SearchQuery query,
+        in PathFilter pathFilter,
+        IHitCollector collector,
+        CancellationToken cancellationToken)
     {
         return Search(query, pathFilter, collector, pathVisibility: null, cancellationToken);
     }
 
-    internal SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, IPathVisibility? pathVisibility, CancellationToken cancellationToken = default)
+    internal SearchStats Search(
+        in SearchQuery query,
+        in PathFilter pathFilter,
+        IHitCollector collector,
+        IPathVisibility? pathVisibility,
+        CancellationToken cancellationToken)
     {
         ValidateQuery(query);
         using var operation = BeginOperation();
@@ -754,9 +767,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         throw new InvalidOperationException($"Unknown segment id {segmentId}.");
     }
 
+    private SegmentCache OpenSegment(SegmentManifestEntry entry)
+    {
+        return OpenSegment(entry, CancellationToken.None);
+    }
+
     private SegmentCache OpenSegment(
         SegmentManifestEntry entry,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -1051,7 +1069,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             documents);
     }
 
-    private static void SearchLiteralDocument(MappedSegment segment, SegmentDocument document, in SearchQuery query, CaseMode resolvedCaseMode, PreparedLiteralQuery? preparedLiteral, int hitLimit, IHitCollector collector, ref long decodedChars, ref int hitsReturned, ref SearchStopReason stopReason, string? predecodedText = null, string? literalOverride = null)
+    private static void SearchLiteralDocument(
+        MappedSegment segment,
+        SegmentDocument document,
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        PreparedLiteralQuery? preparedLiteral,
+        int hitLimit,
+        IHitCollector collector,
+        ref long decodedChars,
+        ref int hitsReturned,
+        ref SearchStopReason stopReason,
+        string? predecodedText,
+        string? literalOverride)
     {
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
@@ -1245,15 +1275,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         foreach (var fragment in preparedMandatoryFragments)
         {
+            var loweredAsciiBytes = fragment.LoweredAsciiBytes;
             var found = false;
-            for (var i = 0; i <= contentBytes.Length - fragment.LoweredAsciiBytes!.Length; i++)
+            for (var i = 0; i <= contentBytes.Length - loweredAsciiBytes.Length; i++)
             {
                 var matches = true;
-                for (var j = 0; j < fragment.LoweredAsciiBytes!.Length; j++)
+                for (var j = 0; j < loweredAsciiBytes.Length; j++)
                 {
                     var current = contentBytes[i + j];
                     current = current is >= (byte)'A' and <= (byte)'Z' ? (byte)(current + 32) : current;
-                    if (current != fragment.LoweredAsciiBytes[j])
+                    if (current != loweredAsciiBytes[j])
                     {
                         matches = false;
                         break;
@@ -1445,7 +1476,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return loweredNeedle;
     }
 
-    private static PreparedLiteralQuery? PrepareLiteralQuery(in SearchQuery query, CaseMode resolvedCaseMode, string? literalOverride = null)
+    private static PreparedLiteralQuery? PrepareLiteralQuery(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        string? literalOverride)
     {
         var pattern = literalOverride ?? query.Pattern;
         if ((query.PatternMode != PatternMode.Literal && literalOverride is null) || string.IsNullOrEmpty(pattern))
@@ -1461,7 +1495,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return new PreparedLiteralQuery(needle, loweredAsciiNeedle, isAscii);
     }
 
-    private static PreparedMandatoryFragment[] PrepareMandatoryFragments(SearchLiteralAnchor[] mandatoryAnchors, CaseMode resolvedCaseMode)
+    private static PreparedMandatoryFragment[] PrepareMandatoryFragments(
+        SearchLiteralAnchor[] mandatoryAnchors,
+        CaseMode resolvedCaseMode)
     {
         if (mandatoryAnchors.Length == 0)
         {
@@ -1477,7 +1513,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             prepared[i] = new PreparedMandatoryFragment(
                 text,
                 utf8Bytes,
-                resolvedCaseMode == CaseMode.Insensitive && isAscii ? LowerAscii(utf8Bytes) : null,
+                resolvedCaseMode == CaseMode.Insensitive && isAscii ? LowerAscii(utf8Bytes) : [],
                 isAscii);
         }
 
@@ -1523,14 +1559,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             advisoryAnchors[i] = new SearchLiteralAnchor(advisorySeeds[i]);
         }
 
-        var regexGroups = regexPlan.Utf8RegexProgram?.OrderedAnchorGroups;
-        if (regexGroups is null || regexGroups.Length == 0)
+        var utf8RegexProgram = regexPlan.Utf8RegexProgram;
+        var regexGroups = utf8RegexProgram?.OrderedAnchorGroups;
+        if (utf8RegexProgram is null || regexGroups is null || regexGroups.Length == 0)
         {
             return new SearchQueryAnchors(mandatoryAnchors, advisoryAnchors, advisoryCaseMode, []);
         }
 
         var orderedAnchorGroups = new SearchOrderedAnchorGroup[regexGroups.Length];
-        var ignoreCase = regexPlan.Utf8RegexProgram!.IgnoreCase;
+        var ignoreCase = utf8RegexProgram.IgnoreCase;
         for (var groupIndex = 0; groupIndex < regexGroups.Length; groupIndex++)
         {
             var regexAnchors = regexGroups[groupIndex].Anchors;
@@ -1547,7 +1584,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return new SearchQueryAnchors(mandatoryAnchors, advisoryAnchors, advisoryCaseMode, orderedAnchorGroups);
     }
 
-    private static string[] GetMandatoryFragments(in SearchQuery query, string? exactRegexLiteral = null)
+    private static string[] GetMandatoryFragments(in SearchQuery query, string? exactRegexLiteral)
     {
         if (query.PatternMode == PatternMode.Regex)
         {
@@ -1884,7 +1921,7 @@ internal sealed class PreparedLiteralQuery
 
 internal sealed class PreparedMandatoryFragment
 {
-    public PreparedMandatoryFragment(string text, byte[] utf8Bytes, byte[]? loweredAsciiBytes, bool isAscii)
+    public PreparedMandatoryFragment(string text, byte[] utf8Bytes, byte[] loweredAsciiBytes, bool isAscii)
     {
         Text = text;
         Utf8Bytes = utf8Bytes;
@@ -1894,7 +1931,7 @@ internal sealed class PreparedMandatoryFragment
 
     public string Text { get; }
     public byte[] Utf8Bytes { get; }
-    public byte[]? LoweredAsciiBytes { get; }
+    public byte[] LoweredAsciiBytes { get; }
     public bool IsAscii { get; }
 }
 
