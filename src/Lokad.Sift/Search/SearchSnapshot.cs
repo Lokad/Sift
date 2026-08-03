@@ -822,23 +822,51 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         using var operation = BeginOperation();
         var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
-
-        foreach (var entry in _segments)
+        if (!TryFindLiveDocument(normalizedPath, out var cache, out var ordinal))
         {
-            var cache = OpenSegment(entry);
-            if (!cache.Segment.TryFindDocumentOrdinal(normalizedPath, out var ordinal) || IsDeadOrdinal(cache.DeadOrdinals, ordinal))
-            {
-                continue;
-            }
-
-            var document = cache.Segment.GetDocument(ordinal);
-            // The segment mapping is operation-scoped, so the returned memory
-            // must own its bytes independently of the mapping.
-            content = cache.Segment.GetContentBytes(document).ToArray();
-            return true;
+            content = default;
+            return false;
         }
 
-        content = default;
+        var document = cache.Segment.GetDocument(ordinal);
+        // The segment mapping is operation-scoped, so the returned memory
+        // must own its bytes independently of the mapping.
+        content = cache.Segment.GetContentBytes(document).ToArray();
+        return true;
+    }
+
+    internal bool ContainsDocument(DocumentKey key)
+    {
+        try
+        {
+            using var operation = BeginOperation();
+            var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
+            return TryFindLiveDocument(normalizedPath, out _, out _);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    private bool TryFindLiveDocument(
+        string normalizedPath,
+        out SegmentCache cache,
+        out uint ordinal)
+    {
+        foreach (var entry in _segments)
+        {
+            cache = OpenSegment(entry);
+            if (cache.Segment.TryFindDocumentOrdinal(normalizedPath, out ordinal) &&
+                !IsDeadOrdinal(cache.DeadOrdinals, ordinal))
+            {
+                return true;
+            }
+        }
+
+        cache = default;
+        ordinal = default;
         return false;
     }
 

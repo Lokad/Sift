@@ -115,7 +115,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 var removedOverlayDocument = _overlayDocuments.Remove(path);
                 if (removedOverlayDocument ||
                     (!_deletedPaths.Contains(path) &&
-                     _baseSnapshot.TryGetDocumentBytes(new DocumentKey(path), out _)))
+                     _baseSnapshot.ContainsDocument(new DocumentKey(path))))
                 {
                     deletedDocuments++;
                 }

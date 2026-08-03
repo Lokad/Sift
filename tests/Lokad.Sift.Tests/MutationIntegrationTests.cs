@@ -1,5 +1,6 @@
 using System.Text;
 using Lokad.Sift;
+using Lokad.Sift.Search;
 using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Tests;
@@ -113,7 +114,19 @@ public sealed class MutationIntegrationTests
     public async Task OverlayDeletionStatsCountOnlyLiveDocuments()
     {
         using var index = SiftIndex.CreateInMemory();
-        await index.Build(new InMemoryDocumentSource([("src/base.txt", "alpha")]));
+        var largeBody = new string('a', 4 * 1024 * 1024);
+        await index.Build(new InMemoryDocumentSource([("src/base.txt", largeBody)]));
+        var baseKey = new DocumentKey("src/base.txt");
+        using var baseSnapshot = Assert.IsType<SearchSnapshot>(index.OpenSnapshot());
+        Assert.True(baseSnapshot.ContainsDocument(baseKey));
+
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var containsBaseDocument = baseSnapshot.ContainsDocument(baseKey);
+        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        Assert.True(containsBaseDocument);
+        Assert.InRange(allocatedBytes, 0, 64 * 1024);
+
         using var overlay = index.OpenOverlaySnapshot();
 
         var deleteBase = await overlay.Apply(
