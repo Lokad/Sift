@@ -200,6 +200,11 @@ public sealed class Sift : ISift
                 exception));
             throw;
         }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
     }
 
     public ActivityStats GetActivityStats()

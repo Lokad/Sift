@@ -332,13 +332,7 @@ public sealed class StorageLifecycleTests
         Directory.CreateDirectory(orphanDirectory);
         File.Copy(sourcePack, orphanPack);
 
-        using (var stream = new FileStream(storage.ManifestPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        {
-            stream.Position = stream.Length - 1;
-            var value = stream.ReadByte();
-            stream.Position--;
-            stream.WriteByte(unchecked((byte)(value ^ 0x5A)));
-        }
+        CorruptLastByte(storage.ManifestPath);
 
         using var reopened = new SiftIndex(fixture.CorpusPath);
         Assert.True(reopened.RequiresRebuild);
@@ -353,6 +347,31 @@ public sealed class StorageLifecycleTests
         var collector = new HitBuffer();
         snapshot.Search(
             new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            collector);
+        Assert.Single(collector.Hits);
+    }
+
+    [Fact]
+    public async Task CorruptionDiscoveredByBuildRequiresRecovery()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        CorruptLastByte(TestHelpers.GetStorage(index).ManifestPath);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            index.Build(new InMemoryDocumentSource([("src/b.txt", "beta\n")])));
+        Assert.True(index.RequiresRebuild);
+        Assert.Throws<InvalidDataException>(() => index.OpenSnapshot());
+
+        await index.Build(new InMemoryDocumentSource([("src/b.txt", "beta\n")]));
+
+        Assert.False(index.RequiresRebuild);
+        using var snapshot = index.OpenSnapshot();
+        var collector = new HitBuffer();
+        snapshot.Search(
+            new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter(),
             collector);
         Assert.Single(collector.Hits);
@@ -589,6 +608,15 @@ public sealed class StorageLifecycleTests
 
             await Task.Delay(20);
         }
+    }
+
+    private static void CorruptLastByte(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        stream.Position = stream.Length - 1;
+        var value = stream.ReadByte();
+        stream.Position--;
+        stream.WriteByte(unchecked((byte)(value ^ 0x5A)));
     }
 
     private static Process StartSnapshotHolder(string corpusPath, string readyPath, string releasePath)
