@@ -755,23 +755,97 @@ The primary consumer surface is the root `Lokad.Sift` namespace. In addition, `L
 ```csharp
 public enum PatternMode { Literal, Regex }
 public enum CaseMode { Sensitive, Insensitive, Smart }
+public enum TimeoutPolicy { Default, Throw, StopSearch }
+public enum DocumentContentLifetime { UntilNextRead, UntilOperationCompletes }
 
-public readonly record struct SearchQuery(
-    string Pattern,
-    PatternMode PatternMode = PatternMode.Regex,
-    CaseMode CaseMode = CaseMode.Smart,
-    bool WholeWord = false,
-    bool WholeLine = false,
-    bool Multiline = false,
-    bool DotAll = false,
-    int MaxHits = 10_000,
-    int MaxDocuments = int.MaxValue,
-    long MaxBytesScanned = long.MaxValue);
+public readonly record struct SearchQuery
+{
+    public SearchQuery(string pattern)
+        : this(pattern, PatternMode.Regex, CaseMode.Smart) { }
 
-public readonly record struct PathFilter(
-    string[]? IncludeGlobs = null,
-    string[]? ExcludeGlobs = null,
-    string? PathRegex = null);
+    public SearchQuery(string pattern, PatternMode patternMode, CaseMode caseMode)
+        : this(
+            pattern,
+            patternMode,
+            caseMode,
+            wholeWord: false,
+            wholeLine: false,
+            multiline: false,
+            dotAll: false,
+            maxHits: 10_000,
+            maxDocuments: int.MaxValue,
+            maxBytesScanned: long.MaxValue,
+            timeoutPolicy: TimeoutPolicy.StopSearch,
+            maxHitsPerDocument: int.MaxValue,
+            maxElapsedMilliseconds: 30_000) { }
+
+    public SearchQuery(
+        string pattern,
+        PatternMode patternMode,
+        CaseMode caseMode,
+        bool wholeWord,
+        bool wholeLine,
+        bool multiline,
+        bool dotAll,
+        int maxHits,
+        int maxDocuments,
+        long maxBytesScanned,
+        TimeoutPolicy timeoutPolicy,
+        int maxHitsPerDocument,
+        long maxElapsedMilliseconds)
+    {
+        Pattern = pattern;
+        PatternMode = patternMode;
+        CaseMode = caseMode;
+        WholeWord = wholeWord;
+        WholeLine = wholeLine;
+        Multiline = multiline;
+        DotAll = dotAll;
+        MaxHits = maxHits;
+        MaxDocuments = maxDocuments;
+        MaxBytesScanned = maxBytesScanned;
+        TimeoutPolicy = timeoutPolicy;
+        MaxHitsPerDocument = maxHitsPerDocument;
+        MaxElapsedMilliseconds = maxElapsedMilliseconds;
+    }
+
+    public string Pattern { get; init; }
+    public PatternMode PatternMode { get; init; }
+    public CaseMode CaseMode { get; init; }
+    public bool WholeWord { get; init; }
+    public bool WholeLine { get; init; }
+    public bool Multiline { get; init; }
+    public bool DotAll { get; init; }
+    public int MaxHits { get; init; }
+    public int MaxDocuments { get; init; }
+    public long MaxBytesScanned { get; init; }
+    public TimeoutPolicy TimeoutPolicy { get; init; }
+    public int MaxHitsPerDocument { get; init; }
+    public long MaxElapsedMilliseconds { get; init; }
+}
+
+public readonly record struct PathFilter
+{
+    public PathFilter()
+        : this(pathPrefix: null, includeGlobs: null, excludeGlobs: null, pathRegex: null) { }
+
+    public PathFilter(
+        string? pathPrefix,
+        string[]? includeGlobs,
+        string[]? excludeGlobs,
+        string? pathRegex)
+    {
+        PathPrefix = pathPrefix;
+        IncludeGlobs = includeGlobs;
+        ExcludeGlobs = excludeGlobs;
+        PathRegex = pathRegex;
+    }
+
+    public string? PathPrefix { get; init; }
+    public string[]? IncludeGlobs { get; init; }
+    public string[]? ExcludeGlobs { get; init; }
+    public string? PathRegex { get; init; }
+}
 
 public readonly record struct RawHit(
     ulong SegmentId,
@@ -784,10 +858,38 @@ public readonly record struct RawHit(
 public readonly record struct DocumentKey(
     string Path);
 
-public readonly record struct SubmittedDocument(
-    string Path,
-    ReadOnlyMemory<byte> Content,
-    DateTimeOffset? LastModifiedUtc = null);
+public readonly record struct SubmittedDocument
+{
+    public SubmittedDocument(string path, ReadOnlyMemory<byte> content)
+        : this(path, content, lastModifiedUtc: null) { }
+
+    public SubmittedDocument(
+        string path,
+        ReadOnlyMemory<byte> content,
+        DateTimeOffset? lastModifiedUtc)
+        : this(
+            path,
+            content,
+            lastModifiedUtc,
+            DocumentContentLifetime.UntilNextRead) { }
+
+    public SubmittedDocument(
+        string path,
+        ReadOnlyMemory<byte> content,
+        DateTimeOffset? lastModifiedUtc,
+        DocumentContentLifetime contentLifetime)
+    {
+        Path = path;
+        Content = content;
+        LastModifiedUtc = lastModifiedUtc;
+        ContentLifetime = contentLifetime;
+    }
+
+    public string Path { get; init; }
+    public ReadOnlyMemory<byte> Content { get; init; }
+    public DateTimeOffset? LastModifiedUtc { get; init; }
+    public DocumentContentLifetime ContentLifetime { get; init; }
+}
 
 public interface IHitCollector
 {
@@ -802,34 +904,49 @@ public interface IDocumentSource
 public interface IIndexSnapshot : IDisposable
 {
     SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter);
-    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken = default);
+    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector);
+    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
+    bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
 }
 
 public interface IOverlaySnapshot : IIndexSnapshot
 {
-    UpdateStats Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default);
-    UpdateStats ApplyTo(ISift target, CancellationToken cancellationToken = default);
+    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
+    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> ApplyTo(ISift target);
+    Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken);
 }
 
 public interface ISift : IDisposable
 {
-    IIndexSnapshot OpenSnapshot(SearchOptions options = default);
-    IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options = default);
+    bool RequiresRebuild { get; }
+    IIndexSnapshot OpenSnapshot();
+    IIndexSnapshot OpenSnapshot(SearchOptions options);
+    IOverlaySnapshot OpenOverlaySnapshot();
+    IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
+    ActivityStats GetActivityStats();
+    IndexValidationStats GetValidationStats();
+    MaintenanceStats GetMaintenanceStats();
     StorageStats GetStorageStats();
     bool ShouldCompact(CompactOptions options);
-    BuildStats Build(IDocumentSource documents, CancellationToken cancellationToken = default);
-    UpdateStats Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken = default);
-    CompactStats Compact(CompactOptions options, CancellationToken cancellationToken = default);
+    Task<IndexValidationStats> Validate();
+    Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
+    Task<BuildStats> Build(IDocumentSource documents);
+    Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
+    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
+    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<CompactStats> Compact(CompactOptions options);
+    Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken);
 }
 ```
 
 Memory ownership rule:
 
-* `SubmittedDocument.Content` is borrowed memory
-* The builder must fully consume or copy `Content` before the next call to `TryReadNext`
-* The source is only required to keep the backing memory valid until the next `TryReadNext` call returns
-* The core library must not retain references to caller-owned buffers after ingestion of that document completes
+* `SubmittedDocument.Content` is borrowed memory whose declared lifetime is set by `ContentLifetime`
+* for `UntilNextRead`, Sift fully consumes or copies `Content` before calling `TryReadNext` again, and the source may reuse the buffer in that next call
+* for `UntilOperationCompletes`, the source keeps `Content` immutable until the enclosing build, update, or apply task completes
+* the core library must not retain caller-owned buffers beyond the declared lifetime
 
 API rules:
 
