@@ -99,6 +99,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             CreateDeletionKeys(deletionSet),
             cancellationToken);
 
+        var deletedDocuments = 0;
         _stateLock.EnterWriteLock();
         try
         {
@@ -111,7 +112,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
             foreach (var path in deletionSet)
             {
-                _overlayDocuments.Remove(path);
+                var removedOverlayDocument = _overlayDocuments.Remove(path);
+                if (removedOverlayDocument ||
+                    (!_deletedPaths.Contains(path) &&
+                     _baseSnapshot.TryGetDocumentBytes(new DocumentKey(path), out _)))
+                {
+                    deletedDocuments++;
+                }
+
                 _deletedPaths.Add(path);
             }
 
@@ -127,7 +135,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayUpdate.UpsertedDocuments,
             overlayUpdate.SkippedUpserts,
             load.Rejected,
-            deletionSet.Count,
+            deletedDocuments,
             overlayUpdate.PublishedSegments,
             load.SubmittedBytes,
             overlayUpdate.ContentBytes,

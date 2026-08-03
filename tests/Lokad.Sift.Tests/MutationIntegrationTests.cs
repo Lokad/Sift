@@ -110,6 +110,32 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayDeletionStatsCountOnlyLiveDocuments()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/base.txt", "alpha")]));
+        using var overlay = index.OpenOverlaySnapshot();
+
+        var deleteBase = await overlay.Apply(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/base.txt"), new DocumentKey("src/missing.txt")]);
+        Assert.Equal(1, deleteBase.DeletedDocuments);
+
+        await overlay.Apply(
+            new InMemoryDocumentSource([("src/overlay.txt", "beta")]),
+            []);
+        var deleteAgain = await overlay.Apply(
+            new InMemoryDocumentSource([]),
+            [
+                new DocumentKey("src/base.txt"),
+                new DocumentKey("src/missing.txt"),
+                new DocumentKey("src/overlay.txt")
+            ]);
+
+        Assert.Equal(1, deleteAgain.DeletedDocuments);
+    }
+
+    [Fact]
     public async Task OverlaySnapshotMaterializesOverlayHitsAndCanFoldBack()
     {
         using var fixture = new CorpusFixture(
