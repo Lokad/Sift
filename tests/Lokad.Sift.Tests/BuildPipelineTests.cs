@@ -8,6 +8,18 @@ namespace Lokad.Sift.Tests;
 
 public sealed class BuildPipelineTests
 {
+    [Theory]
+    [InlineData("/src/a.txt")]
+    [InlineData("\\src\\a.txt")]
+    [InlineData("C:/src/a.txt")]
+    [InlineData("C:\\src\\a.txt")]
+    [InlineData("C:src/a.txt")]
+    [InlineData("c:src/a.txt")]
+    public void CanonicalizePathRejectsRootedAndDriveQualifiedPaths(string path)
+    {
+        Assert.Throws<ArgumentException>(() => IndexBuilder.CanonicalizePath(path));
+    }
+
     [Fact]
     public async Task PartitionDocumentsSplitsOnTargetContentBytes()
     {

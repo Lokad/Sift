@@ -8,6 +8,31 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageLifecycleTests
 {
     [Fact]
+    public async Task IndexIdentityPersistsAcrossMutationsAndReopen()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        IndexIdentity updatedIdentity;
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            Assert.Equal(new IndexIdentity(Guid.Empty, 0), index.GetIndexIdentity());
+            await index.Build(fixture.CreateSource());
+            var builtIdentity = index.GetIndexIdentity();
+            Assert.NotEqual(Guid.Empty, builtIdentity.CorpusId);
+            Assert.Equal(1ul, builtIdentity.Generation);
+
+            await index.Update(
+                new InMemoryDocumentSource([("src/b.txt", "beta\n")]),
+                []);
+            updatedIdentity = index.GetIndexIdentity();
+            Assert.Equal(builtIdentity.CorpusId, updatedIdentity.CorpusId);
+            Assert.True(updatedIdentity.Generation > builtIdentity.Generation);
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        Assert.Equal(updatedIdentity, reopened.GetIndexIdentity());
+    }
+
+    [Fact]
     public void WriterLockRetriesOnlySharingViolations()
     {
         Assert.True(CorpusStorage.IsWriterLockContention(

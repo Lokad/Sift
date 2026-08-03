@@ -445,6 +445,11 @@ public readonly record struct ActivityStats(
     bool IsWriteBusy,
     SiftActivity CurrentActivity);
 
+public readonly record struct IndexIdentity(
+    // Distinguishes replacement corpora that happen to reuse a generation number.
+    Guid CorpusId,
+    ulong Generation);
+
 public enum IndexValidationState
 {
     NotStarted,
@@ -589,6 +594,7 @@ public interface IOverlaySnapshot : IIndexSnapshot
 public interface ISift : IDisposable
 {
     bool RequiresRebuild { get; }
+    IndexIdentity GetIndexIdentity();
     IIndexSnapshot OpenSnapshot();
     IIndexSnapshot OpenSnapshot(SearchOptions options);
     IOverlaySnapshot OpenOverlaySnapshot();

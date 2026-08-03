@@ -429,7 +429,10 @@ internal sealed class IndexBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         path = path.Replace('\\', '/');
-        if (Path.IsPathRooted(path))
+        if (path[0] == '/' ||
+            path.Length >= 2 &&
+            path[1] == ':' &&
+            path[0] is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
         {
             throw new ArgumentException("Document path must be relative.", nameof(path));
         }

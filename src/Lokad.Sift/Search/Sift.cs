@@ -224,6 +224,24 @@ public sealed class Sift : ISift
         }
     }
 
+    public IndexIdentity GetIndexIdentity()
+    {
+        ThrowIfDisposed();
+        ThrowIfRebuildRequired();
+        try
+        {
+            using var snapshot = _storage.OpenReadSnapshot();
+            return new IndexIdentity(
+                snapshot.Manifest.CorpusId,
+                snapshot.Manifest.Generation);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            MarkRequiresRebuild(exception);
+            throw;
+        }
+    }
+
     public Task<IndexValidationStats> Validate()
     {
         return Validate(CancellationToken.None);
