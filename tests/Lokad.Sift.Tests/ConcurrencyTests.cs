@@ -162,6 +162,41 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task QueuedBuildSamplesRecoveryStateAfterEarlierBuildCompletes()
+    {
+        using var fixture = new CorpusFixture();
+        var lockPath = Path.Combine(fixture.CorpusPath, "lock");
+        Directory.CreateDirectory(lockPath);
+        File.WriteAllText(Path.Combine(lockPath, "rebuild.required"), "interrupted");
+        using var index = new SiftIndex(fixture.CorpusPath);
+        Assert.True(index.RequiresRebuild);
+        using var firstSource = new BlockingDocumentSource("src/first.txt", "alpha\n");
+        using var secondSource = new BlockingDocumentSource("src/second.txt", "beta\n");
+
+        var firstBuild = index.Build(firstSource);
+        await firstSource.WaitUntilBlocked();
+        var secondBuild = index.Build(secondSource);
+        await Task.Delay(100);
+
+        firstSource.Release();
+        await firstBuild;
+        await secondSource.WaitUntilBlocked();
+
+        using (var snapshot = index.OpenSnapshot())
+        {
+            var collector = new HitBuffer();
+            var stats = snapshot.Search(
+                new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter(),
+                collector);
+            Assert.Equal(1, stats.HitsReturned);
+        }
+
+        secondSource.Release();
+        await secondBuild;
+    }
+
+    [Fact]
     public async Task OverlaySearchesRemainConsistentDuringApply()
     {
         using var index = SiftIndex.CreateInMemory();

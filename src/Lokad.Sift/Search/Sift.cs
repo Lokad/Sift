@@ -21,6 +21,7 @@ public sealed class Sift : ISift
     private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
     private readonly CancellationTokenSource _validationCancellation = new();
     private readonly ManualResetEventSlim _validationsIdle = new(initialState: true);
+    private readonly SemaphoreSlim _buildGate = new(1, 1);
     private readonly SemaphoreSlim _validationGate = new(1, 1);
     private readonly ConcurrentDictionary<LegacyMaintenanceKey, long> _legacyDeadContentBytes = new();
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
@@ -159,8 +160,11 @@ public sealed class Sift : ISift
             using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
                 _writerCancellation.Token);
+            var acquiredGate = false;
             try
             {
+                await _buildGate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
+                acquiredGate = true;
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
                 var stats = BuildCore(documents, operationCancellation.Token);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
@@ -168,6 +172,11 @@ public sealed class Sift : ISift
             }
             finally
             {
+                if (acquiredGate)
+                {
+                    _buildGate.Release();
+                }
+
                 activity.Dispose();
             }
         });
@@ -864,6 +873,7 @@ public sealed class Sift : ISift
         _writersIdle.Dispose();
         _validationCancellation.Dispose();
         _validationsIdle.Dispose();
+        _buildGate.Dispose();
         _validationGate.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
