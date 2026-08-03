@@ -590,6 +590,52 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task FailedValidationMarksRebuildWhenConcurrentUpdateRetainsSegment()
+    {
+        var storage = new BlockingValidationStorage(new InMemorySiftStorage());
+        using var index = new SiftIndex(storage, new SiftOptions());
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+
+        var validation = index.Validate();
+        try
+        {
+            Assert.True(storage.ValidationStarted.Wait(TimeSpan.FromSeconds(5)));
+            await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        }
+        finally
+        {
+            storage.ReleaseValidation.Set();
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => validation);
+        Assert.True(index.RequiresRebuild);
+        Assert.Equal(IndexValidationState.Failed, index.GetValidationStats().State);
+    }
+
+    [Fact]
+    public async Task FailedValidationDoesNotPoisonConcurrentReplacementBuild()
+    {
+        var storage = new BlockingValidationStorage(new InMemorySiftStorage());
+        using var index = new SiftIndex(storage, new SiftOptions());
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+
+        var validation = index.Validate();
+        try
+        {
+            Assert.True(storage.ValidationStarted.Wait(TimeSpan.FromSeconds(5)));
+            await index.Build(new InMemoryDocumentSource([("src/b.txt", "beta")]));
+        }
+        finally
+        {
+            storage.ReleaseValidation.Set();
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => validation);
+        Assert.False(index.RequiresRebuild);
+        Assert.Equal(IndexValidationState.NotStarted, index.GetValidationStats().State);
+    }
+
+    [Fact]
     public async Task LegacyManifestDeadBytesAreCachedAndMigratedOnMutation()
     {
         using var fixture = new CorpusFixture(
@@ -1072,6 +1118,53 @@ public sealed class StorageIntegrityTests
             MTimeUtcTicks = 0,
             ContentHash64 = Hashing.Fnv1A64(bytes)
         };
+    }
+
+    private sealed class BlockingValidationStorage(ISiftStorage inner) : ISiftStorage
+    {
+        public ManualResetEventSlim ValidationStarted { get; } = new();
+        public ManualResetEventSlim ReleaseValidation { get; } = new();
+        public bool HasManifest => inner.HasManifest;
+        public bool IsReclamationPending => inner.IsReclamationPending;
+        public IDisposable AcquireWriterLock() => inner.AcquireWriterLock();
+        public IDisposable AcquireWriterLock(CancellationToken cancellationToken) => inner.AcquireWriterLock(cancellationToken);
+
+        public SegmentManifestEntry PublishSegment<TDocument>(
+            IReadOnlyList<TDocument> documents,
+            ulong segmentId,
+            long minimumFreeBytesAfterPublication,
+            CancellationToken cancellationToken)
+            where TDocument : ISegmentBuildDocument =>
+            inner.PublishSegment(documents, segmentId, minimumFreeBytesAfterPublication, cancellationToken);
+
+        public void PublishManifest(CorpusManifest manifest) => inner.PublishManifest(manifest);
+        public CorpusManifest ReadManifest() => inner.ReadManifest();
+        public MappedSegment OpenSegment(ulong segmentId) => inner.OpenSegment(segmentId);
+        public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken) =>
+            inner.OpenSegment(segmentId, cancellationToken);
+
+        public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
+        {
+            ValidationStarted.Set();
+            ReleaseValidation.Wait(cancellationToken);
+            throw new InvalidDataException("Simulated retained segment corruption.");
+        }
+
+        public long GetSegmentBytes(ulong segmentId) => inner.GetSegmentBytes(segmentId);
+        public long? GetAvailableBytes() => inner.GetAvailableBytes();
+        public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();
+        public StorageReadSnapshot OpenReadSnapshot() => inner.OpenReadSnapshot();
+        public StorageStats GetStorageStats() => inner.GetStorageStats();
+        public void ReclaimUnreferencedSegments(CancellationToken cancellationToken) =>
+            inner.ReclaimUnreferencedSegments(cancellationToken);
+
+        public bool CanReplaceSegmentsUnderWriterLock() => inner.CanReplaceSegmentsUnderWriterLock();
+        public void EnsureReplacementAllowedUnderWriterLock() => inner.EnsureReplacementAllowedUnderWriterLock();
+        public void PrepareFullBuildUnderWriterLock(bool discardCorruptState) =>
+            inner.PrepareFullBuildUnderWriterLock(discardCorruptState);
+
+        public void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+            inner.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
     }
 }
 

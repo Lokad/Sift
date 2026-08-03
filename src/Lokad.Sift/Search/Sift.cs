@@ -272,6 +272,32 @@ public sealed class Sift : ISift
         CancellationToken cancellationToken,
         long validationRevision)
     {
+        long GetSegmentBytes(ulong segmentId)
+        {
+            try
+            {
+                return _storage.GetSegmentBytes(segmentId);
+            }
+            catch (Exception exception) when (IsIndexCorruption(exception))
+            {
+                PreserveRetainedSegmentFailure(validationRevision, segmentId, exception);
+                throw;
+            }
+        }
+
+        void ValidateSegment(ulong segmentId)
+        {
+            try
+            {
+                _storage.ValidateSegment(segmentId, cancellationToken);
+            }
+            catch (Exception exception) when (IsIndexCorruption(exception))
+            {
+                PreserveRetainedSegmentFailure(validationRevision, segmentId, exception);
+                throw;
+            }
+        }
+
         var watch = Stopwatch.StartNew();
         using var snapshot = _storage.OpenReadSnapshot();
         var manifest = snapshot.Manifest;
@@ -280,7 +306,7 @@ public sealed class Sift : ISift
         for (var i = 0; i < manifest.Segments.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            segmentBytes[i] = _storage.GetSegmentBytes(manifest.Segments[i].SegmentId);
+            segmentBytes[i] = GetSegmentBytes(manifest.Segments[i].SegmentId);
             totalBytes = checked(totalBytes + segmentBytes[i]);
         }
 
@@ -301,9 +327,7 @@ public sealed class Sift : ISift
         for (var i = 0; i < manifest.Segments.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _storage.ValidateSegment(
-                manifest.Segments[i].SegmentId,
-                cancellationToken);
+            ValidateSegment(manifest.Segments[i].SegmentId);
             validatedBytes += segmentBytes[i];
             if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
                 IndexValidationState.Running,
@@ -435,6 +459,7 @@ public sealed class Sift : ISift
         try
         {
             using var writerLock = _storage.AcquireWriterLock();
+            ThrowIfRebuildRequired();
             if (!_storage.HasManifest ||
                 !_storage.CanReplaceSegmentsUnderWriterLock())
             {
@@ -522,6 +547,7 @@ public sealed class Sift : ISift
 
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
+        ThrowIfRebuildRequired();
         var hadManifest = _storage.HasManifest;
         var existingManifest = hadManifest
             ? _storage.ReadManifest()
@@ -718,6 +744,7 @@ public sealed class Sift : ISift
     {
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
+        ThrowIfRebuildRequired();
         var manifest = _storage.HasManifest
             ? _storage.ReadManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
@@ -1164,6 +1191,52 @@ public sealed class Sift : ISift
                 Failure = exception.Message
             };
             return true;
+        }
+    }
+
+    private void PreserveRetainedSegmentFailure(
+        long validationRevision,
+        ulong failedSegmentId,
+        Exception exception)
+    {
+        lock (_validationStatsSync)
+        {
+            if (_validationStatsRevision == validationRevision)
+            {
+                // The outer validation failure path records failures for the generation
+                // that is still current.
+                return;
+            }
+        }
+
+        // A concurrent mutation can invalidate validation statistics while retaining
+        // the immutable pack that failed. Resolve that edge under the writer lock so a
+        // completed full build is not poisoned, while additive updates fail closed.
+        using var _ = _storage.AcquireWriterLock();
+        Exception? currentFailure = null;
+        try
+        {
+            if (!_storage.HasManifest ||
+                _storage.ReadManifest().Segments.All(segment => segment.SegmentId != failedSegmentId))
+            {
+                return;
+            }
+
+            currentFailure = exception;
+        }
+        catch (Exception manifestException) when (IsIndexCorruption(manifestException))
+        {
+            currentFailure = manifestException;
+        }
+
+        MarkRequiresRebuild(currentFailure);
+        lock (_validationStatsSync)
+        {
+            _validationStats = _validationStats with
+            {
+                State = IndexValidationState.Failed,
+                Failure = currentFailure.Message
+            };
         }
     }
 
