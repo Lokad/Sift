@@ -294,7 +294,11 @@ public sealed class Sift : ISift
             }
             catch (Exception exception) when (IsIndexCorruption(exception))
             {
-                PreserveRetainedSegmentFailure(validationRevision, segmentId, exception);
+                PreserveRetainedSegmentFailure(
+                    validationRevision,
+                    segmentId,
+                    exception,
+                    cancellationToken);
                 throw;
             }
         }
@@ -307,7 +311,11 @@ public sealed class Sift : ISift
             }
             catch (Exception exception) when (IsIndexCorruption(exception))
             {
-                PreserveRetainedSegmentFailure(validationRevision, segmentId, exception);
+                PreserveRetainedSegmentFailure(
+                    validationRevision,
+                    segmentId,
+                    exception,
+                    cancellationToken);
                 throw;
             }
         }
@@ -1212,7 +1220,8 @@ public sealed class Sift : ISift
     private void PreserveRetainedSegmentFailure(
         long validationRevision,
         ulong failedSegmentId,
-        Exception exception)
+        Exception exception,
+        CancellationToken cancellationToken)
     {
         lock (_validationStatsSync)
         {
@@ -1227,7 +1236,29 @@ public sealed class Sift : ISift
         // A concurrent mutation can invalidate validation statistics while retaining
         // the immutable pack that failed. Resolve that edge under the writer lock so a
         // completed full build is not poisoned, while additive updates fail closed.
-        using var _ = _storage.AcquireWriterLock();
+        IDisposable writerLock;
+        try
+        {
+            writerLock = _storage.AcquireWriterLock(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation prevents exact reconciliation, so fail closed rather
+            // than leave a known-corrupt pack searchable.
+            MarkRequiresRebuild(exception);
+            lock (_validationStatsSync)
+            {
+                _validationStats = _validationStats with
+                {
+                    State = IndexValidationState.Failed,
+                    Failure = exception.Message
+                };
+            }
+
+            throw;
+        }
+
+        using var _ = writerLock;
         Exception? currentFailure = null;
         try
         {

@@ -636,6 +636,31 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task StaleValidationReconciliationObservesCancellation()
+    {
+        var storage = new BlockingValidationStorage(new InMemorySiftStorage());
+        using var index = new SiftIndex(storage, new SiftOptions());
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var cancellation = new CancellationTokenSource();
+        var validation = index.Validate(cancellation.Token);
+        Assert.True(storage.ValidationStarted.Wait(TimeSpan.FromSeconds(5)));
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+
+        using (storage.BlockWriterLock())
+        {
+            storage.ReleaseValidation.Set();
+            Assert.True(storage.ValidationFailed.Wait(TimeSpan.FromSeconds(5)));
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await validation.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+
+        Assert.True(index.RequiresRebuild);
+        Assert.Equal(IndexValidationState.Failed, index.GetValidationStats().State);
+    }
+
+    [Fact]
     public async Task LegacyManifestDeadBytesAreCachedAndMigratedOnMutation()
     {
         using var fixture = new CorpusFixture(
@@ -1122,12 +1147,25 @@ public sealed class StorageIntegrityTests
 
     private sealed class BlockingValidationStorage(ISiftStorage inner) : ISiftStorage
     {
+        private readonly ManualResetEventSlim _writerLockAllowed = new(initialState: true);
         public ManualResetEventSlim ValidationStarted { get; } = new();
+        public ManualResetEventSlim ValidationFailed { get; } = new();
         public ManualResetEventSlim ReleaseValidation { get; } = new();
         public bool HasManifest => inner.HasManifest;
         public bool IsReclamationPending => inner.IsReclamationPending;
-        public IDisposable AcquireWriterLock() => inner.AcquireWriterLock();
-        public IDisposable AcquireWriterLock(CancellationToken cancellationToken) => inner.AcquireWriterLock(cancellationToken);
+        public IDisposable AcquireWriterLock() => AcquireWriterLock(CancellationToken.None);
+
+        public IDisposable AcquireWriterLock(CancellationToken cancellationToken)
+        {
+            _writerLockAllowed.Wait(cancellationToken);
+            return inner.AcquireWriterLock(cancellationToken);
+        }
+
+        public IDisposable BlockWriterLock()
+        {
+            _writerLockAllowed.Reset();
+            return new WriterLockBlock(_writerLockAllowed);
+        }
 
         public SegmentManifestEntry PublishSegment<TDocument>(
             IReadOnlyList<TDocument> documents,
@@ -1147,6 +1185,7 @@ public sealed class StorageIntegrityTests
         {
             ValidationStarted.Set();
             ReleaseValidation.Wait(cancellationToken);
+            ValidationFailed.Set();
             throw new InvalidDataException("Simulated retained segment corruption.");
         }
 
@@ -1165,6 +1204,14 @@ public sealed class StorageIntegrityTests
 
         public void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
             inner.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+
+        private sealed class WriterLockBlock(ManualResetEventSlim writerLockAllowed) : IDisposable
+        {
+            public void Dispose()
+            {
+                writerLockAllowed.Set();
+            }
+        }
     }
 }
 
