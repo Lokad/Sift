@@ -1105,7 +1105,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private void ValidateQuery(in SearchQuery query)
     {
-        ArgumentNullException.ThrowIfNull(query.Pattern);
+        ArgumentNullException.ThrowIfNull(query);
         if (!Enum.IsDefined(query.PatternMode))
         {
             throw new ArgumentOutOfRangeException(nameof(query), "PatternMode is invalid.");

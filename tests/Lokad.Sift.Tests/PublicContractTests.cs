@@ -25,6 +25,29 @@ public sealed class PublicContractTests
         Assert.Single(typeof(IOverlaySnapshot).GetMethods(), static method => method.Name == nameof(IOverlaySnapshot.ApplyTo));
     }
 
+    [Fact]
+    public void RequiredInputContractsCannotBeDefaultValueTypes()
+    {
+        Assert.False(typeof(SearchQuery).IsValueType);
+        Assert.False(typeof(DocumentKey).IsValueType);
+        Assert.False(typeof(SubmittedDocument).IsValueType);
+        Assert.Throws<ArgumentNullException>(() => new SearchQuery(null!));
+        Assert.Throws<ArgumentNullException>(() => new DocumentKey(null!));
+        Assert.Throws<ArgumentNullException>(() => new SubmittedDocument(null!, ReadOnlyMemory<byte>.Empty));
+    }
+
+    [Fact]
+    public void LargeOperationResultsAreReferenceTypes()
+    {
+        Assert.False(typeof(SearchPlan).IsValueType);
+        Assert.False(typeof(SearchStats).IsValueType);
+        Assert.False(typeof(BuildStats).IsValueType);
+        Assert.False(typeof(UpdateStats).IsValueType);
+        Assert.False(typeof(CompactStats).IsValueType);
+        Assert.False(typeof(MaintenanceStats).IsValueType);
+        Assert.False(typeof(StorageStats).IsValueType);
+    }
+
     private static int CountMethods<T>(string name)
     {
         return typeof(T).GetMethods(BindingFlags.Public | BindingFlags.Instance)

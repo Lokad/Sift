@@ -719,6 +719,7 @@ public sealed class Sift : ISift
         foreach (var deletion in deletions)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ArgumentNullException.ThrowIfNull(deletion);
             var normalized = IndexBuilder.CanonicalizePath(deletion.Path);
             if (!deletionSet.Add(normalized))
             {

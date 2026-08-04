@@ -2146,18 +2146,20 @@ static RealQueryResult RunRealQuery(IIndexSnapshot snapshot, RealQueryDefinition
     }
 
     var samples = GC.AllocateUninitializedArray<double>(options.MeasurementIterations);
-    SearchStats lastStats = default;
+    SearchStats? lastStats = null;
     for (var i = 0; i < samples.Length; i++)
     {
         var start = Stopwatch.GetTimestamp();
-        if (!TryRunSearch(snapshot, searchQuery, pathFilter, options.QueryTimeoutMilliseconds, out lastStats))
+        if (!TryRunSearch(snapshot, searchQuery, pathFilter, options.QueryTimeoutMilliseconds, out var stats))
         {
             return CreateTimedOutQueryResult(query, explain, options.QueryTimeoutMilliseconds);
         }
 
+        lastStats = stats;
         samples[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
     }
 
+    var completedStats = lastStats ?? throw new InvalidOperationException("At least one measurement iteration is required.");
     Array.Sort(samples);
     var medianIndex = samples.Length / 2;
     var p95Index = Math.Min(samples.Length - 1, (int)Math.Ceiling(samples.Length * 0.95) - 1);
@@ -2187,27 +2189,32 @@ static RealQueryResult RunRealQuery(IIndexSnapshot snapshot, RealQueryDefinition
             alternative.EstimatedCandidateDocuments,
             alternative.EstimatedCost,
             alternative.SegmentCount)).ToArray(),
-        lastStats.ScopeDocuments,
-        lastStats.ScopeBytes,
-        lastStats.PostingsBytesRead,
-        lastStats.CandidateDocumentsAfterIndex,
-        lastStats.CandidateDocumentsAfterPrecheck,
-        lastStats.VerifiedDocuments,
-        lastStats.BytesScanned,
-        lastStats.DecodedChars,
-        lastStats.RegexInvocations,
-        lastStats.Utf8RegexInvocations,
-        lastStats.FallbackRegexInvocations,
-        lastStats.Utf8RegexMatchedDocuments,
-        lastStats.Utf8RegexMatchesEnumerated,
-        lastStats.Utf8RegexCacheHits,
-        lastStats.Utf8RegexCacheMisses,
-        lastStats.HitsReturned,
-        lastStats.StopReason.ToString(),
+        completedStats.ScopeDocuments,
+        completedStats.ScopeBytes,
+        completedStats.PostingsBytesRead,
+        completedStats.CandidateDocumentsAfterIndex,
+        completedStats.CandidateDocumentsAfterPrecheck,
+        completedStats.VerifiedDocuments,
+        completedStats.BytesScanned,
+        completedStats.DecodedChars,
+        completedStats.RegexInvocations,
+        completedStats.Utf8RegexInvocations,
+        completedStats.FallbackRegexInvocations,
+        completedStats.Utf8RegexMatchedDocuments,
+        completedStats.Utf8RegexMatchesEnumerated,
+        completedStats.Utf8RegexCacheHits,
+        completedStats.Utf8RegexCacheMisses,
+        completedStats.HitsReturned,
+        completedStats.StopReason.ToString(),
         false);
 }
 
-static bool TryRunSearch(IIndexSnapshot snapshot, in SearchQuery query, in PathFilter pathFilter, int? timeoutMilliseconds, out SearchStats stats)
+static bool TryRunSearch(
+    IIndexSnapshot snapshot,
+    in SearchQuery query,
+    in PathFilter pathFilter,
+    int? timeoutMilliseconds,
+    [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SearchStats? stats)
 {
     using var cts = timeoutMilliseconds is int timeout && timeout > 0 ? new CancellationTokenSource(timeout) : null;
     try
@@ -3509,7 +3516,7 @@ internal sealed class BenchmarkSource : IDocumentSource
         _count = count;
     }
 
-    public bool TryReadNext(out SubmittedDocument document)
+    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
     {
         if (_index >= _count)
         {
@@ -3553,7 +3560,7 @@ internal sealed class FileSystemDocumentSource : IDocumentSource
         _pendingDirectories.Enqueue(rootPath);
     }
 
-    public bool TryReadNext(out SubmittedDocument document)
+    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
     {
         if (_maxFiles is int maxFiles && _emittedFiles >= maxFiles)
         {
@@ -3609,7 +3616,7 @@ internal sealed class MemoryDocumentSource : IDocumentSource
         _documents = documents;
     }
 
-    public bool TryReadNext(out SubmittedDocument document)
+    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
     {
         if (_index >= _documents.Length)
         {

@@ -273,7 +273,7 @@ internal sealed class FileSystemDocumentSource : IDocumentSource
         _files = Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories).GetEnumerator();
     }
 
-    public bool TryReadNext(out SubmittedDocument document)
+    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
     {
         if (!_files.MoveNext())
         {

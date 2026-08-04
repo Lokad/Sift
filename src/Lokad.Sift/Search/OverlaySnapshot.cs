@@ -116,6 +116,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {
+            ArgumentNullException.ThrowIfNull(deletion);
             var normalized = IndexBuilder.CanonicalizePath(deletion.Path);
             if (!deletionSet.Add(normalized))
             {
@@ -644,7 +645,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             _documents = documents;
         }
 
-        public bool TryReadNext(out SubmittedDocument document)
+        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
         {
             if (_index >= _documents.Count)
             {
@@ -736,7 +737,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         private int _index;
 
-        public bool TryReadNext(out SubmittedDocument document)
+        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
         {
             if (_index >= documents.Count)
             {

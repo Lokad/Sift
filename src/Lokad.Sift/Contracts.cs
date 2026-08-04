@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Lokad.Sift;
 
 public enum PatternMode
@@ -53,7 +55,7 @@ public enum DocumentContentLifetime
     UntilOperationCompletes
 }
 
-public readonly record struct SearchQuery
+public sealed record SearchQuery
 {
     public SearchQuery(string pattern)
         : this(pattern, PatternMode.Regex, CaseMode.Smart)
@@ -96,6 +98,7 @@ public readonly record struct SearchQuery
         int maxHitsPerDocument,
         long maxElapsedMilliseconds)
     {
+        ArgumentNullException.ThrowIfNull(pattern);
         Pattern = pattern;
         PatternMode = patternMode;
         CaseMode = caseMode;
@@ -178,9 +181,18 @@ public readonly record struct RawHit(
     int StartLine,
     int EndLine);
 
-public readonly record struct DocumentKey(string Path);
+public sealed record DocumentKey
+{
+    public DocumentKey(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        Path = path;
+    }
 
-public readonly record struct SubmittedDocument
+    public string Path { get; }
+}
+
+public sealed record SubmittedDocument
 {
     public SubmittedDocument(
         string path,
@@ -207,6 +219,7 @@ public readonly record struct SubmittedDocument
         DateTimeOffset? lastModifiedUtc,
         DocumentContentLifetime contentLifetime)
     {
+        ArgumentNullException.ThrowIfNull(path);
         Path = path;
         Content = content;
         LastModifiedUtc = lastModifiedUtc;
@@ -364,7 +377,7 @@ public readonly record struct PlannerAlternative(
     double EstimatedCost,
     int SegmentCount);
 
-public readonly record struct SearchPlan(
+public sealed record SearchPlan(
     string PatternKind,
     CaseMode ResolvedCaseMode,
     int ScopeDocumentCount,
@@ -397,7 +410,7 @@ public readonly record struct SearchPlan(
     TimeoutPolicy TimeoutPolicy,
     PlannerAlternative[] PlannerAlternatives);
 
-public readonly record struct SearchStats(
+public sealed record SearchStats(
     long ElapsedMilliseconds,
     int ScopeDocuments,
     long ScopeBytes,
@@ -418,7 +431,7 @@ public readonly record struct SearchStats(
     int HitsReturned,
     SearchStopReason StopReason);
 
-public readonly record struct BuildStats(
+public sealed record BuildStats(
     int SubmittedDocuments,
     int IndexedDocuments,
     int RejectedDocuments,
@@ -442,7 +455,7 @@ public readonly record struct BuildStats(
     public IndexIdentity CommittedIdentity { get; init; }
 }
 
-public readonly record struct UpdateStats(
+public sealed record UpdateStats(
     int SubmittedUpserts,
     int UpsertedDocuments,
     // Valid replacements omitted because both indexed metadata and body bytes already match.
@@ -514,7 +527,7 @@ public sealed record CompactOptions
     public long MinimumFreeBytesAfterCompaction { get; init; }
 }
 
-public readonly record struct CompactStats(
+public sealed record CompactStats(
     int InputSegments,
     int OutputSegments,
     int MergedDocuments,
@@ -579,7 +592,7 @@ public readonly record struct IndexValidationStats(
     public bool IsReady => State == IndexValidationState.Ready;
 }
 
-public readonly record struct MaintenanceStats(
+public sealed record MaintenanceStats(
     // Manifest generation observed by this snapshot.
     ulong Generation,
     // Packs referenced by the manifest.
@@ -607,7 +620,7 @@ public readonly record struct MaintenanceStats(
     // Live packs below both targets; diagnostic only, because they may not fit together.
     int SmallSegmentCount);
 
-public readonly record struct StorageStats(
+public sealed record StorageStats(
     // Currently reachable packs that are also present on disk.
     int ManifestSegmentCount,
     // On-disk lengths of those packs; this excludes manifest metadata.
@@ -679,7 +692,7 @@ public readonly record struct DocumentVisitStats(
 
 public interface IDocumentSource
 {
-    bool TryReadNext(out SubmittedDocument document);
+    bool TryReadNext([NotNullWhen(true)] out SubmittedDocument? document);
 }
 
 public interface IIndexSnapshot : IDisposable
