@@ -42,7 +42,10 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         where TDocument : ISegmentBuildDocument
     {
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);
-        using var _ = new MappedSegment(bytes, validateChecksums: true);
+        using var _ = new MappedSegment(
+            bytes,
+            validateChecksums: false,
+            cancellationToken);
         lock (_stateLock)
         {
             _reclamationPending = true;

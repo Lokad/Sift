@@ -18,18 +18,9 @@ internal sealed unsafe class MappedSegment : IDisposable
     private byte* _pointer;
     private readonly long _mappedLength;
     private readonly ReadOnlyMemory<byte> _backingMemory;
-    private readonly Dictionary<SegmentRegionId, (long Offset, long Length)> _regions = new();
+    private readonly (long Offset, long Length)[] _regions =
+        new (long Offset, long Length)[SegmentFormat.ReservedRegionIdEnd + 1];
     private int _disposed;
-
-    public MappedSegment(string path)
-        : this(path, validateChecksums: true, CancellationToken.None)
-    {
-    }
-
-    public MappedSegment(string path, bool validateChecksums)
-        : this(path, validateChecksums, CancellationToken.None)
-    {
-    }
 
     public MappedSegment(
         string path,
@@ -69,16 +60,6 @@ internal sealed unsafe class MappedSegment : IDisposable
             _mappedFile?.Dispose();
             throw;
         }
-    }
-
-    public MappedSegment(ReadOnlyMemory<byte> bytes)
-        : this(bytes, validateChecksums: true, CancellationToken.None)
-    {
-    }
-
-    public MappedSegment(ReadOnlyMemory<byte> bytes, bool validateChecksums)
-        : this(bytes, validateChecksums, CancellationToken.None)
-    {
     }
 
     public MappedSegment(
@@ -588,7 +569,7 @@ internal sealed unsafe class MappedSegment : IDisposable
 
     private byte* BasePointer => _pointer;
 
-    private (long Offset, long Length) GetRegion(SegmentRegionId regionId) => _regions[regionId];
+    private (long Offset, long Length) GetRegion(SegmentRegionId regionId) => _regions[(int)regionId];
 
     private uint LowerBound(string value)
     {
@@ -698,31 +679,53 @@ internal sealed unsafe class MappedSegment : IDisposable
         ValidateTableBounds(checksumTableOffset, RegionCount * SegmentFormat.ChecksumEntrySize, fileLength, "checksum table");
 
         var cursor = regionDirectoryOffset;
-        var seen = new HashSet<SegmentRegionId>();
+        ulong seenRegionIds = 0;
         for (var i = 0; i < RegionCount; i++)
         {
             var id = (SegmentRegionId)Read<int>(cursor);
-            if (!Enum.IsDefined(id) || !seen.Add(id))
+            if (!Enum.IsDefined(id))
             {
-                throw new InvalidDataException($"Invalid or duplicate region id '{id}'.");
+                throw new InvalidDataException($"Invalid region id '{id}'.");
+            }
+
+            var idMask = 1UL << (int)id;
+            if ((seenRegionIds & idMask) != 0)
+            {
+                throw new InvalidDataException($"Duplicate region id '{id}'.");
             }
 
             var regionOffset = Read<long>(cursor + 4);
             var regionLength = Read<long>(cursor + 12);
             ValidateTableBounds(regionOffset, regionLength, fileLength, $"region '{id}'");
-            _regions[id] = (regionOffset, regionLength);
+            seenRegionIds |= idMask;
+            _regions[(int)id] = (regionOffset, regionLength);
             cursor += SegmentFormat.RegionDirectoryEntrySize;
         }
 
+        var expectedRegionIds = ((1UL << (SegmentFormat.RegionCount + 1)) - 1) & ~1UL;
+        if (seenRegionIds != expectedRegionIds)
+        {
+            throw new InvalidDataException("The Sift segment region directory is incomplete.");
+        }
+
         var checksumCursor = checksumTableOffset;
-        var checksumIds = new HashSet<SegmentRegionId>();
+        ulong seenChecksumIds = 0;
         for (var i = 0; i < RegionCount; i++)
         {
             var id = (SegmentRegionId)Read<int>(checksumCursor);
-            if (!Enum.IsDefined(id) || !checksumIds.Add(id) || !_regions.ContainsKey(id))
+            if (!Enum.IsDefined(id))
+            {
+                throw new InvalidDataException($"Invalid checksum region id '{id}'.");
+            }
+
+            var idMask = 1UL << (int)id;
+            if ((seenChecksumIds & idMask) != 0 ||
+                (seenRegionIds & idMask) == 0)
             {
                 throw new InvalidDataException($"Invalid or duplicate checksum region id '{id}'.");
             }
+
+            seenChecksumIds |= idMask;
 
             if (validateChecksums)
             {
@@ -731,6 +734,11 @@ internal sealed unsafe class MappedSegment : IDisposable
             }
 
             checksumCursor += SegmentFormat.ChecksumEntrySize;
+        }
+
+        if (seenChecksumIds != expectedRegionIds)
+        {
+            throw new InvalidDataException("The Sift segment checksum table is incomplete.");
         }
 
         var documentTable = GetRegion(SegmentRegionId.DocumentTable);

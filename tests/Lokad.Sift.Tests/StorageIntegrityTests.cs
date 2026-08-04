@@ -461,7 +461,8 @@ public sealed class StorageIntegrityTests
         Directory.CreateDirectory(fixture.CorpusPath);
         File.WriteAllBytes(path, [0x01, 0x02, 0x03]);
 
-        Assert.Throws<InvalidDataException>(() => new MappedSegment(path));
+        Assert.Throws<InvalidDataException>(() =>
+            new MappedSegment(path, validateChecksums: true, CancellationToken.None));
     }
 
     [Fact]
@@ -900,7 +901,10 @@ public sealed class StorageIntegrityTests
             ((int)SegmentRegionId.Stats - 1) * SegmentFormat.RegionDirectoryEntrySize + 12;
         BinaryPrimitives.WriteInt64LittleEndian(legacy.AsSpan(statsDirectoryLengthOffset), SegmentFormat.LegacyStatsLength);
 
-        using var segment = new MappedSegment(legacy, validateChecksums: false);
+        using var segment = new MappedSegment(
+            legacy,
+            validateChecksums: false,
+            CancellationToken.None);
         var stats = segment.GetNonAsciiDocumentStats();
 
         Assert.Equal(segment.DocumentCount, stats.DocumentCount);

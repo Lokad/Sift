@@ -7,7 +7,6 @@ internal static unsafe class SegmentWriter
 {
     public static long Write<TDocument>(
         string path,
-        string tempPath,
         ulong segmentId,
         IReadOnlyList<TDocument> documents,
         Action<long> ensureCapacity,
@@ -15,7 +14,6 @@ internal static unsafe class SegmentWriter
         where TDocument : ISegmentBuildDocument
     {
         using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
-        _ = tempPath;
         using var prepared = Prepare(documents, cancellationToken);
         ensureCapacity(prepared.TotalLength);
         using var stream = new FileStream(path, new FileStreamOptions
