@@ -10,7 +10,7 @@ namespace Lokad.Sift;
 
 public sealed class Sift : ISift
 {
-    private delegate StreamedDocuments UpdateDocumentStreamer(
+    private delegate ValueTask<StreamedDocuments> UpdateDocumentStreamer(
         IReadOnlySet<string> forbiddenPaths,
         RejectedUpsertPolicy rejectedUpsertPolicy,
         Action<List<StoredDocument>> preparePartition,
@@ -28,7 +28,7 @@ public sealed class Sift : ISift
     private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
     private readonly CancellationTokenSource _validationCancellation = new();
     private readonly ManualResetEventSlim _validationsIdle = new(initialState: true);
-    private readonly SemaphoreSlim _buildGate = new(1, 1);
+    private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private readonly SemaphoreSlim _validationGate = new(1, 1);
     private readonly ConcurrentDictionary<LegacyMaintenanceKey, long> _legacyDeadContentBytes = new();
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
@@ -178,7 +178,7 @@ public sealed class Sift : ISift
         ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
-                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, options, isRecovery, token)),
+                (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
                 operationCancellation),
             cancellationToken);
     }
@@ -211,7 +211,7 @@ public sealed class Sift : ISift
         ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
-                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, options, isRecovery, token)),
+                (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
                 operationCancellation),
             cancellationToken);
     }
@@ -220,32 +220,39 @@ public sealed class Sift : ISift
         Func<CancellationToken, ValueTask<BuildStats>> build,
         CancellationToken cancellationToken)
     {
-        var activity = BeginActivity(SiftActivity.Build);
-        return Task.Run(async () =>
-        {
-            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                _writerCancellation.Token);
-            var acquiredGate = false;
-            try
+        return RunMutation(
+            SiftActivity.Build,
+            async operationCancellation =>
             {
-                await _buildGate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
-                acquiredGate = true;
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
-                var stats = await build(operationCancellation.Token).ConfigureAwait(false);
+                var stats = await build(operationCancellation).ConfigureAwait(false);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
                 return stats with { PeakManagedBytes = peakManagedBytes };
-            }
-            finally
-            {
-                if (acquiredGate)
-                {
-                    _buildGate.Release();
-                }
+            },
+            cancellationToken);
+    }
 
-                activity.Dispose();
-            }
-        });
+    private async Task<TResult> RunMutation<TResult>(
+        SiftActivity activity,
+        Func<CancellationToken, ValueTask<TResult>> mutation,
+        CancellationToken cancellationToken)
+    {
+        using var request = BeginMutationRequest();
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _writerCancellation.Token);
+        await _mutationGate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
+        try
+        {
+            using var activityScope = BeginActivity(activity);
+            return await Task.Run(
+                async () => await mutation(operationCancellation.Token).ConfigureAwait(false),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
     }
 
     private async ValueTask<BuildStats> BuildCore(
@@ -629,7 +636,7 @@ public sealed class Sift : ISift
         ArgumentNullException.ThrowIfNull(upserts);
         return RunUpdate(
             (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
-                IndexBuilder.StreamDocuments(
+                new ValueTask<StreamedDocuments>(IndexBuilder.StreamDocuments(
                     upserts,
                     operationCancellation,
                     _options,
@@ -638,7 +645,7 @@ public sealed class Sift : ISift
                     rejectedUpsertPolicy,
                     collectAcceptedPaths: true,
                     preparePartition,
-                    publishPartition),
+                    publishPartition)),
             deletions,
             options,
             cancellationToken);
@@ -684,7 +691,7 @@ public sealed class Sift : ISift
         ArgumentNullException.ThrowIfNull(upserts);
         return RunUpdate(
             (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
-                IndexBuilder.StreamDocuments(
+                IndexBuilder.StreamDocumentsAsync(
                     upserts,
                     operationCancellation,
                     _options,
@@ -709,33 +716,28 @@ public sealed class Sift : ISift
         ThrowIfRebuildRequired();
         ValidateUpdateOptions(options);
         var deletionArray = deletions.ToArray();
-        var activity = BeginActivity(SiftActivity.Update);
-        return Task.Run(() =>
-        {
-            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                _writerCancellation.Token);
-            try
+        return RunMutation(
+            SiftActivity.Update,
+            async operationCancellation =>
             {
-                return UpdateCore(
-                    streamDocuments,
-                    deletionArray,
-                    options,
-                    operationCancellation.Token);
-            }
-            catch (Exception exception) when (IsIndexCorruption(exception))
-            {
-                MarkRequiresRebuild(exception);
-                throw;
-            }
-            finally
-            {
-                activity.Dispose();
-            }
-        });
+                try
+                {
+                    return await UpdateCoreAsync(
+                        streamDocuments,
+                        deletionArray,
+                        options,
+                        operationCancellation).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (IsIndexCorruption(exception))
+                {
+                    MarkRequiresRebuild(exception);
+                    throw;
+                }
+            },
+            cancellationToken);
     }
 
-    private UpdateStats UpdateCore(
+    private async ValueTask<UpdateStats> UpdateCoreAsync(
         UpdateDocumentStreamer streamDocuments,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
@@ -809,7 +811,7 @@ public sealed class Sift : ISift
         try
         {
             var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-            upsertLoad = streamDocuments(
+            upsertLoad = await streamDocuments(
                 deletionSet,
                 options.RejectedUpsertPolicy,
                 partition => RemoveUnchangedDocuments(
@@ -827,7 +829,7 @@ public sealed class Sift : ISift
                         _options.MinimumFreeBytesAfterMutation,
                         cancellationToken));
                 },
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             var removalPaths = new HashSet<string>(deletionSet, StringComparer.Ordinal);
             if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
             {
@@ -1004,29 +1006,24 @@ public sealed class Sift : ISift
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         ValidateCompactOptions(options);
-        var activity = BeginActivity(SiftActivity.Compact);
-        return Task.Run(async () =>
-        {
-            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                _writerCancellation.Token);
-            try
+        return RunMutation(
+            SiftActivity.Compact,
+            async operationCancellation =>
             {
-                using var measurement = ManagedMemoryPeakMeasurement.Start();
-                var stats = CompactCore(options, operationCancellation.Token);
-                var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
-                return stats with { PeakManagedBytes = peakManagedBytes };
-            }
-            catch (Exception exception) when (IsIndexCorruption(exception))
-            {
-                MarkRequiresRebuild(exception);
-                throw;
-            }
-            finally
-            {
-                activity.Dispose();
-            }
-        });
+                try
+                {
+                    using var measurement = ManagedMemoryPeakMeasurement.Start();
+                    var stats = CompactCore(options, operationCancellation);
+                    var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
+                    return stats with { PeakManagedBytes = peakManagedBytes };
+                }
+                catch (Exception exception) when (IsIndexCorruption(exception))
+                {
+                    MarkRequiresRebuild(exception);
+                    throw;
+                }
+            },
+            cancellationToken);
     }
 
     private CompactStats CompactCore(CompactOptions options, CancellationToken cancellationToken)
@@ -1158,7 +1155,7 @@ public sealed class Sift : ISift
         _writersIdle.Dispose();
         _validationCancellation.Dispose();
         _validationsIdle.Dispose();
-        _buildGate.Dispose();
+        _mutationGate.Dispose();
         _validationGate.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
@@ -1393,18 +1390,23 @@ public sealed class Sift : ISift
         }
     }
 
-    private IDisposable BeginActivity(SiftActivity activity)
+    private IDisposable BeginMutationRequest()
     {
         lock (_activitySync)
         {
             ThrowIfDisposed();
             if (++_activeWriters == 1)
             {
-                Volatile.Write(ref _currentActivity, (int)activity);
                 _writersIdle.Reset();
             }
         }
 
+        return new MutationRequestScope(this);
+    }
+
+    private IDisposable BeginActivity(SiftActivity activity)
+    {
+        Volatile.Write(ref _currentActivity, (int)activity);
         return new ActivityScope(this);
     }
 
@@ -1628,12 +1630,27 @@ public sealed class Sift : ISift
                 return;
             }
 
-            lock (owner._activitySync)
+            Volatile.Write(ref owner._currentActivity, (int)SiftActivity.Idle);
+        }
+    }
+
+    private sealed class MutationRequestScope(Sift owner) : IDisposable
+    {
+        private Sift? _owner = owner;
+
+        public void Dispose()
+        {
+            var currentOwner = Interlocked.Exchange(ref _owner, null);
+            if (currentOwner is null)
             {
-                if (--owner._activeWriters == 0)
+                return;
+            }
+
+            lock (currentOwner._activitySync)
+            {
+                if (--currentOwner._activeWriters == 0)
                 {
-                    Volatile.Write(ref owner._currentActivity, (int)SiftActivity.Idle);
-                    owner._writersIdle.Set();
+                    currentOwner._writersIdle.Set();
                 }
             }
         }

@@ -8,7 +8,7 @@ namespace Lokad.Sift.Indexer;
 
 internal sealed class IndexBuilder
 {
-    private delegate StreamedDocuments BuildDocumentStreamer(
+    private delegate ValueTask<StreamedDocuments> BuildDocumentStreamer(
         Action<List<StoredDocument>> preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition);
 
@@ -25,36 +25,36 @@ internal sealed class IndexBuilder
         _options = options;
     }
 
-    public BuildStats Build(
+    public ValueTask<BuildStats> BuildAsync(
         IDocumentSource source,
         BuildOptions options,
         bool discardCorruptState,
         CancellationToken cancellationToken)
     {
-        return BuildCore(
-            (preparePartition, publishPartition) => StreamDocuments(
-                source,
-                cancellationToken,
-                _options,
-                operationName: "build",
-                forbiddenPaths: null,
-                rejectedUpsertPolicy: RejectedUpsertPolicy.PreserveExisting,
-                collectAcceptedPaths: false,
-                preparePartition,
-                publishPartition),
+        return BuildCoreAsync(
+            (preparePartition, publishPartition) => new ValueTask<StreamedDocuments>(StreamDocuments(
+                    source,
+                    cancellationToken,
+                    _options,
+                    operationName: "build",
+                    forbiddenPaths: null,
+                    rejectedUpsertPolicy: RejectedUpsertPolicy.PreserveExisting,
+                    collectAcceptedPaths: false,
+                    preparePartition,
+                    publishPartition)),
             discardCorruptState,
             options,
             cancellationToken);
     }
 
-    public BuildStats Build(
+    public ValueTask<BuildStats> BuildAsync(
         IAsyncEnumerable<SubmittedDocument> source,
         BuildOptions options,
         bool discardCorruptState,
         CancellationToken cancellationToken)
     {
-        return BuildCore(
-            (preparePartition, publishPartition) => StreamDocuments(
+        return BuildCoreAsync(
+            (preparePartition, publishPartition) => StreamDocumentsAsync(
                 source,
                 cancellationToken,
                 _options,
@@ -69,7 +69,7 @@ internal sealed class IndexBuilder
             cancellationToken);
     }
 
-    private BuildStats BuildCore(
+    private async ValueTask<BuildStats> BuildCoreAsync(
         BuildDocumentStreamer streamDocuments,
         bool discardCorruptState,
         BuildOptions options,
@@ -88,7 +88,7 @@ internal sealed class IndexBuilder
         StreamedDocuments load;
         try
         {
-            load = streamDocuments(
+            load = await streamDocuments(
                 static _ => { },
                 partition =>
                 {
@@ -99,7 +99,7 @@ internal sealed class IndexBuilder
                         segmentId,
                         _options.MinimumFreeBytesAfterMutation,
                         cancellationToken));
-                });
+                }).ConfigureAwait(false);
 
             var pendingStats = new BuildStats(
                 SubmittedDocuments: load.Submitted,
@@ -184,7 +184,7 @@ internal sealed class IndexBuilder
         return accumulator.Complete();
     }
 
-    public static StreamedDocuments StreamDocuments(
+    public static async ValueTask<StreamedDocuments> StreamDocumentsAsync(
         IAsyncEnumerable<SubmittedDocument> source,
         CancellationToken cancellationToken,
         SiftOptions options,
@@ -204,18 +204,10 @@ internal sealed class IndexBuilder
             preparePartition,
             publishPartition);
 
-        var enumerator = source.GetAsyncEnumerator(cancellationToken);
-        try
+        await foreach (var submittedDocument in source.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                accumulator.Add(enumerator.Current);
-            }
-        }
-        finally
-        {
-            enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            cancellationToken.ThrowIfCancellationRequested();
+            accumulator.Add(submittedDocument);
         }
 
         return accumulator.Complete();

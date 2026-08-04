@@ -197,6 +197,35 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task DifferentMutationKindsShareOneCoordinatorAndReportTheRunningActivity()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        using var buildSource = new BlockingDocumentSource("src/base.txt", "alpha\n");
+        using var updateSource = new BlockingDocumentSource("src/update.txt", "beta\n");
+
+        var build = index.Build(buildSource);
+        await buildSource.WaitUntilBlocked();
+        var update = index.Update(updateSource, []);
+        await Task.Delay(100);
+
+        var duringBuild = index.GetActivityStats();
+        Assert.True(duringBuild.IsWriteBusy);
+        Assert.Equal(SiftActivity.Build, duringBuild.CurrentActivity);
+        Assert.False(updateSource.WaitUntilBlocked().IsCompleted);
+
+        buildSource.Release();
+        await build;
+        await updateSource.WaitUntilBlocked();
+        var duringUpdate = index.GetActivityStats();
+        Assert.True(duringUpdate.IsWriteBusy);
+        Assert.Equal(SiftActivity.Update, duringUpdate.CurrentActivity);
+
+        updateSource.Release();
+        await update;
+        Assert.False(index.GetActivityStats().IsWriteBusy);
+    }
+
+    [Fact]
     public async Task OverlaySearchesRemainConsistentDuringApply()
     {
         using var index = SiftIndex.CreateInMemory();

@@ -4,7 +4,8 @@ namespace Lokad.Sift.Storage;
 
 public sealed class InMemorySiftStorage : ISiftStorage
 {
-    private readonly object _writerLock = new();
+    private readonly SemaphoreSlim _writerGate = new(1, 1);
+    private readonly object _stateLock = new();
     private readonly Dictionary<ulong, byte[]> _segments = new();
     private readonly Dictionary<ulong, int> _snapshotSegmentReferences = new();
     private readonly Dictionary<ulong, int> _snapshotGenerationReferences = new();
@@ -15,7 +16,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
     {
         get
         {
-            lock (_writerLock)
+            lock (_stateLock)
             {
                 return _manifest is not null;
             }
@@ -29,14 +30,8 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public IDisposable AcquireWriterLock(CancellationToken cancellationToken)
     {
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (System.Threading.Monitor.TryEnter(_writerLock, millisecondsTimeout: 50))
-            {
-                return new Releaser(_writerLock);
-            }
-        }
+        _writerGate.Wait(cancellationToken);
+        return new Releaser(_writerGate);
     }
 
     public SegmentManifestEntry PublishSegment<TDocument>(
@@ -48,7 +43,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
     {
         var (bytes, contentBytes) = SegmentWriter.WriteToBytes(segmentId, documents, cancellationToken);
         using var _ = new MappedSegment(bytes, validateChecksums: true);
-        lock (_writerLock)
+        lock (_stateLock)
         {
             _reclamationPending = true;
             if (!_segments.TryAdd(segmentId, bytes))
@@ -62,7 +57,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public void PublishManifest(CorpusManifest manifest)
     {
-        lock (_writerLock)
+        lock (_stateLock)
         {
             _manifest = CloneManifest(manifest);
             _ = ReclaimUnreferencedSegmentsUnderWriterLock();
@@ -71,7 +66,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public CorpusManifest ReadManifest()
     {
-        lock (_writerLock)
+        lock (_stateLock)
         {
             return _manifest is not null
                 ? CloneManifest(_manifest)
@@ -87,7 +82,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
     public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken)
     {
         byte[] bytes;
-        lock (_writerLock)
+        lock (_stateLock)
         {
             if (!_segments.TryGetValue(segmentId, out var storedBytes))
             {
@@ -116,7 +111,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
     public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
     {
         byte[] bytes;
-        lock (_writerLock)
+        lock (_stateLock)
         {
             if (!_segments.TryGetValue(segmentId, out var storedBytes))
             {
@@ -139,7 +134,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     public long GetSegmentBytes(ulong segmentId)
     {
-        lock (_writerLock)
+        lock (_stateLock)
         {
             return _segments.TryGetValue(segmentId, out var bytes)
                 ? bytes.Length
@@ -156,7 +151,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
     {
         get
         {
-            lock (_writerLock)
+            lock (_stateLock)
             {
                 return _reclamationPending;
             }
@@ -169,7 +164,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
     {
-        lock (_writerLock)
+        lock (_stateLock)
         {
             var manifest = _manifest is not null
                 ? CloneManifest(_manifest)
@@ -196,7 +191,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     StorageStats ISiftStorage.GetStorageStats()
     {
-        lock (_writerLock)
+        lock (_stateLock)
         {
             var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
             return GetStorageStatsUnderWriterLock(reclamation);
@@ -221,33 +216,39 @@ public sealed class InMemorySiftStorage : ISiftStorage
 
     void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
     {
-        if (!discardCorruptState)
+        lock (_stateLock)
         {
-            EnsureReplacementAllowedUnderWriterLock();
-            return;
-        }
+            if (!discardCorruptState)
+            {
+                EnsureReplacementAllowedUnderWriterLock();
+                return;
+            }
 
-        _manifest = null;
-        _segments.Clear();
-        _snapshotSegmentReferences.Clear();
-        _snapshotGenerationReferences.Clear();
-        _reclamationPending = false;
+            _manifest = null;
+            _segments.Clear();
+            _snapshotSegmentReferences.Clear();
+            _snapshotGenerationReferences.Clear();
+            _reclamationPending = false;
+        }
     }
 
     void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
-        var referencedSegmentIds = _manifest?.Segments
-            .Select(static segment => segment.SegmentId)
-            .ToHashSet() ?? [];
-        foreach (var segmentId in attemptedSegmentIds)
+        lock (_stateLock)
         {
-            if (!referencedSegmentIds.Contains(segmentId))
+            var referencedSegmentIds = _manifest?.Segments
+                .Select(static segment => segment.SegmentId)
+                .ToHashSet() ?? [];
+            foreach (var segmentId in attemptedSegmentIds)
             {
-                _segments.Remove(segmentId);
+                if (!referencedSegmentIds.Contains(segmentId))
+                {
+                    _segments.Remove(segmentId);
+                }
             }
-        }
 
-        _reclamationPending = _segments.Keys.Any(segmentId => !referencedSegmentIds.Contains(segmentId));
+            _reclamationPending = _segments.Keys.Any(segmentId => !referencedSegmentIds.Contains(segmentId));
+        }
     }
 
     private StorageStats GetStorageStatsUnderWriterLock(SegmentReclamationStats reclamation)
@@ -290,6 +291,14 @@ public sealed class InMemorySiftStorage : ISiftStorage
     }
 
     private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock()
+    {
+        lock (_stateLock)
+        {
+            return ReclaimUnreferencedSegmentsCore();
+        }
+    }
+
+    private SegmentReclamationStats ReclaimUnreferencedSegmentsCore()
     {
         if (_manifest is null)
         {
@@ -369,17 +378,13 @@ public sealed class InMemorySiftStorage : ISiftStorage
             segments);
     }
 
-    private sealed class Releaser(object syncRoot) : IDisposable
+    private sealed class Releaser(SemaphoreSlim gate) : IDisposable
     {
-        private object? _syncRoot = syncRoot;
+        private SemaphoreSlim? _gate = gate;
 
         public void Dispose()
         {
-            var syncRoot = Interlocked.Exchange(ref _syncRoot, null);
-            if (syncRoot is not null)
-            {
-                System.Threading.Monitor.Exit(syncRoot);
-            }
+            Interlocked.Exchange(ref _gate, null)?.Release();
         }
     }
 
@@ -395,7 +400,7 @@ public sealed class InMemorySiftStorage : ISiftStorage
                 return;
             }
 
-            lock (owner._writerLock)
+            lock (owner._stateLock)
             {
                 for (var i = 0; i < segmentIds.Length; i++)
                 {
