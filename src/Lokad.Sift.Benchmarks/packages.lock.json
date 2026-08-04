@@ -20,6 +20,12 @@
           "System.Management": "9.0.5"
         }
       },
+      "Lokad.Utf8Regex": {
+        "type": "Direct",
+        "requested": "[0.1.0, )",
+        "resolved": "0.1.0",
+        "contentHash": "N9avcuagFJSz/f6h9dCvJfUeNMkgV8s/tuFUIdf6rRUS0Eg5SsUv5tD3e0emNr13aF4OggF1/vLx+giZB/AjOg=="
+      },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",
         "resolved": "0.15.6",
@@ -165,22 +171,6 @@
         "type": "Transitive",
         "resolved": "4.7.0",
         "contentHash": "VybpaOQQhqE6siHppMktjfGBw1GCwvCqiufqmP8F1nj7fTUNtW35LOEt3UZTEsECfo+ELAl/9o9nJx3U91i7vA=="
-      },
-      "lokad.sift": {
-        "type": "Project",
-        "dependencies": {
-          "Lokad.Sift.Core": "[1.0.0, )",
-          "Lokad.Utf8Regex": "[0.1.0, )"
-        }
-      },
-      "lokad.sift.core": {
-        "type": "Project"
-      },
-      "Lokad.Utf8Regex": {
-        "type": "CentralTransitive",
-        "requested": "[0.1.0, )",
-        "resolved": "0.1.0",
-        "contentHash": "N9avcuagFJSz/f6h9dCvJfUeNMkgV8s/tuFUIdf6rRUS0Eg5SsUv5tD3e0emNr13aF4OggF1/vLx+giZB/AjOg=="
       }
     }
   }

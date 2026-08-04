@@ -7,6 +7,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Lokad.Utf8Regex" />
   </ItemGroup>
 
   <ItemGroup>
@@ -14,7 +15,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Lokad.Sift.Cli\Lokad.Sift.Cli.csproj" />
-    <ProjectReference Include="..\..\src\Lokad.Sift\Lokad.Sift.csproj" />
+    <ProjectReference Include="..\..\src\Lokad.Sift.Cli\Lokad.Sift.Cli.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Keep low-level verification in the implementation assembly without granting
+         friend access from the shipped Lokad.Sift assembly. -->
+    <Compile Include="..\..\src\Lokad.Sift\**\*.cs"
+             Exclude="..\..\src\Lokad.Sift\bin\**;..\..\src\Lokad.Sift\obj\**"
+             LinkBase="Lokad.Sift.Source" />
   </ItemGroup>
 </Project>

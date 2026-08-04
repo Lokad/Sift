@@ -5,6 +5,13 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
-    <ProjectReference Include="..\Lokad.Sift\Lokad.Sift.csproj" />
+    <PackageReference Include="Lokad.Utf8Regex" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Bench internal kernels in-assembly without granting friend access from
+         the shipped Lokad.Sift assembly. -->
+    <Compile Include="..\Lokad.Sift\**\*.cs"
+             Exclude="..\Lokad.Sift\bin\**;..\Lokad.Sift\obj\**"
+             LinkBase="Lokad.Sift.Source" />
   </ItemGroup>
 </Project>
