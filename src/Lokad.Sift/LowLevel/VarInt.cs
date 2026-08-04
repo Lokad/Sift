@@ -1,6 +1,6 @@
 namespace Lokad.Sift.LowLevel;
 
-public static class VarInt
+internal static class VarInt
 {
     public static int WriteUInt32(Span<byte> buffer, uint value)
     {

@@ -8,7 +8,7 @@ using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
 
-public sealed unsafe class MappedSegment : IDisposable
+internal sealed unsafe class MappedSegment : IDisposable
 {
     private static long s_mappedBytes;
     private static int s_openSegments;
@@ -799,9 +799,9 @@ public sealed unsafe class MappedSegment : IDisposable
     }
 }
 
-public delegate void PostingsVisitor(ReadOnlySpan<byte> payload, int docFreq);
+internal delegate void PostingsVisitor(ReadOnlySpan<byte> payload, int docFreq);
 
-public readonly record struct PostingsMetadata(
+internal readonly record struct PostingsMetadata(
     int DocumentFrequency,
     int EncodedBytes);
 
@@ -809,11 +809,11 @@ internal readonly record struct NonAsciiDocumentStats(
     int DocumentCount,
     long ContentBytes);
 
-public readonly record struct IndexRegionPair(
+internal readonly record struct IndexRegionPair(
     SegmentRegionId Lexicon,
     SegmentRegionId Postings);
 
-public readonly record struct SegmentDocument(
+internal readonly record struct SegmentDocument(
     uint Ordinal,
     ulong PathOffset,
     int PathLength,

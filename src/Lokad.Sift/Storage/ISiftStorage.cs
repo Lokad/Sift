@@ -1,6 +1,6 @@
 namespace Lokad.Sift.Storage;
 
-public interface ISiftStorage
+internal interface ISiftStorage
 {
     bool HasManifest { get; }
     bool IsReclamationPending { get; }

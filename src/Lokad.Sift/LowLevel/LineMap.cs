@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace Lokad.Sift.LowLevel;
 
-public static class LineMap
+internal static class LineMap
 {
     public const int AnchorStride = 128;
 

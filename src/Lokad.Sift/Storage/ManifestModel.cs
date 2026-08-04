@@ -1,6 +1,6 @@
 namespace Lokad.Sift.Storage;
 
-public readonly record struct SegmentManifestEntry(
+internal readonly record struct SegmentManifestEntry(
     ulong SegmentId,
     int DocumentCount,
     long ContentBytes,
@@ -10,7 +10,7 @@ public readonly record struct SegmentManifestEntry(
     public int LiveDocumentCount => DocumentCount - DeadOrdinals.Length;
 }
 
-public sealed record CorpusManifest(
+internal sealed record CorpusManifest(
     Guid CorpusId,
     ulong ContentRevision,
     ulong Generation,

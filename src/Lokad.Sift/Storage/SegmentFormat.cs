@@ -1,6 +1,6 @@
 namespace Lokad.Sift.Storage;
 
-public enum SegmentRegionId
+internal enum SegmentRegionId
 {
     DocumentTable = 1,
     PathBlob = 2,

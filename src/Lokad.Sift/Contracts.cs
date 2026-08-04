@@ -684,10 +684,8 @@ public interface IDocumentSource
 
 public interface IIndexSnapshot : IDisposable
 {
-    DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector);
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
     SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter);
-    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector);
     SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
@@ -695,17 +693,12 @@ public interface IIndexSnapshot : IDisposable
 
 public interface IOverlaySnapshot : IIndexSnapshot
 {
-    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, OverlayApplyOptions options);
     Task<UpdateStats> Apply(
         IDocumentSource upserts,
         ReadOnlySpan<DocumentKey> deletions,
         OverlayApplyOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyTo(ISift target);
-    Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options);
     Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
@@ -714,9 +707,7 @@ public interface ISift : IDisposable
     bool RequiresRebuild { get; }
     IndexIdentity GetIndexIdentity();
     IndexState GetIndexState();
-    IIndexSnapshot OpenSnapshot();
     IIndexSnapshot OpenSnapshot(SearchOptions options);
-    IOverlaySnapshot OpenOverlaySnapshot();
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
     ActivityStats GetActivityStats();
     IndexValidationStats GetValidationStats();
@@ -724,45 +715,30 @@ public interface ISift : IDisposable
     StorageStats GetStorageStats();
     // Reports whether the current generation contains work selectable by this policy.
     bool ShouldCompact(CompactOptions options);
-    Task<IndexValidationStats> Validate();
     Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
-    Task<BuildStats> Build(IDocumentSource documents);
-    Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
-    Task<BuildStats> Build(IDocumentSource documents, BuildOptions options);
     Task<BuildStats> Build(
         IDocumentSource documents,
         BuildOptions options,
         CancellationToken cancellationToken);
-    Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents);
-    Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents, CancellationToken cancellationToken);
-    Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents, BuildOptions options);
     Task<BuildStats> Build(
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, UpdateOptions options);
     Task<UpdateStats> Update(
         IDocumentSource upserts,
         ReadOnlySpan<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> Update(IAsyncEnumerable<SubmittedDocument> upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
         ReadOnlySpan<DocumentKey> deletions,
         CancellationToken cancellationToken);
-    Task<UpdateStats> Update(
-        IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
-        UpdateOptions options);
     Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
         ReadOnlySpan<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken);
-    Task<CompactStats> Compact(CompactOptions options);
     Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken);
 }
 

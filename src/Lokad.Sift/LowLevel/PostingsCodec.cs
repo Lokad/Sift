@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Lokad.Sift.LowLevel;
 
-public static class PostingsCodec
+internal static class PostingsCodec
 {
     public const int CheckpointInterval = 256;
     public const int CheckpointThreshold = 4096;
@@ -509,7 +509,7 @@ public static class PostingsCodec
     }
 }
 
-public readonly ref struct PostingsView
+internal readonly ref struct PostingsView
 {
     public PostingsView(bool IsCheckpointed, ReadOnlySpan<byte> Data, ReadOnlySpan<byte> Checkpoints)
     {

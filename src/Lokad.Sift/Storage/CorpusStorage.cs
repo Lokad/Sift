@@ -8,7 +8,7 @@ using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
 
-public sealed class CorpusStorage : ISiftStorage
+internal sealed class CorpusStorage : ISiftStorage
 {
     private const int LinuxOpenDirectory = 0x10000;
     private const int LinuxOpenCloseOnExec = 0x80000;
@@ -2075,7 +2075,7 @@ internal sealed class PublicationFaultInjector
     }
 }
 
-public interface ISegmentBuildDocument
+internal interface ISegmentBuildDocument
 {
     ReadOnlySpan<byte> GetPathUtf8();
     ReadOnlySpan<byte> GetContentBytes();
@@ -2086,7 +2086,7 @@ public interface ISegmentBuildDocument
     ulong ContentHash64 { get; }
 }
 
-public sealed class StoredDocument : ISegmentBuildDocument
+internal sealed class StoredDocument : ISegmentBuildDocument
 {
     private byte[] _pathUtf8 = [];
     private int _lineCount;

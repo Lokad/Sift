@@ -2,7 +2,7 @@ using System.Text;
 
 namespace Lokad.Sift.LowLevel;
 
-public static class Hashing
+internal static class Hashing
 {
     public static ulong Fnv1A64(ReadOnlySpan<byte> data)
     {

@@ -1,7 +1,7 @@
 namespace Lokad.Sift.Storage;
 
 // Holding this object open pins every pack named by Manifest across processes.
-public sealed class StorageReadSnapshot : IDisposable
+internal sealed class StorageReadSnapshot : IDisposable
 {
     private IDisposable? _lease;
 

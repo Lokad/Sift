@@ -103,11 +103,6 @@ public sealed class Sift : ISift
         return new Sift(new InMemorySiftStorage(), options);
     }
 
-    public IIndexSnapshot OpenSnapshot()
-    {
-        return OpenSnapshot(new SearchOptions());
-    }
-
     public IIndexSnapshot OpenSnapshot(SearchOptions options)
     {
         ThrowIfDisposed();
@@ -126,11 +121,6 @@ public sealed class Sift : ISift
             MarkRequiresRebuild(exception);
             throw;
         }
-    }
-
-    public IOverlaySnapshot OpenOverlaySnapshot()
-    {
-        return OpenOverlaySnapshot(new SearchOptions());
     }
 
     public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options)
@@ -156,21 +146,6 @@ public sealed class Sift : ISift
         }
     }
 
-    public Task<BuildStats> Build(IDocumentSource documents)
-    {
-        return Build(documents, new BuildOptions(), CancellationToken.None);
-    }
-
-    public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken)
-    {
-        return Build(documents, new BuildOptions(), cancellationToken);
-    }
-
-    public Task<BuildStats> Build(IDocumentSource documents, BuildOptions options)
-    {
-        return Build(documents, options, CancellationToken.None);
-    }
-
     public Task<BuildStats> Build(
         IDocumentSource documents,
         BuildOptions options,
@@ -183,25 +158,6 @@ public sealed class Sift : ISift
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
                 operationCancellation),
             cancellationToken);
-    }
-
-    public Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents)
-    {
-        return Build(documents, new BuildOptions(), CancellationToken.None);
-    }
-
-    public Task<BuildStats> Build(
-        IAsyncEnumerable<SubmittedDocument> documents,
-        CancellationToken cancellationToken)
-    {
-        return Build(documents, new BuildOptions(), cancellationToken);
-    }
-
-    public Task<BuildStats> Build(
-        IAsyncEnumerable<SubmittedDocument> documents,
-        BuildOptions options)
-    {
-        return Build(documents, options, CancellationToken.None);
     }
 
     public Task<BuildStats> Build(
@@ -328,11 +284,6 @@ public sealed class Sift : ISift
             MarkRequiresRebuild(exception);
             throw;
         }
-    }
-
-    public Task<IndexValidationStats> Validate()
-    {
-        return Validate(CancellationToken.None);
     }
 
     public Task<IndexValidationStats> Validate(CancellationToken cancellationToken)
@@ -606,15 +557,6 @@ public sealed class Sift : ISift
         }
     }
 
-    public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
-    {
-        return Update(
-            upserts,
-            deletions,
-            new UpdateOptions(_options.RejectedUpsertPolicy),
-            CancellationToken.None);
-    }
-
     public Task<UpdateStats> Update(
         IDocumentSource upserts,
         ReadOnlySpan<DocumentKey> deletions,
@@ -625,14 +567,6 @@ public sealed class Sift : ISift
             deletions,
             new UpdateOptions(_options.RejectedUpsertPolicy),
             cancellationToken);
-    }
-
-    public Task<UpdateStats> Update(
-        IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
-        UpdateOptions options)
-    {
-        return Update(upserts, deletions, options, CancellationToken.None);
     }
 
     public Task<UpdateStats> Update(
@@ -661,17 +595,6 @@ public sealed class Sift : ISift
 
     public Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions)
-    {
-        return Update(
-            upserts,
-            deletions,
-            new UpdateOptions(_options.RejectedUpsertPolicy),
-            CancellationToken.None);
-    }
-
-    public Task<UpdateStats> Update(
-        IAsyncEnumerable<SubmittedDocument> upserts,
         ReadOnlySpan<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
@@ -680,14 +603,6 @@ public sealed class Sift : ISift
             deletions,
             new UpdateOptions(_options.RejectedUpsertPolicy),
             cancellationToken);
-    }
-
-    public Task<UpdateStats> Update(
-        IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
-        UpdateOptions options)
-    {
-        return Update(upserts, deletions, options, CancellationToken.None);
     }
 
     public Task<UpdateStats> Update(
@@ -1002,11 +917,6 @@ public sealed class Sift : ISift
             manifest.CorpusId,
             manifest.ContentRevision,
             manifest.Generation);
-    }
-
-    public Task<CompactStats> Compact(CompactOptions options)
-    {
-        return Compact(options, CancellationToken.None);
     }
 
     public Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken)
