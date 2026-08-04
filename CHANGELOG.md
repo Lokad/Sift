@@ -12,7 +12,7 @@
 - Exposed total corpus usage, quota headroom, and exceptional reclamation
   failures through `StorageStats`.
 - Added asynchronous full-index validation with progress and readiness telemetry
-  so applications can warm checksum verification before serving queries.
+  so applications can verify checksums before serving queries.
 - Added `DocumentContentLifetime.UntilOperationCompletes` so sources with stable
   buffers can avoid an intermediate body copy during build and update.
 - Added pull-based `IAsyncEnumerable<SubmittedDocument>` build and update APIs
@@ -30,8 +30,8 @@
   parallel searches, including repeated hit materialization from one snapshot.
 - Bounded parallel hit buffering and propagated collector cancellation to
   in-flight segment producers instead of finishing the entire batch first.
-- Avoided rescanning lexicons and legacy document tables whenever a previously
-  validated segment is mapped by a new snapshot.
+- Avoided rescanning lexicons and legacy document tables during repeated work on
+  an already-open snapshot.
 - Kept normal search and update opens to structural validation instead of
   synchronously checksumming every byte of each segment after process restart;
   `Validate()` remains the explicit full-integrity pass.
@@ -72,6 +72,8 @@
 
 ### Fixed
 
+- Made explicit validation reread the manifest so unchanged file timestamps and
+  lengths cannot conceal on-disk corruption behind the normal read cache.
 - Prevented oversized regex quantifiers and lone surrogate escapes from crashing
   Sift's advisory analyzers with implementation exceptions.
 - Treated supplementary-plane Unicode letters and digits as single word
@@ -107,6 +109,8 @@
   merging.
 - Replaced generation-only index identity with corpus id, logical content
   revision, and physical storage generation.
+- Replaced raw index and hit identity primitives with `CorpusId`,
+  `ContentRevision`, `StorageGeneration`, `SegmentId`, and `DocumentOrdinal`.
 - Removed nullable `SiftOptions` entry points; callers either omit the options
   through the dedicated overload or provide a non-null instance.
 - Made `SearchQuery` a reference contract and made default `DocumentKey` and
@@ -117,3 +121,5 @@
   now expose only the canonical cancellation- and options-aware operations.
 - Internalized storage formats, mapped segments, manifests, and codec helpers;
   the supported package surface is the root `Lokad.Sift` integration contract.
+- Removed friend-assembly access from the shipped library; internal tests and
+  benchmarks compile the implementation sources into their own assemblies.

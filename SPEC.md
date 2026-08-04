@@ -37,8 +37,9 @@ Sift is intended to remain **language agnostic** with respect to the indexed cor
 2. **Dependency policy**
 
    * No native dependencies
-   * Production code must rely only on the .NET runtime and base class libraries
-   * No third-party NuGet packages in production code
+   * Production code relies on the .NET runtime, base class libraries, and the
+     allowlisted managed `Lokad.Utf8Regex` package
+   * No other third-party NuGet packages in production code
    * Test and benchmark projects may use minimal purpose-specific dependencies such as `xUnit`
    * No SQLite/LMDB/Lucene
    * No external service
@@ -80,7 +81,7 @@ Sift is intended to remain **language agnostic** with respect to the indexed cor
 
 ## 3. Runtime and low-level rules
 
-The query engine shall be built around **memory-mapped immutable segment files**. .NET memory-mapped files map file contents into the process address space, support extremely large files, and provide complete random access without seeking. Segment building and publication shall use `RandomAccess` for offset-based file reads/writes and `RandomAccess.FlushToDisk` before a manifest swap. Hot scanners shall use runtime dispatch over .NET hardware intrinsics, preferring `Vector512`/AVX2 where profitable on x86/x64, then ARM `AdvSimd`, then scalar fallback. Repeated delimiter scans shall use cached `SearchValues<T>` instances; temporary buffers shall come from `ArrayPool<T>`; `Unsafe`/`MemoryMarshal` are allowed only in a dedicated low-level assembly. ([Microsoft Learn][1])
+The query engine is built around **memory-mapped immutable segment files**. .NET memory-mapped files map file contents into the process address space, support extremely large files, and provide complete random access without seeking. Segment building and publication use `RandomAccess` for offset-based file reads/writes and `RandomAccess.FlushToDisk` before a manifest swap. Hot scanners use span-based runtime primitives and targeted unsafe pointer access where measurements justify it; temporary buffers come from `ArrayPool<T>`. Storage, indexing, and low-level implementation types remain internal to the single `Lokad.Sift` assembly. ([Microsoft Learn][1])
 
 Regex execution shall be designed around a **byte-oriented UTF-8 compute path** for the supported fast subset. `.NET Regex` remains the semantic oracle and fallback authority for unsupported constructs, differential validation, and slow-path verification, but it is not the intended steady-state compute path for selective queries. When `.NET Regex` fallback is used, prefer `RegexOptions.NonBacktracking` whenever compatible because that mode guarantees linear-time processing. Patterns that require constructs such as lookarounds or backreferences must fall back to the classic engine, and all backtracking-mode executions must run with explicit timeouts. ([Microsoft Learn][2])
 
@@ -857,12 +858,23 @@ public sealed class PathFilter
 }
 
 public readonly record struct RawHit(
-    ulong SegmentId,
-    uint DocumentOrdinal,
+    SegmentId SegmentId,
+    DocumentOrdinal DocumentOrdinal,
     int StartByte,
     int EndByte,
     int StartLine,
     int EndLine);
+
+public readonly record struct CorpusId(Guid Value);
+public readonly record struct ContentRevision(ulong Value);
+public readonly record struct StorageGeneration(ulong Value);
+public readonly record struct SegmentId(ulong Value);
+public readonly record struct DocumentOrdinal(uint Value);
+
+public readonly record struct IndexIdentity(
+    CorpusId CorpusId,
+    ContentRevision ContentRevision,
+    StorageGeneration StorageGeneration);
 
 public readonly record struct DocumentKey
 {
