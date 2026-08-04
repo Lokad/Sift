@@ -231,7 +231,7 @@ public sealed class ConcurrencyTests
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/base.txt", "alpha\n")]));
         using var overlay = index.OpenOverlaySnapshot();
-        await overlay.Apply(
+        await overlay.Update(
             new InMemoryDocumentSource([("src/overlay.txt", "alpha 0\n")]),
             []);
         var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
@@ -250,7 +250,7 @@ public sealed class ConcurrencyTests
         {
             for (var iteration = 1; iteration <= 20; iteration++)
             {
-                await overlay.Apply(
+                await overlay.Update(
                     new InMemoryDocumentSource([
                         ("src/overlay.txt", $"alpha {iteration}\n")
                     ]),

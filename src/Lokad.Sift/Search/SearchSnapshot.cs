@@ -41,6 +41,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private int _disposed;
     internal static int PreparedQueryCacheCount => PreparedQueryCache.Count;
     internal static int PreparedQueryCacheCharacters => PreparedQueryCache.Weight;
+    internal IndexIdentity Identity => new(
+        _storageSnapshot.Manifest.CorpusId,
+        _storageSnapshot.Manifest.ContentRevision,
+        _storageSnapshot.Manifest.Generation);
 
     public SearchSnapshot(
         ISiftStorage storage,

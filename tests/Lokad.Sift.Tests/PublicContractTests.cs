@@ -21,8 +21,9 @@ public sealed class PublicContractTests
         Assert.Single(typeof(ISift).GetMethods(), static method => method.Name == nameof(ISift.Validate));
         Assert.Single(typeof(ISift).GetMethods(), static method => method.Name == nameof(ISift.Compact));
         Assert.Single(typeof(IIndexSnapshot).GetMethods(), static method => method.Name == nameof(IIndexSnapshot.Search));
-        Assert.Equal(2, CountMethods<IOverlaySnapshot>(nameof(IOverlaySnapshot.Apply)));
-        Assert.Single(typeof(IOverlaySnapshot).GetMethods(), static method => method.Name == nameof(IOverlaySnapshot.ApplyTo));
+        Assert.Equal(2, CountMethods<IOverlaySnapshot>(nameof(IOverlaySnapshot.Update)));
+        Assert.Single(typeof(IOverlaySnapshot).GetMethods(), static method => method.Name == nameof(IOverlaySnapshot.CommitToBase));
+        Assert.Single(typeof(IOverlaySnapshot).GetMethods(), static method => method.Name == nameof(IOverlaySnapshot.ApplyDeltaTo));
     }
 
     [Fact]

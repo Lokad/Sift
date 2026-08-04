@@ -392,7 +392,7 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var snapshot = index.OpenOverlaySnapshot();
-        await snapshot.Apply(
+        await snapshot.Update(
             new InMemoryDocumentSource([
                 ("src/keep.txt", "overlay keep\n")
             ]),
@@ -422,12 +422,12 @@ public sealed class SearchIntegrationTests
                 contentLifetime: DocumentContentLifetime.UntilOperationCompletes)
         ]);
 
-        await overlay.Apply(source, []);
+        await overlay.Update(source, []);
         sourceContent.AsSpan().Fill((byte)'x');
 
         using var target = SiftIndex.CreateInMemory();
         await target.Build(new InMemoryDocumentSource([]));
-        await overlay.ApplyTo(target);
+        await overlay.ApplyDeltaTo(target);
         using var snapshot = target.OpenSnapshot();
         Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var content));
         Assert.Equal("alpha"u8.ToArray(), content.ToArray());
@@ -1690,7 +1690,7 @@ public sealed class SearchIntegrationTests
         using var index = SiftIndex.CreateInMemory(options);
         await index.Build(new InMemoryDocumentSource([("src/match.txt", "needle\n")]));
         using var overlay = index.OpenOverlaySnapshot();
-        await overlay.Apply(new InMemoryDocumentSource([("src/miss.txt", "unrelated\n")]), []);
+        await overlay.Update(new InMemoryDocumentSource([("src/miss.txt", "unrelated\n")]), []);
 
         var plan = overlay.Explain(
             new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
@@ -2958,7 +2958,7 @@ public sealed class SearchIntegrationTests
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/base.txt", "needle")]));
         using var overlay = index.OpenOverlaySnapshot();
-        await overlay.Apply(
+        await overlay.Update(
             new InMemoryDocumentSource([("src/overlay.txt", "needle")]),
             []);
         var collector = new SlowHitCollector();

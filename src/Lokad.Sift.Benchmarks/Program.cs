@@ -95,7 +95,7 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
                 var iteration = overlayChurnIteration++;
                 var pathSlot = iteration % 8;
                 var bodyGeneration = iteration / 8 % overlayBodies.Length;
-                overlay.Apply(
+                overlay.Update(
                     new MemoryDocumentSource(
                     [
                         new SubmittedDocument(

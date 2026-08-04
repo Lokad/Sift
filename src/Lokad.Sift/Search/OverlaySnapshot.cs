@@ -10,6 +10,7 @@ namespace Lokad.Sift.Search;
 internal sealed class OverlaySnapshot : IOverlaySnapshot
 {
     private readonly SearchSnapshot _baseSnapshot;
+    private readonly IndexIdentity _baseIdentity;
     private readonly Sift _overlayIndex;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
@@ -20,7 +21,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly Dictionary<ulong, ulong> _syntheticToOverlaySegmentIds = [];
     // Collectors may materialize overlay hits recursively while Search holds a read lease.
     private readonly ReaderWriterLockSlim _stateLock = new(LockRecursionPolicy.SupportsRecursion);
-    private readonly SemaphoreSlim _applyLock = new(1, 1);
+    private readonly SemaphoreSlim _updateLock = new(1, 1);
     private readonly object _syntheticSync = new();
     private IIndexSnapshot _overlaySnapshot;
     private HiddenPathVisibility _hiddenPathVisibility = HiddenPathVisibility.Empty;
@@ -30,6 +31,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     internal OverlaySnapshot(SearchSnapshot baseSnapshot, SiftOptions options, SearchOptions searchOptions)
     {
         _baseSnapshot = baseSnapshot;
+        _baseIdentity = baseSnapshot.Identity;
         _options = options;
         _searchOptions = searchOptions;
         _overlayIndex = Sift.CreateInMemory(options);
@@ -37,39 +39,39 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseSegmentIds = new HashSet<ulong>(_baseSnapshot.GetSegmentIds());
     }
 
-    public Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
+    public Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
     {
-        return Apply(
+        return Update(
             upserts,
             deletions,
-            new OverlayApplyOptions(_options.RejectedUpsertPolicy),
+            new OverlayUpdateOptions(_options.RejectedUpsertPolicy),
             CancellationToken.None);
     }
 
-    public Task<UpdateStats> Apply(
+    public Task<UpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
-        return Apply(
+        return Update(
             upserts,
             deletions,
-            new OverlayApplyOptions(_options.RejectedUpsertPolicy),
+            new OverlayUpdateOptions(_options.RejectedUpsertPolicy),
             cancellationToken);
     }
 
-    public Task<UpdateStats> Apply(
+    public Task<UpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options)
+        OverlayUpdateOptions options)
     {
-        return Apply(upserts, deletions, options, CancellationToken.None);
+        return Update(upserts, deletions, options, CancellationToken.None);
     }
 
-    public Task<UpdateStats> Apply(
+    public Task<UpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options,
+        OverlayUpdateOptions options,
         CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(options.RejectedUpsertPolicy))
@@ -77,31 +79,31 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
         }
 
-        return ApplyCore(upserts, deletions, options, cancellationToken);
+        return UpdateCore(upserts, deletions, options, cancellationToken);
     }
 
-    private async Task<UpdateStats> ApplyCore(
+    private async Task<UpdateStats> UpdateCore(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options,
+        OverlayUpdateOptions options,
         CancellationToken cancellationToken)
     {
-        await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
-            return await ApplyCoreUnderLock(upserts, deletions, options, cancellationToken).ConfigureAwait(false);
+            return await UpdateCoreUnderLock(upserts, deletions, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            _applyLock.Release();
+            _updateLock.Release();
         }
     }
 
-    private async Task<UpdateStats> ApplyCoreUnderLock(
+    private async Task<UpdateStats> UpdateCoreUnderLock(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options,
+        OverlayUpdateOptions options,
         CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
@@ -186,27 +188,32 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayUpdate.CommittedIdentity);
     }
 
-    public Task<UpdateStats> ApplyTo(ISift target)
+    public Task<UpdateStats> CommitToBase(
+        ISift baseIndex,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
     {
-        return ApplyTo(target, new UpdateOptions(), CancellationToken.None);
+        if (options.ExpectedIdentity is { } expectedIdentity &&
+            (expectedIdentity.CorpusId != _baseIdentity.CorpusId ||
+             expectedIdentity.ContentRevision != _baseIdentity.ContentRevision))
+        {
+            throw new ArgumentException(
+                "ExpectedIdentity must identify the overlay's base revision.",
+                nameof(options));
+        }
+
+        return ApplyDeltaToCore(
+            baseIndex,
+            options with { ExpectedIdentity = _baseIdentity },
+            cancellationToken);
     }
 
-    public Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken)
-    {
-        return ApplyTo(target, new UpdateOptions(), cancellationToken);
-    }
-
-    public Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options)
-    {
-        return ApplyTo(target, options, CancellationToken.None);
-    }
-
-    public Task<UpdateStats> ApplyTo(
+    public Task<UpdateStats> ApplyDeltaTo(
         ISift target,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        return ApplyToCore(target, options, cancellationToken);
+        return ApplyDeltaToCore(target, options, cancellationToken);
     }
 
     public DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector)
@@ -460,7 +467,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return;
         }
 
-        _applyLock.Wait();
+        _updateLock.Wait();
         try
         {
             _stateLock.EnterWriteLock();
@@ -477,7 +484,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
         finally
         {
-            _applyLock.Release();
+            _updateLock.Release();
         }
     }
 
@@ -794,12 +801,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
     }
 
-    private async Task<UpdateStats> ApplyToCore(
+    private async Task<UpdateStats> ApplyDeltaToCore(
         ISift target,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
@@ -813,7 +820,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
         finally
         {
-            _applyLock.Release();
+            _updateLock.Release();
         }
     }
 

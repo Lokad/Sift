@@ -91,7 +91,7 @@ public sealed class MutationIntegrationTests
             ("src/b.txt", "beta")
         ]));
         using var overlay = index.OpenOverlaySnapshot();
-        await overlay.Apply(
+        await overlay.Update(
             new InMemoryDocumentSource([
                 ("src/a.txt", "omega"),
                 ("src/c.txt", "gamma")
@@ -238,7 +238,7 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var overlay = index.OpenOverlaySnapshot();
-        var apply = await overlay.Apply(
+        var apply = await overlay.Update(
             new InMemoryDocumentSource([
                 ("src/a.txt", "omega\n"),
                 ("src/c.txt", "gamma\n")
@@ -281,15 +281,15 @@ public sealed class MutationIntegrationTests
 
         using var overlay = index.OpenOverlaySnapshot();
 
-        var deleteBase = await overlay.Apply(
+        var deleteBase = await overlay.Update(
             new InMemoryDocumentSource([]),
             [new DocumentKey("src/base.txt"), new DocumentKey("src/missing.txt")]);
         Assert.Equal(1, deleteBase.DeletedDocuments);
 
-        await overlay.Apply(
+        await overlay.Update(
             new InMemoryDocumentSource([("src/overlay.txt", "beta")]),
             []);
-        var deleteAgain = await overlay.Apply(
+        var deleteAgain = await overlay.Update(
             new InMemoryDocumentSource([]),
             [
                 new DocumentKey("src/base.txt"),
@@ -301,7 +301,7 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task OverlaySnapshotMaterializesOverlayHitsAndCanFoldBack()
+    public async Task OverlaySnapshotMaterializesOverlayHitsAndCanCommitToBase()
     {
         using var fixture = new CorpusFixture(
             ("src/lib/math.cs", "static class MathEx { int Add(int a, int b) => a + b; }\n"),
@@ -311,7 +311,7 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var overlay = index.OpenOverlaySnapshot();
-        await overlay.Apply(
+        await overlay.Update(
             new InMemoryDocumentSource([
                 ("src/lib/math.cs", "static class MathEx { int Add(int a, int b) => checked(a + b); int Mul(int a, int b) => a * b; }\n")
             ]),
@@ -323,8 +323,8 @@ public sealed class MutationIntegrationTests
         Assert.Equal("src/lib/math.cs", overlayHit.Path);
         Assert.Contains("Mul", overlayHit.MatchText, StringComparison.Ordinal);
 
-        var foldBack = await overlay.ApplyTo(index);
-        Assert.Equal(1, foldBack.UpsertedDocuments);
+        var commit = await overlay.CommitToBase(index);
+        Assert.Equal(1, commit.UpsertedDocuments);
 
         using var snapshot = index.OpenSnapshot();
         var foldedCollector = new HitBuffer();
@@ -346,7 +346,7 @@ public sealed class MutationIntegrationTests
 
         for (var revision = 0; revision < 12; revision++)
         {
-            await overlay.Apply(
+            await overlay.Update(
                 new InMemoryDocumentSource([("src/overlay.txt", $"revision {revision}")]),
                 [new DocumentKey($"src/missing-{revision}.txt")]);
         }
@@ -358,15 +358,15 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task OverlayFoldBackHonorsTransactionalUpdateOptions()
+    public async Task OverlayCommitHonorsTransactionalUpdateOptions()
     {
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
         using var overlay = index.OpenOverlaySnapshot();
-        await overlay.Apply(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
+        await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
         var expectedIdentity = index.GetIndexIdentity();
 
-        var update = await overlay.ApplyTo(index, new UpdateOptions
+        var update = await overlay.CommitToBase(index, new UpdateOptions
         {
             ExpectedIdentity = expectedIdentity,
             CommitMetadataProvider = static _ => "overlay-commit"u8.ToArray()
@@ -374,6 +374,22 @@ public sealed class MutationIntegrationTests
 
         Assert.NotEqual(expectedIdentity, update.CommittedIdentity);
         Assert.Equal("overlay-commit"u8.ToArray(), index.GetIndexState().CommitMetadata.ToArray());
+    }
+
+    [Fact]
+    public async Task OverlayCommitRejectsAChangedBaseByDefault()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+
+        await Assert.ThrowsAsync<StaleIndexStateException>(() => overlay.CommitToBase(index));
+
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var content));
+        Assert.Equal("alpha"u8.ToArray(), content.ToArray());
     }
 
     [Fact]

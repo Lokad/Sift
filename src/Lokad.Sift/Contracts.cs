@@ -323,14 +323,14 @@ public sealed record UpdateOptions
     public Func<UpdateStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
-public sealed record OverlayApplyOptions
+public sealed record OverlayUpdateOptions
 {
-    public OverlayApplyOptions()
+    public OverlayUpdateOptions()
         : this(RejectedUpsertPolicy.FailUpdate)
     {
     }
 
-    public OverlayApplyOptions(RejectedUpsertPolicy rejectedUpsertPolicy)
+    public OverlayUpdateOptions(RejectedUpsertPolicy rejectedUpsertPolicy)
     {
         RejectedUpsertPolicy = rejectedUpsertPolicy;
     }
@@ -1149,15 +1149,16 @@ public interface IIndexSnapshot : IDisposable
 public interface IOverlaySnapshot : IIndexSnapshot
 {
     /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
-    Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
 
     /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
-    Task<UpdateStats> Apply(
+    Task<UpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options,
+        OverlayUpdateOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
+    Task<UpdateStats> CommitToBase(ISift baseIndex, UpdateOptions options, CancellationToken cancellationToken);
+    Task<UpdateStats> ApplyDeltaTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
 public interface ISift : IDisposable

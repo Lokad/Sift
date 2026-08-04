@@ -120,44 +120,68 @@ public static class SiftContractExtensions
         return snapshot.Search(query, pathFilter, collector, CancellationToken.None);
     }
 
-    public static Task<UpdateStats> Apply(
+    public static Task<UpdateStats> Update(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
-        return snapshot.Apply(upserts, deletions, CancellationToken.None);
+        return snapshot.Update(upserts, deletions, CancellationToken.None);
     }
 
-    public static Task<UpdateStats> Apply(
+    public static Task<UpdateStats> Update(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options)
+        OverlayUpdateOptions options)
     {
-        return snapshot.Apply(upserts, deletions, options, CancellationToken.None);
+        return snapshot.Update(upserts, deletions, options, CancellationToken.None);
     }
 
-    public static Task<UpdateStats> ApplyTo(this IOverlaySnapshot snapshot, ISift target)
-        => ApplyTo(snapshot, target, new UpdateOptions(), CancellationToken.None);
+    public static Task<UpdateStats> CommitToBase(this IOverlaySnapshot snapshot, ISift baseIndex)
+        => CommitToBase(snapshot, baseIndex, new UpdateOptions(), CancellationToken.None);
 
-    public static Task<UpdateStats> ApplyTo(
+    public static Task<UpdateStats> CommitToBase(
+        this IOverlaySnapshot snapshot,
+        ISift baseIndex,
+        CancellationToken cancellationToken)
+        => CommitToBase(snapshot, baseIndex, new UpdateOptions(), cancellationToken);
+
+    public static Task<UpdateStats> CommitToBase(
+        this IOverlaySnapshot snapshot,
+        ISift baseIndex,
+        UpdateOptions options)
+        => CommitToBase(snapshot, baseIndex, options, CancellationToken.None);
+
+    private static Task<UpdateStats> CommitToBase(
+        IOverlaySnapshot snapshot,
+        ISift baseIndex,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
+        return snapshot.CommitToBase(baseIndex, options, cancellationToken);
+    }
+
+    public static Task<UpdateStats> ApplyDeltaTo(this IOverlaySnapshot snapshot, ISift target)
+        => ApplyDeltaTo(snapshot, target, new UpdateOptions(), CancellationToken.None);
+
+    public static Task<UpdateStats> ApplyDeltaTo(
         this IOverlaySnapshot snapshot,
         ISift target,
         CancellationToken cancellationToken)
-        => ApplyTo(snapshot, target, new UpdateOptions(), cancellationToken);
+        => ApplyDeltaTo(snapshot, target, new UpdateOptions(), cancellationToken);
 
-    public static Task<UpdateStats> ApplyTo(
+    public static Task<UpdateStats> ApplyDeltaTo(
         this IOverlaySnapshot snapshot,
         ISift target,
         UpdateOptions options)
-        => ApplyTo(snapshot, target, options, CancellationToken.None);
+        => ApplyDeltaTo(snapshot, target, options, CancellationToken.None);
 
-    private static Task<UpdateStats> ApplyTo(
+    private static Task<UpdateStats> ApplyDeltaTo(
         IOverlaySnapshot snapshot,
         ISift target,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        return snapshot.ApplyTo(target, options, cancellationToken);
+        return snapshot.ApplyDeltaTo(target, options, cancellationToken);
     }
 }
