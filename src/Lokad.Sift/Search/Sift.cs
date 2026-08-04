@@ -602,6 +602,27 @@ public sealed class Sift : ISift
             cancellationToken);
     }
 
+    internal Task<UpdateStats> UpdatePrevalidated(
+        LoadedDocuments upserts,
+        IReadOnlyList<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
+        return RunUpdate(
+            (forbiddenPaths, _, preparePartition, publishPartition, operationCancellation) =>
+                new ValueTask<StreamedDocuments>(IndexBuilder.StreamLoadedDocuments(
+                    upserts,
+                    operationCancellation,
+                    _options,
+                    forbiddenPaths,
+                    collectAcceptedPaths: true,
+                    preparePartition,
+                    publishPartition)),
+            deletions,
+            options,
+            cancellationToken);
+    }
+
     private Task<UpdateStats> RunUpdate(
         UpdateDocumentStreamer streamDocuments,
         IReadOnlyList<DocumentKey> deletions,

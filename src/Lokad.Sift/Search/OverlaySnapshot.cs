@@ -109,7 +109,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             cancellationToken,
             _options,
             options.RejectedUpsertPolicy,
-            retainContentBeyondOperation: true);
+            retainContentBeyondOperation: false);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {
@@ -120,31 +120,13 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
         }
 
-        for (var i = 0; i < load.Documents.Count; i++)
-        {
-            var path = load.Documents[i].Path;
-            if (deletionSet.Contains(path))
-            {
-                throw new InvalidOperationException($"Path '{path}' cannot appear in both upserts and deletions.");
-            }
-        }
-
-        for (var i = 0; i < load.RejectedDocuments.Count; i++)
-        {
-            var path = load.RejectedDocuments[i].Path;
-            if (deletionSet.Contains(path))
-            {
-                throw new InvalidOperationException($"Path '{path}' cannot appear in both upserts and deletions.");
-            }
-        }
-
         if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
         {
             deletionSet.UnionWith(load.RejectedDocuments.Select(static document => document.Path));
         }
 
-        var overlayUpdate = await _overlayIndex.Update(
-            new StoredDocumentSource(load.Documents),
+        var overlayUpdate = await _overlayIndex.UpdatePrevalidated(
+            load,
             CreateDeletionKeys(deletionSet),
             new UpdateOptions(options.RejectedUpsertPolicy),
             cancellationToken);
@@ -636,34 +618,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
 
         return [.. list];
-    }
-
-    private sealed class StoredDocumentSource : IDocumentSource
-    {
-        private readonly IReadOnlyList<StoredDocument> _documents;
-        private int _index;
-
-        public StoredDocumentSource(IReadOnlyList<StoredDocument> documents)
-        {
-            _documents = documents;
-        }
-
-        public bool TryReadNext(out SubmittedDocument document)
-        {
-            if (_index >= _documents.Count)
-            {
-                document = default;
-                return false;
-            }
-
-            var next = _documents[_index++];
-            document = new SubmittedDocument(
-                next.Path,
-                next.Content,
-                new DateTimeOffset(next.MTimeUtcTicks, TimeSpan.Zero),
-                DocumentContentLifetime.UntilOperationCompletes);
-            return true;
-        }
     }
 
     private sealed class StateReadLease(ReaderWriterLockSlim stateLock) : IDisposable

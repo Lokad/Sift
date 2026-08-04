@@ -210,6 +210,58 @@ internal sealed class IndexBuilder
         return accumulator.Complete();
     }
 
+    public static StreamedDocuments StreamLoadedDocuments(
+        LoadedDocuments load,
+        CancellationToken cancellationToken,
+        SiftOptions options,
+        IReadOnlySet<string> forbiddenPaths,
+        bool collectAcceptedPaths,
+        Action<List<StoredDocument>> preparePartition,
+        Action<IReadOnlyList<StoredDocument>> publishPartition)
+    {
+        var partitioner = new StoredDocumentPartitioner(
+            options,
+            collectAcceptedPaths,
+            materializeDocuments: false,
+            preparePartition,
+            publishPartition);
+        for (var i = 0; i < load.Documents.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var document = load.Documents[i];
+            if (forbiddenPaths.Contains(document.Path))
+            {
+                throw new InvalidOperationException(
+                    $"Path '{document.Path}' cannot appear in both upserts and deletions.");
+            }
+
+            partitioner.Add(document);
+        }
+
+        for (var i = 0; i < load.RejectedDocuments.Count; i++)
+        {
+            var rejected = load.RejectedDocuments[i];
+            if (forbiddenPaths.Contains(rejected.Path))
+            {
+                throw new InvalidOperationException(
+                    $"Path '{rejected.Path}' cannot appear in both upserts and deletions.");
+            }
+        }
+
+        var partitioning = partitioner.Complete();
+        return new StreamedDocuments(
+            load.Submitted,
+            partitioning.Accepted,
+            partitioning.Skipped,
+            load.Rejected,
+            load.SubmittedBytes,
+            partitioning.AcceptedBytes,
+            partitioning.SkippedBytes,
+            load.RejectedBytes,
+            partitioning.AcceptedPaths,
+            load.RejectedDocuments);
+    }
+
     private sealed class StreamedDocumentAccumulator(
         SiftOptions options,
         string operationName,
@@ -220,20 +272,17 @@ internal sealed class IndexBuilder
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         private readonly HashSet<string> _submittedPaths = new(StringComparer.Ordinal);
-        private readonly HashSet<string>? _acceptedPaths = collectAcceptedPaths
-            ? new HashSet<string>(StringComparer.Ordinal)
-            : null;
+        private readonly StoredDocumentPartitioner _partitioner = new(
+            options,
+            collectAcceptedPaths,
+            materializeDocuments: true,
+            preparePartition,
+            publishPartition);
         private readonly List<RejectedDocument> _rejectedDocuments = [];
-        private List<StoredDocument> _partition = [];
         private int _submitted;
         private long _submittedBytes;
-        private int _accepted;
-        private long _acceptedBytes;
-        private int _skipped;
-        private long _skippedBytes;
         private int _rejected;
         private long _rejectedBytes;
-        private long _partitionBytes;
 
         public void Add(SubmittedDocument submittedDocument)
         {
@@ -278,6 +327,45 @@ internal sealed class IndexBuilder
                 return;
             }
 
+            _partitioner.Add(document);
+        }
+
+        public StreamedDocuments Complete()
+        {
+            var partitioning = _partitioner.Complete();
+            return new StreamedDocuments(
+                _submitted,
+                partitioning.Accepted,
+                partitioning.Skipped,
+                _rejected,
+                _submittedBytes,
+                partitioning.AcceptedBytes,
+                partitioning.SkippedBytes,
+                _rejectedBytes,
+                partitioning.AcceptedPaths,
+                _rejectedDocuments);
+        }
+    }
+
+    private sealed class StoredDocumentPartitioner(
+        SiftOptions options,
+        bool collectAcceptedPaths,
+        bool materializeDocuments,
+        Action<List<StoredDocument>> preparePartition,
+        Action<IReadOnlyList<StoredDocument>> publishPartition)
+    {
+        private readonly HashSet<string>? _acceptedPaths = collectAcceptedPaths
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : null;
+        private List<StoredDocument> _partition = [];
+        private int _accepted;
+        private long _acceptedBytes;
+        private int _skipped;
+        private long _skippedBytes;
+        private long _partitionBytes;
+
+        public void Add(StoredDocument document)
+        {
             var nextPartitionBytes = checked(_partitionBytes + document.Content.Length);
             if (_partition.Count > 0 &&
                 (_partition.Count >= options.TargetSegmentDocumentCount ||
@@ -290,20 +378,15 @@ internal sealed class IndexBuilder
             _partitionBytes += document.Content.Length;
         }
 
-        public StreamedDocuments Complete()
+        public PartitioningStats Complete()
         {
             FlushPartition();
-            return new StreamedDocuments(
-                _submitted,
+            return new PartitioningStats(
                 _accepted,
                 _skipped,
-                _rejected,
-                _submittedBytes,
                 _acceptedBytes,
                 _skippedBytes,
-                _rejectedBytes,
-                _acceptedPaths ?? [],
-                _rejectedDocuments);
+                _acceptedPaths ?? []);
         }
 
         private void FlushPartition()
@@ -332,9 +415,12 @@ internal sealed class IndexBuilder
 
             if (_partition.Count > 0)
             {
-                for (var i = 0; i < _partition.Count; i++)
+                if (materializeDocuments)
                 {
-                    Materialize(_partition[i]);
+                    for (var i = 0; i < _partition.Count; i++)
+                    {
+                        Materialize(_partition[i]);
+                    }
                 }
 
                 publishPartition(_partition);
@@ -356,7 +442,6 @@ internal sealed class IndexBuilder
         long submittedBytes = 0;
         var rejected = 0;
         long rejectedBytes = 0;
-        long acceptedBytes = 0;
         var rejectedDocuments = new List<RejectedDocument>();
         var documents = new List<StoredDocument>();
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
@@ -400,7 +485,6 @@ internal sealed class IndexBuilder
 
             Materialize(storedDocument);
             documents.Add(storedDocument);
-            acceptedBytes += storedDocument.Content.Length;
         }
 
         return new LoadedDocuments(
@@ -408,7 +492,6 @@ internal sealed class IndexBuilder
             submittedBytes,
             rejected,
             rejectedBytes,
-            acceptedBytes,
             documents,
             rejectedDocuments);
     }
@@ -559,6 +642,13 @@ internal sealed class IndexBuilder
             encodedLineIndex);
     }
 
+    private readonly record struct PartitioningStats(
+        int Accepted,
+        int Skipped,
+        long AcceptedBytes,
+        long SkippedBytes,
+        HashSet<string> AcceptedPaths);
+
 }
 
 internal readonly record struct LoadedDocuments(
@@ -566,7 +656,6 @@ internal readonly record struct LoadedDocuments(
     long SubmittedBytes,
     int Rejected,
     long RejectedBytes,
-    long AcceptedBytes,
     List<StoredDocument> Documents,
     IReadOnlyList<RejectedDocument> RejectedDocuments);
 
