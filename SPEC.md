@@ -171,7 +171,9 @@ Corpus root:
 
 * format version
 * corpus id
-* build generation id
+* logical content revision
+* physical storage generation id
+* bounded opaque consumer commit metadata
 * root table
 * active segment table
 * for each active segment:
@@ -453,6 +455,7 @@ Updated document:
 * old document ordinal becomes dead in manifest
 * new version is written into a new segment
 * if the replacement is rejected by ingestion policy, the old ordinal remains live
+  or is deleted according to the operation's explicit rejection policy
 
 Deleted document:
 
@@ -466,6 +469,9 @@ Update batch rules:
 * a path must not appear in both `upserts` and `deletions` within the same update batch
 * violating these rules is an error
 * update application is atomic at the batch level
+* optional consumer metadata is copied into the same manifest publication
+* an optimistic update expectation compares corpus id and logical content
+  revision; content-preserving compaction does not invalidate it
 
 ### 7.8 Compaction
 

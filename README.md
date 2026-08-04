@@ -266,7 +266,7 @@ For advanced storage-engine consumers, `Lokad.Sift.Storage` is also a supported 
 Typical usage:
 
 1. create a `Sift`
-2. build the index from `IDocumentSource`
+2. build the index from `IDocumentSource` or `IAsyncEnumerable<SubmittedDocument>`
 3. open a snapshot
 4. search and materialize hits
 5. apply `Update(...)` for upserts/deletions
@@ -278,14 +278,26 @@ For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a fi
 
 - Paths must be relative and canonicalizable to `/`-separated logical paths.
 - Input content is `ReadOnlyMemory<byte>` and must be UTF-8.
+- Async document sources are pulled under Sift's writer transaction, providing
+  natural backpressure without a consumer-owned producer queue.
 - Searches operate on snapshots. Open a new snapshot after updates if you want to observe the new generation.
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
 - Rejected upserts fail the entire update by default, preventing callers from
   checkpointing an event whose replacement was not indexed. The exception
   identifies the first rejected path, reason, and submitted size. Set
-  `RejectedUpsertPolicy.PreserveExisting` only when retaining the old searchable
-  version and inspecting `RejectedUpserts` is intentional.
+  `RejectedUpsertPolicy.PreserveExisting` to retain old searchable versions, or
+  `DeleteExisting` to remove them. Those non-failing policies report every
+  rejected path and reason through `UpdateStats.RejectedDocuments`; full builds
+  report the same details through `BuildStats.RejectedDocumentDetails`.
+- `BuildOptions.CommitMetadataProvider` and
+  `UpdateOptions.CommitMetadataProvider` copy bounded opaque consumer metadata
+  into the same manifest commit as the indexed documents. `GetIndexState()`
+  returns that metadata with a corpus id, logical content revision, and physical
+  storage generation. `ExpectedIdentity` rejects an update based on stale logical
+  content while allowing content-preserving compaction.
+- `VisitDocuments(...)` streams the live document keys in a snapshot without
+  requiring a search query or materializing document bodies.
 - Use `ShouldCompact(...)` with the same options passed to `Compact(...)`; do not trigger on aggregate segment count alone.
 - `Compact(...)` is optional but useful after many updates, and owns cleanup of the segments it replaces.
 

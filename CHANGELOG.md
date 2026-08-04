@@ -15,6 +15,14 @@
   so applications can warm checksum verification before serving queries.
 - Added `DocumentContentLifetime.UntilOperationCompletes` so sources with stable
   buffers can avoid an intermediate body copy during build and update.
+- Added pull-based `IAsyncEnumerable<SubmittedDocument>` build and update APIs
+  for naturally backpressured asynchronous ingestion.
+- Added bounded opaque commit metadata, stable corpus/content identity, and
+  optimistic update preconditions for consumer checkpoints committed with index
+  mutations.
+- Added snapshot live-document enumeration without body materialization.
+- Added complete rejected-document details and committed identities to build and
+  non-failing update results.
 
 ### Changed
 
@@ -49,6 +57,8 @@
   default pattern limit to 2,048 characters.
 - Increased the default post-mutation reserve to preserve enough space for one
   default compaction pass.
+- Made compaction preserve logical content revisions and commit metadata while
+  advancing only the physical storage generation.
 
 ### Fixed
 
@@ -62,6 +72,8 @@
   searches use ASCII n-gram indexes.
 - Prevented rejected-only and ineffective deletion updates from publishing
   redundant manifest generations while preserving legacy-manifest migration.
+- Allowed callers to atomically delete stale versions of rejected replacements
+  and report every rejected document in one non-failing update.
 - Avoided publishing replacement segments for byte-identical upserts and
   reported skipped documents and bytes in `UpdateStats`.
 - Made regex planning account for Unicode fallback document and byte density,
@@ -83,5 +95,7 @@
 - Renamed `CompactOptions.SegmentCountTrigger` to
   `SmallSegmentMergeThreshold` to clarify that it only gates clean small-segment
   merging.
+- Replaced generation-only index identity with corpus id, logical content
+  revision, and physical storage generation.
 - Removed nullable `SiftOptions` entry points; callers either omit the options
   through the dedicated overload or provide a non-null instance.
