@@ -566,6 +566,8 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
         var beforeManifest = index.Storage.ReadManifest();
         var beforeStorage = index.GetStorageStats();
+        var storage = TestHelpers.GetStorage(index);
+        var opensBeforeUpdate = storage.SegmentOpenCount;
 
         var stats = await index.Update(
             new InMemoryDocumentSource([("src/a.txt", "alpha\n")]),
@@ -582,6 +584,7 @@ public sealed class MutationIntegrationTests
         Assert.Equal(beforeManifest.Generation, afterManifest.Generation);
         Assert.Equal(beforeStorage.ManifestSegmentBytes, afterStorage.ManifestSegmentBytes);
         Assert.Equal(0, index.GetMaintenanceStats().DeadDocuments);
+        Assert.Equal(1, storage.SegmentOpenCount - opensBeforeUpdate);
     }
 
     [Fact]

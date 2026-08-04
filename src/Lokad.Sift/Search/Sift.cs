@@ -1742,6 +1742,21 @@ public sealed class Sift : ISift
         IReadOnlySet<string> affectedPaths,
         CancellationToken cancellationToken)
     {
+        return FindLiveDocumentKeys(
+            manifest,
+            affectedPaths,
+            incomingDocuments: null,
+            unchangedPaths: null,
+            cancellationToken);
+    }
+
+    private Dictionary<string, LiveDocumentKey> FindLiveDocumentKeys(
+        CorpusManifest manifest,
+        IReadOnlySet<string> affectedPaths,
+        IReadOnlyDictionary<string, StoredDocument>? incomingDocuments,
+        ISet<string>? unchangedPaths,
+        CancellationToken cancellationToken)
+    {
         var live = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
         if (affectedPaths.Count == 0)
         {
@@ -1776,12 +1791,20 @@ public sealed class Sift : ISift
                     if (Array.BinarySearch(entry.DeadOrdinals, foundOrdinal) < 0)
                     {
                         var document = segment.GetDocument(foundOrdinal);
-                        live.Add(path, new LiveDocumentKey(
+                        var key = new LiveDocumentKey(
                             entry.SegmentId,
                             foundOrdinal,
                             document.ContentLength,
                             document.MTimeUtcTicks,
-                            document.ContentHash64));
+                            document.ContentHash64);
+                        live.Add(path, key);
+                        RecordUnchangedDocument(
+                            segment,
+                            document,
+                            path,
+                            key,
+                            incomingDocuments,
+                            unchangedPaths);
                     }
                 }
 
@@ -1838,12 +1861,21 @@ public sealed class Sift : ISift
 
                 if (deadIndex >= entry.DeadOrdinals.Length || entry.DeadOrdinals[deadIndex] != ordinal)
                 {
-                    live.Add(sortedPaths[pathIndex], new LiveDocumentKey(
+                    var path = sortedPaths[pathIndex];
+                    var key = new LiveDocumentKey(
                         entry.SegmentId,
                         ordinal,
                         document.ContentLength,
                         document.MTimeUtcTicks,
-                        document.ContentHash64));
+                        document.ContentHash64);
+                    live.Add(path, key);
+                    RecordUnchangedDocument(
+                        segment,
+                        document,
+                        path,
+                        key,
+                        incomingDocuments,
+                        unchangedPaths);
                 }
 
                 unresolvedPaths.Remove(sortedPaths[pathIndex]);
@@ -1853,6 +1885,32 @@ public sealed class Sift : ISift
         }
 
         return live;
+    }
+
+    private static void RecordUnchangedDocument(
+        MappedSegment segment,
+        SegmentDocument indexedDocument,
+        string path,
+        in LiveDocumentKey indexedKey,
+        IReadOnlyDictionary<string, StoredDocument>? incomingDocuments,
+        ISet<string>? unchangedPaths)
+    {
+        if (incomingDocuments is null ||
+            unchangedPaths is null ||
+            !incomingDocuments.TryGetValue(path, out var incoming) ||
+            indexedKey.ContentLength != incoming.Content.Length ||
+            indexedKey.ContentHash64 != incoming.ContentHash64 ||
+            indexedKey.MTimeUtcTicks != incoming.MTimeUtcTicks)
+        {
+            return;
+        }
+
+        // The persisted hash is only a fast rejection filter; byte equality
+        // is required before suppressing a replacement.
+        if (segment.GetContentBytes(indexedDocument).SequenceEqual(incoming.Content.Span))
+        {
+            unchangedPaths.Add(path);
+        }
     }
 
     private sealed class ValidationScope(Sift owner) : IDisposable
@@ -1890,37 +1948,16 @@ public sealed class Sift : ISift
 
         var byPath = documents.ToDictionary(static document => document.Path, StringComparer.Ordinal);
         var paths = byPath.Keys.ToHashSet(StringComparer.Ordinal);
-        var current = FindLiveDocumentKeys(manifest, paths, cancellationToken);
+        var unchangedPaths = new HashSet<string>(StringComparer.Ordinal);
+        var current = FindLiveDocumentKeys(
+            manifest,
+            paths,
+            byPath,
+            unchangedPaths,
+            cancellationToken);
         foreach (var pair in current)
         {
             existingKeys.Add(pair.Key, pair.Value);
-        }
-
-        var unchangedPaths = new HashSet<string>(StringComparer.Ordinal);
-        var possibleMatches = current.Where(pair =>
-        {
-            var incoming = byPath[pair.Key];
-            var indexed = pair.Value;
-            return indexed.ContentLength == incoming.Content.Length &&
-                   indexed.ContentHash64 == incoming.ContentHash64 &&
-                   indexed.MTimeUtcTicks == incoming.MTimeUtcTicks;
-        });
-        foreach (var group in possibleMatches.GroupBy(static pair => pair.Value.SegmentId))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            using var segment = _storage.OpenSegment(group.Key, cancellationToken);
-            foreach (var pair in group)
-            {
-                var incoming = byPath[pair.Key];
-                var indexed = pair.Value;
-                // The persisted hash is only a fast rejection filter; byte equality
-                // is required before suppressing a replacement.
-                var indexedDocument = segment.GetDocument(indexed.Ordinal);
-                if (segment.GetContentBytes(indexedDocument).SequenceEqual(incoming.Content.Span))
-                {
-                    unchangedPaths.Add(pair.Key);
-                }
-            }
         }
 
         documents.RemoveAll(document => unchangedPaths.Contains(document.Path));
