@@ -121,7 +121,7 @@ public sealed class CacheTests
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "needle")]));
         using var snapshot = index.OpenSnapshot();
 
-        for (var i = 0; i < SearchSnapshot.PreparedQueryCacheCapacity + 32; i++)
+        for (var i = 0; i < SearchQueryPreparer.CacheCapacity + 32; i++)
         {
             var suffix = $"bounded-prepared-{i}";
             _ = snapshot.Explain(
@@ -129,8 +129,8 @@ public sealed class CacheTests
                 new PathFilter { PathRegex = $"src/.+(?#${suffix})" });
         }
 
-        Assert.True(SearchSnapshot.PreparedQueryCacheCount <= SearchSnapshot.PreparedQueryCacheCapacity);
-        Assert.True(SearchSnapshot.PreparedQueryCacheCharacters <= SearchSnapshot.PreparedQueryCacheCharacterCapacity);
+        Assert.True(SearchQueryPreparer.CacheCount <= SearchQueryPreparer.CacheCapacity);
+        Assert.True(SearchQueryPreparer.CacheCharacters <= SearchQueryPreparer.CacheCharacterCapacity);
         Assert.True(PathFilterMatcher.CacheCount <= PathFilterMatcher.CacheCapacity);
         Assert.True(PathFilterMatcher.CacheCharacters <= PathFilterMatcher.CacheCharacterCapacity);
     }
