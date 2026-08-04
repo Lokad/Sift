@@ -252,6 +252,10 @@ public sealed class SiftOptions
     public int OverlayCompactionSegmentThreshold { get; init; } = 8;
     // Prevents one search from creating an excessive number of segment workers.
     public int MaxSegmentParallelism { get; init; } = 64;
+    // Retains the native indexing workspace between mutations for latency-sensitive writers.
+    public bool RetainIndexingWorkspace { get; init; }
+    // Enables process-wide managed-heap sampling during build and compaction.
+    public bool MeasurePeakManagedMemory { get; init; }
 }
 
 public sealed record BuildOptions
@@ -423,6 +427,7 @@ public readonly record struct BuildStats(
     long ContentBytes,
     long RejectedBytes,
     long ElapsedMilliseconds,
+    // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
     long PeakManagedBytes)
 {
     /// <summary>Documents omitted from the completed build, with their rejection reasons.</summary>
@@ -515,6 +520,7 @@ public readonly record struct CompactStats(
     int MergedDocuments,
     long ContentBytes,
     long ElapsedMilliseconds,
+    // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
     long PeakManagedBytes,
     // True when the same policy can make progress in another bounded pass.
     bool HasMoreWork);

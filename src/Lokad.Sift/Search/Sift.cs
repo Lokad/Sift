@@ -21,7 +21,7 @@ public sealed class Sift : ISift
     private readonly ISiftStorage _storage;
     private readonly IndexBuilder _builder;
     private readonly SiftOptions _options;
-    private readonly IDisposable _indexingWorkspaceLease;
+    private readonly IDisposable? _retainedIndexingWorkspaceLease;
     private readonly CancellationTokenSource _writerCancellation = new();
     private readonly ManualResetEventSlim _writersIdle = new(initialState: true);
     private readonly CancellationTokenSource _reclamationCancellation = new();
@@ -70,7 +70,9 @@ public sealed class Sift : ISift
     {
         _options = options;
         ValidateSiftOptions(_options);
-        _indexingWorkspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
+        _retainedIndexingWorkspaceLease = options.RetainIndexingWorkspace
+            ? SegmentIndexBuilder.AcquireWorkspaceLease()
+            : null;
         _storage = storage;
         _builder = new IndexBuilder(_storage, _options);
         try
@@ -84,7 +86,7 @@ public sealed class Sift : ISift
         }
         catch
         {
-            _indexingWorkspaceLease.Dispose();
+            _retainedIndexingWorkspaceLease?.Dispose();
             throw;
         }
 
@@ -224,6 +226,11 @@ public sealed class Sift : ISift
             SiftActivity.Build,
             async operationCancellation =>
             {
+                if (!_options.MeasurePeakManagedMemory)
+                {
+                    return await build(operationCancellation).ConfigureAwait(false);
+                }
+
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
                 var stats = await build(operationCancellation).ConfigureAwait(false);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
@@ -245,6 +252,7 @@ public sealed class Sift : ISift
         try
         {
             using var activityScope = BeginActivity(activity);
+            using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
             return await Task.Run(
                 async () => await mutation(operationCancellation.Token).ConfigureAwait(false),
                 CancellationToken.None).ConfigureAwait(false);
@@ -1012,6 +1020,11 @@ public sealed class Sift : ISift
             {
                 try
                 {
+                    if (!_options.MeasurePeakManagedMemory)
+                    {
+                        return CompactCore(options, operationCancellation);
+                    }
+
                     using var measurement = ManagedMemoryPeakMeasurement.Start();
                     var stats = CompactCore(options, operationCancellation);
                     var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
@@ -1150,7 +1163,7 @@ public sealed class Sift : ISift
         }
 
         _reclamationIdle.Wait();
-        _indexingWorkspaceLease.Dispose();
+        _retainedIndexingWorkspaceLease?.Dispose();
         _writerCancellation.Dispose();
         _writersIdle.Dispose();
         _validationCancellation.Dispose();

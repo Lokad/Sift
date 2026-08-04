@@ -6,26 +6,43 @@ namespace Lokad.Sift.Tests;
 public sealed class IndexingWorkspaceTests
 {
     [Fact]
-    public async Task LastSiftDisposeReleasesNativeIndexingWorkspaces()
+    public async Task MutationReleasesNativeIndexingWorkspaceByDefault()
     {
         Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
-        var first = SiftIndex.CreateInMemory();
-        var second = SiftIndex.CreateInMemory();
+        using var index = SiftIndex.CreateInMemory();
+
+        var build = await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
+
+        Assert.Equal(0, build.PeakManagedBytes);
+        Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
+    }
+
+    [Fact]
+    public async Task RetainedWorkspaceIsReleasedWhenOptedInIndexIsDisposed()
+    {
+        Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
+        var index = SiftIndex.CreateInMemory(new SiftOptions { RetainIndexingWorkspace = true });
         try
         {
-            await first.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
+            await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
             Assert.True(IndexingProcessMetrics.NativeWorkspaceBytes >= 128L * 1024 * 1024);
 
-            first.Dispose();
-            Assert.True(IndexingProcessMetrics.NativeWorkspaceBytes >= 128L * 1024 * 1024);
-
-            second.Dispose();
+            index.Dispose();
             Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
         }
         finally
         {
-            first.Dispose();
-            second.Dispose();
+            index.Dispose();
         }
+    }
+
+    [Fact]
+    public async Task ManagedMemoryMeasurementIsOptIn()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { MeasurePeakManagedMemory = true });
+
+        var build = await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
+
+        Assert.True(build.PeakManagedBytes > 0);
     }
 }
