@@ -158,11 +158,6 @@ internal static class Utf8RegexEngine
 
     private static bool IsAscii(string text) => Encoding.UTF8.GetByteCount(text) == text.Length;
 
-    private static byte FoldAscii(byte value)
-    {
-        return value is >= (byte)'A' and <= (byte)'Z' ? (byte)(value + 32) : value;
-    }
-
     private sealed class Parser
     {
         private readonly string _pattern;
@@ -765,7 +760,7 @@ internal static class Utf8RegexEngine
 
         private byte NormalizeLiteral(byte value)
         {
-            return _ignoreCase ? FoldAscii(value) : value;
+            return _ignoreCase ? AsciiCase.Fold(value) : value;
         }
 
         private static void AddAsciiCasePairs(bool[] set)
@@ -839,7 +834,7 @@ internal static class Utf8RegexEngine
                 case Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal } atom:
                     set =
                     [
-                        [ignoreCase ? FoldAscii(atom.Literal) : atom.Literal]
+                        [ignoreCase ? AsciiCase.Fold(atom.Literal) : atom.Literal]
                     ];
                     return true;
                 case Utf8RegexAtom atom when IsZeroWidth(atom):
@@ -1021,7 +1016,7 @@ internal static class Utf8RegexEngine
                     groups =
                     [
                         [
-                            new Utf8RegexOrderedAnchor([ignoreCase ? FoldAscii(atom.Literal) : atom.Literal], null, false)
+                            new Utf8RegexOrderedAnchor([ignoreCase ? AsciiCase.Fold(atom.Literal) : atom.Literal], null, false)
                         ]
                     ];
                     return true;

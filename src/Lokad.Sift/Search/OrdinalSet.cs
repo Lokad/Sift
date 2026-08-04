@@ -77,6 +77,18 @@ internal sealed class OrdinalSet
         return result;
     }
 
+    public bool TryGetSpan(out ReadOnlySpan<uint> ordinals)
+    {
+        if (_isRange)
+        {
+            ordinals = default;
+            return false;
+        }
+
+        ordinals = _ordinals;
+        return true;
+    }
+
     public void CopyTo(PooledBitSet destination)
     {
         foreach (var ordinal in this)

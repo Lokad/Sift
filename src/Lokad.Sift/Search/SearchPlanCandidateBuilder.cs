@@ -526,7 +526,7 @@ internal static class SearchPlanCandidateBuilder
 
         for (var i = 0; i <= patternBytes.Length - plan.GramLength && selected.Count < maxSelectedNgrams; i++)
         {
-            if (!TryEncodeGram(patternBytes.AsSpan(i, plan.GramLength), caseInsensitiveAscii, out var gram))
+            if (!SegmentIndexBuilder.TryEncodeGram(patternBytes.AsSpan(i, plan.GramLength), caseInsensitiveAscii, out var gram))
             {
                 return;
             }
@@ -558,27 +558,5 @@ internal static class SearchPlanCandidateBuilder
         return pair.Lexicon is SegmentRegionId.ContentTriIcLex or SegmentRegionId.ContentBiIcLex;
     }
 
-    private static bool TryEncodeGram(ReadOnlySpan<byte> value, bool caseInsensitive, out int gram)
-    {
-        gram = 0;
-        for (var i = 0; i < value.Length; i++)
-        {
-            var current = value[i];
-            if (caseInsensitive)
-            {
-                if (current > 0x7F)
-                {
-                    gram = 0;
-                    return false;
-                }
-
-                current = (byte)(current is >= (byte)'A' and <= (byte)'Z' ? current + 32 : current);
-            }
-
-            gram = (gram << 8) | current;
-        }
-
-        return true;
-    }
 }
 

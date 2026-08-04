@@ -1854,7 +1854,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            var current = FoldAscii(haystack[i]);
+            var current = AsciiCase.Fold(haystack[i]);
             while (matched > 0 && current != loweredNeedle[matched])
             {
                 matched = prefixTable[matched - 1];
@@ -1895,17 +1895,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return prefixTable;
     }
 
-    private static byte FoldAscii(byte value)
-    {
-        return value is >= (byte)'A' and <= (byte)'Z' ? (byte)(value + 32) : value;
-    }
-
     private static byte[] LowerAscii(ReadOnlySpan<byte> needle)
     {
         var loweredNeedle = GC.AllocateUninitializedArray<byte>(needle.Length);
         for (var i = 0; i < needle.Length; i++)
         {
-            loweredNeedle[i] = FoldAscii(needle[i]);
+            loweredNeedle[i] = AsciiCase.Fold(needle[i]);
         }
 
         return loweredNeedle;

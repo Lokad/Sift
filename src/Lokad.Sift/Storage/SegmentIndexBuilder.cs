@@ -530,7 +530,7 @@ internal static class SegmentIndexBuilder
                     return false;
                 }
 
-                current = FoldAscii(current);
+                current = AsciiCase.Fold(current);
             }
 
             gram = (gram << 8) | current;
@@ -574,8 +574,8 @@ internal static class SegmentIndexBuilder
             return false;
         }
 
-        first = FoldAscii(first);
-        second = FoldAscii(second);
+        first = AsciiCase.Fold(first);
+        second = AsciiCase.Fold(second);
         gram = (first << 8) | second;
         return true;
     }
@@ -600,16 +600,11 @@ internal static class SegmentIndexBuilder
             return false;
         }
 
-        first = FoldAscii(first);
-        second = FoldAscii(second);
-        third = FoldAscii(third);
+        first = AsciiCase.Fold(first);
+        second = AsciiCase.Fold(second);
+        third = AsciiCase.Fold(third);
         gram = (first << 16) | (second << 8) | third;
         return true;
-    }
-
-    public static byte FoldAscii(byte value)
-    {
-        return (byte)(value is >= (byte)'A' and <= (byte)'Z' ? value + 32 : value);
     }
 
     internal static void WriteBucketTable(Span<byte> lexicon, ReadOnlySpan<int> bucketStarts, int entryCount)

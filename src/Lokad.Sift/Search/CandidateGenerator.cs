@@ -1,3 +1,4 @@
+using System.Buffers;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Storage;
 
@@ -17,17 +18,32 @@ internal static class CandidateGenerator
             return new CandidateResult(OrdinalSet.Empty, 0);
         }
 
-        var grams = new int[plan.SelectedGrams.Length];
-        for (var i = 0; i < plan.SelectedGrams.Length; i++)
+        var rentedGrams = plan.SelectedGrams.Length > 64
+            ? ArrayPool<int>.Shared.Rent(plan.SelectedGrams.Length)
+            : null;
+        Span<int> grams = rentedGrams is null
+            ? stackalloc int[plan.SelectedGrams.Length]
+            : rentedGrams.AsSpan(0, plan.SelectedGrams.Length);
+        for (var i = 0; i < grams.Length; i++)
         {
             grams[i] = plan.SelectedGrams[i].Gram;
         }
 
-        return plan.UnionCandidates
-            ? plan.UnionGroupLengths is not null && plan.UnionGroupLengths.Length > 0
-                ? GenerateUnionOfIntersections(segment, scopeOrdinals, plan.IndexPair, grams, plan.UnionGroupLengths)
-                : GenerateUnion(segment, scopeOrdinals, plan.IndexPair, grams)
-            : Generate(segment, scopeOrdinals, plan.IndexPair, grams);
+        try
+        {
+            return plan.UnionCandidates
+                ? plan.UnionGroupLengths is not null && plan.UnionGroupLengths.Length > 0
+                    ? GenerateUnionOfIntersections(segment, scopeOrdinals, plan.IndexPair, grams, plan.UnionGroupLengths)
+                    : GenerateUnion(segment, scopeOrdinals, plan.IndexPair, grams)
+                : Generate(segment, scopeOrdinals, plan.IndexPair, grams);
+        }
+        finally
+        {
+            if (rentedGrams is not null)
+            {
+                ArrayPool<int>.Shared.Return(rentedGrams);
+            }
+        }
     }
 
     public static CandidateResult IncludeNonAsciiDocuments(
@@ -81,7 +97,10 @@ internal static class CandidateGenerator
             return new CandidateResult(OrdinalSet.FromSorted(candidateBits.ToOrdinals()), postingsBytesRead);
         }
 
-        var current = scopeOrdinals.ToArray();
+        var current = scopeOrdinals.TryGetSpan(out var explicitOrdinals)
+            ? explicitOrdinals
+            : scopeOrdinals.ToArray();
+        uint[]? currentBuffer = null;
         for (var i = 0; i < grams.Length; i++)
         {
             if (!segment.TryGetPostings(pair, grams[i], out var postings, out var docFreq))
@@ -90,7 +109,8 @@ internal static class CandidateGenerator
             }
 
             postingsBytesRead += postings.Length;
-            current = IntersectSortedWithPostings(current, postings, docFreq);
+            currentBuffer = IntersectSortedWithPostings(current, postings, docFreq);
+            current = currentBuffer;
             if (current.Length == 0)
             {
                 return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
@@ -121,7 +141,9 @@ internal static class CandidateGenerator
             }
         }
 
-        return new CandidateResult(OrdinalSet.FromSorted(current), postingsBytesRead);
+        return new CandidateResult(
+            OrdinalSet.FromSorted(currentBuffer ?? []),
+            postingsBytesRead);
     }
 
     private static CandidateResult GenerateUnion(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)

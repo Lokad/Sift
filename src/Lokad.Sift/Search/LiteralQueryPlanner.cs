@@ -85,7 +85,7 @@ internal static class LiteralQueryPlanner
         var grams = new List<SelectedGram>();
         for (var i = 0; i <= patternBytes.Length - gramLength && grams.Count < options.MaxSelectedNgrams; i++)
         {
-            if (!TryEncodeGram(patternBytes.AsSpan(i, gramLength), caseInsensitiveAscii, out var gram))
+            if (!SegmentIndexBuilder.TryEncodeGram(patternBytes.AsSpan(i, gramLength), caseInsensitiveAscii, out var gram))
             {
                 return null;
             }
@@ -242,28 +242,6 @@ internal static class LiteralQueryPlanner
                 : new IndexRegionPair(SegmentRegionId.ContentBiCsLex, SegmentRegionId.ContentBiCsPost);
     }
 
-    private static bool TryEncodeGram(ReadOnlySpan<byte> value, bool caseInsensitive, out int gram)
-    {
-        gram = 0;
-        for (var i = 0; i < value.Length; i++)
-        {
-            var current = value[i];
-            if (caseInsensitive)
-            {
-                if (current > 0x7F)
-                {
-                    gram = 0;
-                    return false;
-                }
-
-                current = (byte)(current is >= (byte)'A' and <= (byte)'Z' ? current + 32 : current);
-            }
-
-            gram = (gram << 8) | current;
-        }
-
-        return true;
-    }
 }
 
 internal readonly record struct LiteralPlan(
