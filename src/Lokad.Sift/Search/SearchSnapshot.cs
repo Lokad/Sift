@@ -1724,26 +1724,28 @@ internal struct SearchMetrics
         int hitsReturned,
         SearchStopReason stopReason)
     {
-        return new SearchStats(
-            elapsedMilliseconds,
-            ScopeDocuments,
-            ScopeBytes,
-            PostingsBytesRead,
-            CandidateDocumentsAfterIndex,
-            CandidateDocumentsAfterPrecheck,
-            VerifiedDocuments,
-            BytesScanned,
-            DecodedChars,
-            RegexInvocations,
-            Utf8RegexInvocations,
-            FallbackRegexInvocations,
-            NonBacktrackingRegexInvocations,
-            Utf8RegexMatchedDocuments,
-            Utf8RegexMatchesEnumerated,
-            Utf8RegexCacheHits,
-            Utf8RegexCacheMisses,
-            hitsReturned,
-            stopReason);
+        return new SearchStats(new SearchStatsData
+        {
+            ElapsedMilliseconds = elapsedMilliseconds,
+            ScopeDocuments = ScopeDocuments,
+            ScopeBytes = ScopeBytes,
+            PostingsBytesRead = PostingsBytesRead,
+            CandidateDocumentsAfterIndex = CandidateDocumentsAfterIndex,
+            CandidateDocumentsAfterPrecheck = CandidateDocumentsAfterPrecheck,
+            VerifiedDocuments = VerifiedDocuments,
+            BytesScanned = BytesScanned,
+            DecodedChars = DecodedChars,
+            RegexInvocations = RegexInvocations,
+            Utf8RegexInvocations = Utf8RegexInvocations,
+            FallbackRegexInvocations = FallbackRegexInvocations,
+            NonBacktrackingRegexInvocations = NonBacktrackingRegexInvocations,
+            Utf8RegexMatchedDocuments = Utf8RegexMatchedDocuments,
+            Utf8RegexMatchesEnumerated = Utf8RegexMatchesEnumerated,
+            Utf8RegexCacheHits = Utf8RegexCacheHits,
+            Utf8RegexCacheMisses = Utf8RegexCacheMisses,
+            HitsReturned = hitsReturned,
+            StopReason = stopReason
+        });
     }
 }
 

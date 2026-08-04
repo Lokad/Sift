@@ -429,50 +429,29 @@ public sealed class MaintenanceStats
 
 public sealed class StorageStats
 {
-    internal StorageStats(
-        int manifestSegmentCount,
-        long manifestSegmentBytes,
-        int physicalSegmentCount,
-        long physicalSegmentBytes,
-        int retiredSegmentCount,
-        long retiredSegmentBytes,
-        long temporaryBytes,
-        long corpusPhysicalBytes,
-        long maximumPhysicalBytes,
-        long? availableBytes,
-        int leasedGenerationCount,
-        ulong? oldestLeasedGeneration,
-        int snapshotDeferredSegmentCount,
-        long snapshotDeferredSegmentBytes,
-        int pendingDeletionSegmentCount,
-        long pendingDeletionSegmentBytes,
-        int blockedReclamationSegmentCount,
-        long blockedReclamationSegmentBytes,
-        bool isReclamationBlocked,
-        long reclamationFailureCount,
-        string? lastReclamationFailure)
+    internal StorageStats(StorageStatsData data)
     {
-        ManifestSegmentCount = manifestSegmentCount;
-        ManifestSegmentBytes = manifestSegmentBytes;
-        PhysicalSegmentCount = physicalSegmentCount;
-        PhysicalSegmentBytes = physicalSegmentBytes;
-        RetiredSegmentCount = retiredSegmentCount;
-        RetiredSegmentBytes = retiredSegmentBytes;
-        TemporaryBytes = temporaryBytes;
-        CorpusPhysicalBytes = corpusPhysicalBytes;
-        MaximumPhysicalBytes = maximumPhysicalBytes;
-        AvailableBytes = availableBytes;
-        LeasedGenerationCount = leasedGenerationCount;
-        OldestLeasedGeneration = oldestLeasedGeneration;
-        SnapshotDeferredSegmentCount = snapshotDeferredSegmentCount;
-        SnapshotDeferredSegmentBytes = snapshotDeferredSegmentBytes;
-        PendingDeletionSegmentCount = pendingDeletionSegmentCount;
-        PendingDeletionSegmentBytes = pendingDeletionSegmentBytes;
-        BlockedReclamationSegmentCount = blockedReclamationSegmentCount;
-        BlockedReclamationSegmentBytes = blockedReclamationSegmentBytes;
-        IsReclamationBlocked = isReclamationBlocked;
-        ReclamationFailureCount = reclamationFailureCount;
-        LastReclamationFailure = lastReclamationFailure;
+        ManifestSegmentCount = data.ManifestSegmentCount;
+        ManifestSegmentBytes = data.ManifestSegmentBytes;
+        PhysicalSegmentCount = data.PhysicalSegmentCount;
+        PhysicalSegmentBytes = data.PhysicalSegmentBytes;
+        RetiredSegmentCount = data.RetiredSegmentCount;
+        RetiredSegmentBytes = data.RetiredSegmentBytes;
+        TemporaryBytes = data.TemporaryBytes;
+        CorpusPhysicalBytes = data.CorpusPhysicalBytes;
+        MaximumPhysicalBytes = data.MaximumPhysicalBytes;
+        AvailableBytes = data.AvailableBytes;
+        LeasedGenerationCount = data.LeasedGenerationCount;
+        OldestLeasedGeneration = data.OldestLeasedGeneration;
+        SnapshotDeferredSegmentCount = data.SnapshotDeferredSegmentCount;
+        SnapshotDeferredSegmentBytes = data.SnapshotDeferredSegmentBytes;
+        PendingDeletionSegmentCount = data.PendingDeletionSegmentCount;
+        PendingDeletionSegmentBytes = data.PendingDeletionSegmentBytes;
+        BlockedReclamationSegmentCount = data.BlockedReclamationSegmentCount;
+        BlockedReclamationSegmentBytes = data.BlockedReclamationSegmentBytes;
+        IsReclamationBlocked = data.IsReclamationBlocked;
+        ReclamationFailureCount = data.ReclamationFailureCount;
+        LastReclamationFailure = data.LastReclamationFailure;
     }
 
     // Currently reachable packs that are also present on disk.
@@ -517,6 +496,31 @@ public sealed class StorageStats
     public long ReclamationFailureCount { get; }
     // Most recent exceptional reclamation failure, or null when no sweep has failed.
     public string? LastReclamationFailure { get; }
+}
+
+internal sealed class StorageStatsData
+{
+    public required int ManifestSegmentCount { get; init; }
+    public required long ManifestSegmentBytes { get; init; }
+    public required int PhysicalSegmentCount { get; init; }
+    public required long PhysicalSegmentBytes { get; init; }
+    public required int RetiredSegmentCount { get; init; }
+    public required long RetiredSegmentBytes { get; init; }
+    public required long TemporaryBytes { get; init; }
+    public required long CorpusPhysicalBytes { get; init; }
+    public required long MaximumPhysicalBytes { get; init; }
+    public required long? AvailableBytes { get; init; }
+    public required int LeasedGenerationCount { get; init; }
+    public required ulong? OldestLeasedGeneration { get; init; }
+    public required int SnapshotDeferredSegmentCount { get; init; }
+    public required long SnapshotDeferredSegmentBytes { get; init; }
+    public required int PendingDeletionSegmentCount { get; init; }
+    public required long PendingDeletionSegmentBytes { get; init; }
+    public required int BlockedReclamationSegmentCount { get; init; }
+    public required long BlockedReclamationSegmentBytes { get; init; }
+    public required bool IsReclamationBlocked { get; init; }
+    public required long ReclamationFailureCount { get; init; }
+    public required string? LastReclamationFailure { get; init; }
 }
 
 public interface IIndexSnapshot : IDisposable

@@ -267,28 +267,30 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             }
         }
 
-        return new StorageStats(
-            manifestSegmentCount: manifestSegmentCount,
-            manifestSegmentBytes: manifestSegmentBytes,
-            physicalSegmentCount: _segments.Count,
-            physicalSegmentBytes: physicalSegmentBytes,
-            retiredSegmentCount: _segments.Count - manifestSegmentCount,
-            retiredSegmentBytes: physicalSegmentBytes - manifestSegmentBytes,
-            temporaryBytes: 0,
-            corpusPhysicalBytes: physicalSegmentBytes,
-            maximumPhysicalBytes: long.MaxValue,
-            availableBytes: null,
-            leasedGenerationCount: reclamation.LeasedGenerationCount,
-            oldestLeasedGeneration: reclamation.OldestLeasedGeneration,
-            snapshotDeferredSegmentCount: reclamation.DeferredSegmentCount,
-            snapshotDeferredSegmentBytes: reclamation.DeferredSegmentBytes,
-            pendingDeletionSegmentCount: reclamation.FailedSegmentCount,
-            pendingDeletionSegmentBytes: reclamation.FailedSegmentBytes,
-            blockedReclamationSegmentCount: reclamation.BlockedSegmentCount,
-            blockedReclamationSegmentBytes: reclamation.BlockedSegmentBytes,
-            isReclamationBlocked: reclamation.IsBlocked,
-            reclamationFailureCount: 0,
-            lastReclamationFailure: null);
+        return new StorageStats(new StorageStatsData
+        {
+            ManifestSegmentCount = manifestSegmentCount,
+            ManifestSegmentBytes = manifestSegmentBytes,
+            PhysicalSegmentCount = _segments.Count,
+            PhysicalSegmentBytes = physicalSegmentBytes,
+            RetiredSegmentCount = _segments.Count - manifestSegmentCount,
+            RetiredSegmentBytes = physicalSegmentBytes - manifestSegmentBytes,
+            TemporaryBytes = 0,
+            CorpusPhysicalBytes = physicalSegmentBytes,
+            MaximumPhysicalBytes = long.MaxValue,
+            AvailableBytes = null,
+            LeasedGenerationCount = reclamation.LeasedGenerationCount,
+            OldestLeasedGeneration = reclamation.OldestLeasedGeneration,
+            SnapshotDeferredSegmentCount = reclamation.DeferredSegmentCount,
+            SnapshotDeferredSegmentBytes = reclamation.DeferredSegmentBytes,
+            PendingDeletionSegmentCount = reclamation.FailedSegmentCount,
+            PendingDeletionSegmentBytes = reclamation.FailedSegmentBytes,
+            BlockedReclamationSegmentCount = reclamation.BlockedSegmentCount,
+            BlockedReclamationSegmentBytes = reclamation.BlockedSegmentBytes,
+            IsReclamationBlocked = reclamation.IsBlocked,
+            ReclamationFailureCount = 0,
+            LastReclamationFailure = null
+        });
     }
 
     private SegmentReclamationStats ReclaimUnreferencedSegmentsUnderWriterLock()

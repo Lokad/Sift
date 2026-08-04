@@ -354,46 +354,27 @@ internal sealed class SearchPlanData
 
 public sealed class SearchStats
 {
-    internal SearchStats(
-        long elapsedMilliseconds,
-        int scopeDocuments,
-        long scopeBytes,
-        long postingsBytesRead,
-        int candidateDocumentsAfterIndex,
-        int candidateDocumentsAfterPrecheck,
-        int verifiedDocuments,
-        long bytesScanned,
-        long decodedChars,
-        int regexInvocations,
-        int utf8RegexInvocations,
-        int fallbackRegexInvocations,
-        int nonBacktrackingRegexInvocations,
-        int utf8RegexMatchedDocuments,
-        long utf8RegexMatchesEnumerated,
-        long utf8RegexCacheHits,
-        long utf8RegexCacheMisses,
-        int hitsReturned,
-        SearchStopReason stopReason)
+    internal SearchStats(SearchStatsData data)
     {
-        ElapsedMilliseconds = elapsedMilliseconds;
-        ScopeDocuments = scopeDocuments;
-        ScopeBytes = scopeBytes;
-        PostingsBytesRead = postingsBytesRead;
-        CandidateDocumentsAfterIndex = candidateDocumentsAfterIndex;
-        CandidateDocumentsAfterPrecheck = candidateDocumentsAfterPrecheck;
-        VerifiedDocuments = verifiedDocuments;
-        BytesScanned = bytesScanned;
-        DecodedChars = decodedChars;
-        RegexInvocations = regexInvocations;
-        Utf8RegexInvocations = utf8RegexInvocations;
-        FallbackRegexInvocations = fallbackRegexInvocations;
-        NonBacktrackingRegexInvocations = nonBacktrackingRegexInvocations;
-        Utf8RegexMatchedDocuments = utf8RegexMatchedDocuments;
-        Utf8RegexMatchesEnumerated = utf8RegexMatchesEnumerated;
-        Utf8RegexCacheHits = utf8RegexCacheHits;
-        Utf8RegexCacheMisses = utf8RegexCacheMisses;
-        HitsReturned = hitsReturned;
-        StopReason = stopReason;
+        ElapsedMilliseconds = data.ElapsedMilliseconds;
+        ScopeDocuments = data.ScopeDocuments;
+        ScopeBytes = data.ScopeBytes;
+        PostingsBytesRead = data.PostingsBytesRead;
+        CandidateDocumentsAfterIndex = data.CandidateDocumentsAfterIndex;
+        CandidateDocumentsAfterPrecheck = data.CandidateDocumentsAfterPrecheck;
+        VerifiedDocuments = data.VerifiedDocuments;
+        BytesScanned = data.BytesScanned;
+        DecodedChars = data.DecodedChars;
+        RegexInvocations = data.RegexInvocations;
+        Utf8RegexInvocations = data.Utf8RegexInvocations;
+        FallbackRegexInvocations = data.FallbackRegexInvocations;
+        NonBacktrackingRegexInvocations = data.NonBacktrackingRegexInvocations;
+        Utf8RegexMatchedDocuments = data.Utf8RegexMatchedDocuments;
+        Utf8RegexMatchesEnumerated = data.Utf8RegexMatchesEnumerated;
+        Utf8RegexCacheHits = data.Utf8RegexCacheHits;
+        Utf8RegexCacheMisses = data.Utf8RegexCacheMisses;
+        HitsReturned = data.HitsReturned;
+        StopReason = data.StopReason;
     }
 
     public long ElapsedMilliseconds { get; }
@@ -418,27 +399,52 @@ public sealed class SearchStats
 
     internal SearchStats WithStopReason(SearchStopReason stopReason)
     {
-        return new SearchStats(
-            ElapsedMilliseconds,
-            ScopeDocuments,
-            ScopeBytes,
-            PostingsBytesRead,
-            CandidateDocumentsAfterIndex,
-            CandidateDocumentsAfterPrecheck,
-            VerifiedDocuments,
-            BytesScanned,
-            DecodedChars,
-            RegexInvocations,
-            Utf8RegexInvocations,
-            FallbackRegexInvocations,
-            NonBacktrackingRegexInvocations,
-            Utf8RegexMatchedDocuments,
-            Utf8RegexMatchesEnumerated,
-            Utf8RegexCacheHits,
-            Utf8RegexCacheMisses,
-            HitsReturned,
-            stopReason);
+        return new SearchStats(new SearchStatsData
+        {
+            ElapsedMilliseconds = ElapsedMilliseconds,
+            ScopeDocuments = ScopeDocuments,
+            ScopeBytes = ScopeBytes,
+            PostingsBytesRead = PostingsBytesRead,
+            CandidateDocumentsAfterIndex = CandidateDocumentsAfterIndex,
+            CandidateDocumentsAfterPrecheck = CandidateDocumentsAfterPrecheck,
+            VerifiedDocuments = VerifiedDocuments,
+            BytesScanned = BytesScanned,
+            DecodedChars = DecodedChars,
+            RegexInvocations = RegexInvocations,
+            Utf8RegexInvocations = Utf8RegexInvocations,
+            FallbackRegexInvocations = FallbackRegexInvocations,
+            NonBacktrackingRegexInvocations = NonBacktrackingRegexInvocations,
+            Utf8RegexMatchedDocuments = Utf8RegexMatchedDocuments,
+            Utf8RegexMatchesEnumerated = Utf8RegexMatchesEnumerated,
+            Utf8RegexCacheHits = Utf8RegexCacheHits,
+            Utf8RegexCacheMisses = Utf8RegexCacheMisses,
+            HitsReturned = HitsReturned,
+            StopReason = stopReason
+        });
     }
+}
+
+internal sealed class SearchStatsData
+{
+    public required long ElapsedMilliseconds { get; init; }
+    public required int ScopeDocuments { get; init; }
+    public required long ScopeBytes { get; init; }
+    public required long PostingsBytesRead { get; init; }
+    public required int CandidateDocumentsAfterIndex { get; init; }
+    public required int CandidateDocumentsAfterPrecheck { get; init; }
+    public required int VerifiedDocuments { get; init; }
+    public required long BytesScanned { get; init; }
+    public required long DecodedChars { get; init; }
+    public required int RegexInvocations { get; init; }
+    public required int Utf8RegexInvocations { get; init; }
+    public required int FallbackRegexInvocations { get; init; }
+    public required int NonBacktrackingRegexInvocations { get; init; }
+    public required int Utf8RegexMatchedDocuments { get; init; }
+    public required long Utf8RegexMatchesEnumerated { get; init; }
+    public required long Utf8RegexCacheHits { get; init; }
+    public required long Utf8RegexCacheMisses { get; init; }
+    public required int HitsReturned { get; init; }
+    public required SearchStopReason StopReason { get; init; }
 }
 
 public sealed class MaterializedHit
