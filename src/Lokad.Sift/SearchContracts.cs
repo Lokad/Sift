@@ -212,30 +212,19 @@ public enum SearchVerifierKind
 
 public sealed class PlannerAlternative
 {
-    internal PlannerAlternative(
-        SearchCandidateKind candidateKind,
-        SearchCandidateCombination candidateCombination,
-        SearchVerifierKind verifierKind,
-        bool usesIndex,
-        double estimatedDirectScanCost,
-        double? estimatedIndexedCost,
-        double estimatedCandidateDocuments,
-        double estimatedCost,
-        int segmentCount,
-        int scopeDocumentCount,
-        long scopeByteCount)
+    internal PlannerAlternative(PlannerAlternativeData data)
     {
-        CandidateKind = candidateKind;
-        CandidateCombination = candidateCombination;
-        VerifierKind = verifierKind;
-        UsesIndex = usesIndex;
-        EstimatedDirectScanCost = estimatedDirectScanCost;
-        EstimatedIndexedCost = estimatedIndexedCost;
-        EstimatedCandidateDocuments = estimatedCandidateDocuments;
-        EstimatedCost = estimatedCost;
-        SegmentCount = segmentCount;
-        ScopeDocumentCount = scopeDocumentCount;
-        ScopeByteCount = scopeByteCount;
+        CandidateKind = data.CandidateKind;
+        CandidateCombination = data.CandidateCombination;
+        VerifierKind = data.VerifierKind;
+        UsesIndex = data.UsesIndex;
+        EstimatedDirectScanCost = data.EstimatedDirectScanCost;
+        EstimatedIndexedCost = data.EstimatedIndexedCost;
+        EstimatedCandidateDocuments = data.EstimatedCandidateDocuments;
+        EstimatedCost = data.EstimatedCost;
+        SegmentCount = data.SegmentCount;
+        ScopeDocumentCount = data.ScopeDocumentCount;
+        ScopeByteCount = data.ScopeByteCount;
     }
 
     public SearchCandidateKind CandidateKind { get; }
@@ -249,6 +238,21 @@ public sealed class PlannerAlternative
     public int SegmentCount { get; }
     public int ScopeDocumentCount { get; }
     public long ScopeByteCount { get; }
+}
+
+internal sealed class PlannerAlternativeData
+{
+    public required SearchCandidateKind CandidateKind { get; init; }
+    public required SearchCandidateCombination CandidateCombination { get; init; }
+    public required SearchVerifierKind VerifierKind { get; init; }
+    public required bool UsesIndex { get; init; }
+    public required double EstimatedDirectScanCost { get; init; }
+    public required double? EstimatedIndexedCost { get; init; }
+    public required double EstimatedCandidateDocuments { get; init; }
+    public required double EstimatedCost { get; init; }
+    public required int SegmentCount { get; init; }
+    public required int ScopeDocumentCount { get; init; }
+    public required long ScopeByteCount { get; init; }
 }
 
 public sealed class SearchPlan
@@ -450,28 +454,18 @@ internal sealed class SearchStatsData
 
 public sealed class MaterializedHit
 {
-    internal MaterializedHit(
-        string path,
-        int startLine,
-        int startColumn,
-        int endLine,
-        int endColumn,
-        string matchText,
-        IReadOnlyList<string> beforeContext,
-        IReadOnlyList<string> afterContext,
-        bool isMatchTruncated,
-        bool isContextTruncated)
+    internal MaterializedHit(MaterializedHitData data)
     {
-        Path = path;
-        StartLine = startLine;
-        StartColumn = startColumn;
-        EndLine = endLine;
-        EndColumn = endColumn;
-        MatchText = matchText;
-        BeforeContext = PublicResultCollection.Freeze(beforeContext);
-        AfterContext = PublicResultCollection.Freeze(afterContext);
-        IsMatchTruncated = isMatchTruncated;
-        IsContextTruncated = isContextTruncated;
+        Path = data.Path;
+        StartLine = data.StartLine;
+        StartColumn = data.StartColumn;
+        EndLine = data.EndLine;
+        EndColumn = data.EndColumn;
+        MatchText = data.MatchText;
+        BeforeContext = PublicResultCollection.Freeze(data.BeforeContext);
+        AfterContext = PublicResultCollection.Freeze(data.AfterContext);
+        IsMatchTruncated = data.IsMatchTruncated;
+        IsContextTruncated = data.IsContextTruncated;
     }
 
     public string Path { get; }
@@ -484,6 +478,20 @@ public sealed class MaterializedHit
     public IReadOnlyList<string> AfterContext { get; }
     public bool IsMatchTruncated { get; }
     public bool IsContextTruncated { get; }
+}
+
+internal sealed class MaterializedHitData
+{
+    public required string Path { get; init; }
+    public required int StartLine { get; init; }
+    public required int StartColumn { get; init; }
+    public required int EndLine { get; init; }
+    public required int EndColumn { get; init; }
+    public required string MatchText { get; init; }
+    public required IReadOnlyList<string> BeforeContext { get; init; }
+    public required IReadOnlyList<string> AfterContext { get; init; }
+    public required bool IsMatchTruncated { get; init; }
+    public required bool IsContextTruncated { get; init; }
 }
 
 public interface IHitCollector

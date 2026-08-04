@@ -234,17 +234,19 @@ internal struct PlannerAlternativeAccumulator
         SearchVerifierKind verifierKind,
         bool usesIndex)
     {
-        return new PlannerAlternative(
-            candidateKind,
-            candidateCombination,
-            verifierKind,
-            usesIndex,
-            EstimatedDirectScanCost,
-            EstimatedIndexedCost,
-            EstimatedCandidateDocuments,
-            EstimatedCost,
-            SegmentCount,
-            ScopeDocumentCount,
-            ScopeByteCount);
+        return new PlannerAlternative(new PlannerAlternativeData
+        {
+            CandidateKind = candidateKind,
+            CandidateCombination = candidateCombination,
+            VerifierKind = verifierKind,
+            UsesIndex = usesIndex,
+            EstimatedDirectScanCost = EstimatedDirectScanCost,
+            EstimatedIndexedCost = EstimatedIndexedCost,
+            EstimatedCandidateDocuments = EstimatedCandidateDocuments,
+            EstimatedCost = EstimatedCost,
+            SegmentCount = SegmentCount,
+            ScopeDocumentCount = ScopeDocumentCount,
+            ScopeByteCount = ScopeByteCount
+        });
     }
 }

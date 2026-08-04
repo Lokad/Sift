@@ -62,20 +62,22 @@ internal sealed class IndexCompactor
         var liveDocuments = totalDocuments - deadDocuments;
         var deadDocumentFraction = totalDocuments == 0 ? 0d : (double)deadDocuments / totalDocuments;
         var deadContentFraction = contentBytes == 0 ? 0d : (double)reclaimableContentBytes / contentBytes;
-        return new MaintenanceStats(
-            generation: manifest.Generation,
-            segmentCount: manifest.Segments.Count,
-            totalDocuments: totalDocuments,
-            liveDocuments: liveDocuments,
-            deadDocuments: deadDocuments,
-            deadDocumentFraction: deadDocumentFraction,
-            deadContentFraction: deadContentFraction,
-            contentBytes: contentBytes,
-            estimatedLiveContentBytes: contentBytes - reclaimableContentBytes,
-            estimatedReclaimableContentBytes: reclaimableContentBytes,
-            deadOrdinalEntries: deadDocuments,
-            segmentsWithDeletions: segmentsWithDeletions,
-            smallSegmentCount: smallSegmentCount);
+        return new MaintenanceStats(new MaintenanceStatsData
+        {
+            Generation = manifest.Generation,
+            SegmentCount = manifest.Segments.Count,
+            TotalDocuments = totalDocuments,
+            LiveDocuments = liveDocuments,
+            DeadDocuments = deadDocuments,
+            DeadDocumentFraction = deadDocumentFraction,
+            DeadContentFraction = deadContentFraction,
+            ContentBytes = contentBytes,
+            EstimatedLiveContentBytes = contentBytes - reclaimableContentBytes,
+            EstimatedReclaimableContentBytes = reclaimableContentBytes,
+            DeadOrdinalEntries = deadDocuments,
+            SegmentsWithDeletions = segmentsWithDeletions,
+            SmallSegmentCount = smallSegmentCount
+        });
     }
 
     public bool ShouldCompact(
@@ -114,14 +116,16 @@ internal sealed class IndexCompactor
         if (selectedSegmentIds.Count == 0)
         {
             watch.Stop();
-            return new CompactStats(
-                inputSegments: 0,
-                outputSegments: 0,
-                mergedDocuments: 0,
-                contentBytes: 0,
-                elapsedMilliseconds: watch.ElapsedMilliseconds,
-                peakManagedBytes: 0,
-                hasMoreWork: false);
+            return new CompactStats(new CompactStatsData
+            {
+                InputSegments = 0,
+                OutputSegments = 0,
+                MergedDocuments = 0,
+                ContentBytes = 0,
+                ElapsedMilliseconds = watch.ElapsedMilliseconds,
+                PeakManagedBytes = 0,
+                HasMoreWork = false
+            });
         }
 
         writeSession.EnsureReplacementAllowed();
@@ -170,18 +174,20 @@ internal sealed class IndexCompactor
         }
 
         watch.Stop();
-        return new CompactStats(
-            inputSegments: selectedSegmentIds.Count,
-            outputSegments: newSegments.Count,
-            mergedDocuments: publication.MergedDocuments,
-            contentBytes: publication.ContentBytes,
-            elapsedMilliseconds: watch.ElapsedMilliseconds,
-            peakManagedBytes: 0,
-            hasMoreWork: writeSession.CanReplaceSegments() &&
+        return new CompactStats(new CompactStatsData
+        {
+            InputSegments = selectedSegmentIds.Count,
+            OutputSegments = newSegments.Count,
+            MergedDocuments = publication.MergedDocuments,
+            ContentBytes = publication.ContentBytes,
+            ElapsedMilliseconds = watch.ElapsedMilliseconds,
+            PeakManagedBytes = 0,
+            HasMoreWork = writeSession.CanReplaceSegments() &&
                 HasActionableWork(
                     manifest,
                     options,
-                    CancellationToken.None));
+                    CancellationToken.None)
+        });
     }
 
     public static void ValidateOptions(CompactOptions options)

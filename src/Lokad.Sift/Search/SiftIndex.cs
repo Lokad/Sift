@@ -705,20 +705,22 @@ public sealed class SiftIndex : ISiftIndex
 
                 var requiresManifestMigration = existingManifest.Segments.Any(
                     static segment => segment.DeadContentBytes < 0);
-                var pendingStats = new UpdateStats(
-                    submittedUpserts: upsertLoad.Submitted,
-                    upsertedDocuments: upsertLoad.Accepted,
-                    skippedUpserts: upsertLoad.Skipped,
-                    rejectedUpserts: upsertLoad.Rejected,
-                    deletedDocuments: deletedDocuments,
-                    publishedSegments: publishedSegments.Count,
-                    submittedBytes: upsertLoad.SubmittedBytes,
-                    contentBytes: upsertLoad.AcceptedBytes,
-                    skippedBytes: upsertLoad.SkippedBytes,
-                    rejectedBytes: upsertLoad.RejectedBytes,
-                    rejectedDocuments: upsertLoad.RejectedDocuments,
-                    elapsedMilliseconds: watch.ElapsedMilliseconds,
-                    committedIdentity: default);
+                var pendingStats = new UpdateStats(new UpdateStatsData
+                {
+                    SubmittedUpserts = upsertLoad.Submitted,
+                    UpsertedDocuments = upsertLoad.Accepted,
+                    SkippedUpserts = upsertLoad.Skipped,
+                    RejectedUpserts = upsertLoad.Rejected,
+                    DeletedDocuments = deletedDocuments,
+                    PublishedSegments = publishedSegments.Count,
+                    SubmittedBytes = upsertLoad.SubmittedBytes,
+                    ContentBytes = upsertLoad.AcceptedBytes,
+                    SkippedBytes = upsertLoad.SkippedBytes,
+                    RejectedBytes = upsertLoad.RejectedBytes,
+                    RejectedDocumentDetails = upsertLoad.RejectedDocuments,
+                    ElapsedMilliseconds = watch.ElapsedMilliseconds,
+                    CommittedIdentity = default
+                });
                 var commitMetadata = options.CommitMetadataProvider is null
                     ? existingManifest.CommitMetadata
                     : options.CommitMetadataProvider(pendingStats).ToArray();
@@ -802,20 +804,22 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             watch.Stop();
-            return new UpdateStats(
-                submittedUpserts: upsertLoad.Submitted,
-                upsertedDocuments: upsertLoad.Accepted,
-                skippedUpserts: upsertLoad.Skipped,
-                rejectedUpserts: upsertLoad.Rejected,
-                deletedDocuments: deletedDocuments,
-                publishedSegments: publishedSegments.Count,
-                submittedBytes: upsertLoad.SubmittedBytes,
-                contentBytes: upsertLoad.AcceptedBytes,
-                skippedBytes: upsertLoad.SkippedBytes,
-                rejectedBytes: upsertLoad.RejectedBytes,
-                rejectedDocuments: upsertLoad.RejectedDocuments,
-                elapsedMilliseconds: watch.ElapsedMilliseconds,
-                committedIdentity: committedIdentity);
+            return new UpdateStats(new UpdateStatsData
+            {
+                SubmittedUpserts = upsertLoad.Submitted,
+                UpsertedDocuments = upsertLoad.Accepted,
+                SkippedUpserts = upsertLoad.Skipped,
+                RejectedUpserts = upsertLoad.Rejected,
+                DeletedDocuments = deletedDocuments,
+                PublishedSegments = publishedSegments.Count,
+                SubmittedBytes = upsertLoad.SubmittedBytes,
+                ContentBytes = upsertLoad.AcceptedBytes,
+                SkippedBytes = upsertLoad.SkippedBytes,
+                RejectedBytes = upsertLoad.RejectedBytes,
+                RejectedDocumentDetails = upsertLoad.RejectedDocuments,
+                ElapsedMilliseconds = watch.ElapsedMilliseconds,
+                CommittedIdentity = committedIdentity
+            });
         }
     }
 
