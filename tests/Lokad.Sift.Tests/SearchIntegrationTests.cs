@@ -897,7 +897,8 @@ public sealed class SearchIntegrationTests
         var query = new SearchQuery("\\[(?:Fact|Theory|InlineData)\\b", PatternMode.Regex, CaseMode.Sensitive);
         var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
-        var literals = program.LeadingLiteralSet!
+        Assert.NotNull(program.LeadingLiteralSet);
+        var literals = program.LeadingLiteralSet
             .Select(static bytes => System.Text.Encoding.UTF8.GetString(bytes))
             .OrderBy(static literal => literal, StringComparer.Ordinal)
             .ToArray();
@@ -911,7 +912,8 @@ public sealed class SearchIntegrationTests
         var query = new SearchQuery("services\\.(?:Add|TryAdd|AddKeyed)(?:Singleton|Scoped|Transient)\\b", PatternMode.Regex, CaseMode.Sensitive);
         var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
-        var literals = program.LeadingLiteralSet!
+        Assert.NotNull(program.LeadingLiteralSet);
+        var literals = program.LeadingLiteralSet
             .Select(static bytes => System.Text.Encoding.UTF8.GetString(bytes))
             .OrderBy(static literal => literal, StringComparer.Ordinal)
             .ToArray();
@@ -936,7 +938,8 @@ public sealed class SearchIntegrationTests
         var query = new SearchQuery("\\b(?:Get|TryGet|Create|Load)[A-Z][A-Za-z0-9]+Async\\s*\\(", PatternMode.Regex, CaseMode.Sensitive);
         var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
-        var groups = program.OrderedAnchorGroups!
+        Assert.NotNull(program.OrderedAnchorGroups);
+        var groups = program.OrderedAnchorGroups
             .Select(static group => string.Join(">", group.Anchors.Select(static anchor => System.Text.Encoding.UTF8.GetString(anchor.Utf8Bytes))))
             .OrderBy(static value => value, StringComparer.Ordinal)
             .ToArray();
