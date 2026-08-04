@@ -54,6 +54,8 @@ public sealed class PublicContractTests
         Assert.False(typeof(CompactStats).IsValueType);
         Assert.False(typeof(MaintenanceStats).IsValueType);
         Assert.False(typeof(StorageStats).IsValueType);
+        Assert.False(typeof(IndexState).IsValueType);
+        Assert.False(typeof(MaterializedHit).IsValueType);
     }
 
     [Fact]
@@ -67,7 +69,9 @@ public sealed class PublicContractTests
             typeof(UpdateStats),
             typeof(CompactStats),
             typeof(MaintenanceStats),
-            typeof(StorageStats)
+            typeof(StorageStats),
+            typeof(IndexState),
+            typeof(MaterializedHit)
         ];
 
         foreach (var resultType in resultTypes)

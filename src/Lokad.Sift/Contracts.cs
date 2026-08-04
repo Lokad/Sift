@@ -633,7 +633,7 @@ public sealed class SearchStats
         stopReason);
 }
 
-public sealed record BuildStats
+public sealed class BuildStats
 {
     internal BuildStats(
         int submittedDocuments,
@@ -698,7 +698,7 @@ public sealed record BuildStats
 
 }
 
-public sealed record UpdateStats
+public sealed class UpdateStats
 {
     internal UpdateStats(
         int submittedUpserts,
@@ -801,7 +801,7 @@ public sealed record CompactOptions
     public long MinimumFreeBytesAfterCompaction { get; init; }
 }
 
-public sealed record CompactStats
+public sealed class CompactStats
 {
     internal CompactStats(
         int inputSegments,
@@ -861,9 +861,17 @@ public readonly record struct IndexIdentity(
     // Changes whenever a manifest is published, including compaction and metadata-only commits.
     ulong StorageGeneration);
 
-public readonly record struct IndexState(
-    IndexIdentity Identity,
-    ReadOnlyMemory<byte> CommitMetadata);
+public sealed class IndexState
+{
+    internal IndexState(IndexIdentity identity, ReadOnlyMemory<byte> commitMetadata)
+    {
+        Identity = identity;
+        CommitMetadata = commitMetadata;
+    }
+
+    public IndexIdentity Identity { get; }
+    public ReadOnlyMemory<byte> CommitMetadata { get; }
+}
 
 public enum IndexValidationState
 {
@@ -895,7 +903,7 @@ public readonly record struct IndexValidationStats(
     public bool IsReady => State == IndexValidationState.Ready;
 }
 
-public sealed record MaintenanceStats
+public sealed class MaintenanceStats
 {
     internal MaintenanceStats(
         ulong generation,
@@ -955,7 +963,7 @@ public sealed record MaintenanceStats
     public int SmallSegmentCount { get; }
 }
 
-public sealed record StorageStats
+public sealed class StorageStats
 {
     internal StorageStats(
         int manifestSegmentCount,
@@ -1047,17 +1055,43 @@ public sealed record StorageStats
     public string? LastReclamationFailure { get; }
 }
 
-public readonly record struct MaterializedHit(
-    string Path,
-    int StartLine,
-    int StartColumn,
-    int EndLine,
-    int EndColumn,
-    string MatchText,
-    string[] BeforeContext,
-    string[] AfterContext,
-    bool IsMatchTruncated,
-    bool IsContextTruncated);
+public sealed class MaterializedHit
+{
+    internal MaterializedHit(
+        string path,
+        int startLine,
+        int startColumn,
+        int endLine,
+        int endColumn,
+        string matchText,
+        IReadOnlyList<string> beforeContext,
+        IReadOnlyList<string> afterContext,
+        bool isMatchTruncated,
+        bool isContextTruncated)
+    {
+        Path = path;
+        StartLine = startLine;
+        StartColumn = startColumn;
+        EndLine = endLine;
+        EndColumn = endColumn;
+        MatchText = matchText;
+        BeforeContext = PublicResultCollection.Freeze(beforeContext);
+        AfterContext = PublicResultCollection.Freeze(afterContext);
+        IsMatchTruncated = isMatchTruncated;
+        IsContextTruncated = isContextTruncated;
+    }
+
+    public string Path { get; }
+    public int StartLine { get; }
+    public int StartColumn { get; }
+    public int EndLine { get; }
+    public int EndColumn { get; }
+    public string MatchText { get; }
+    public IReadOnlyList<string> BeforeContext { get; }
+    public IReadOnlyList<string> AfterContext { get; }
+    public bool IsMatchTruncated { get; }
+    public bool IsContextTruncated { get; }
+}
 
 public interface IHitCollector
 {
