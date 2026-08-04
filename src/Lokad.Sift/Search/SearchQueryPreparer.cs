@@ -80,7 +80,7 @@ internal static class SearchQueryPreparer
             }
             else
             {
-                analysis = RegexFragmentAnalyzer.AnalyzePattern(query.Pattern);
+                analysis = RegexFragmentAnalyzer.AnalyzeFallbackPattern(query.Pattern);
             }
         }
 

@@ -6,6 +6,27 @@ namespace Lokad.Sift.Tests;
 public sealed class RegexAnalyzerTests
 {
     [Theory]
+    [InlineData("alpha")]
+    [InlineData("a(b|c)d")]
+    [InlineData("foo[0-9]+bar")]
+    [InlineData("^foo.*bar$")]
+    [InlineData("\\bword\\b")]
+    public void SupportedPatternsUseExecutionSyntaxAnalysis(string pattern)
+    {
+        var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
+        Assert.True(Utf8RegexEngine.TryParseSyntax(query, CaseMode.Sensitive, out var syntax));
+
+        var fromPattern = RegexFragmentAnalyzer.AnalyzePattern(pattern);
+        var fromSyntax = RegexFragmentAnalyzer.AnalyzePattern(syntax);
+
+        Assert.Equal(fromSyntax.IsExactLiteral, fromPattern.IsExactLiteral);
+        Assert.Equal(fromSyntax.ExactLiteral, fromPattern.ExactLiteral);
+        Assert.Equal(fromSyntax.MandatoryFragments, fromPattern.MandatoryFragments);
+        Assert.Equal(fromSyntax.AdvisorySeeds.Seeds, fromPattern.AdvisorySeeds.Seeds);
+        Assert.Equal(fromSyntax.AdvisorySeeds.RequiresIgnoreCase, fromPattern.AdvisorySeeds.RequiresIgnoreCase);
+    }
+
+    [Theory]
     [InlineData("(?(1)foo|bar)")]
     [InlineData("(?i:foo)bar")]
     [InlineData("(?-i:foo)bar")]

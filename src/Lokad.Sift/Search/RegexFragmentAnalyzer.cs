@@ -13,25 +13,64 @@ internal static class RegexFragmentAnalyzer
 
     public static PatternAnalysis AnalyzePattern(string pattern)
     {
+        return AnalyzePattern(pattern, limit: 8);
+    }
+
+    private static PatternAnalysis AnalyzePattern(string pattern, int limit)
+    {
         if (string.IsNullOrEmpty(pattern))
         {
             return new PatternAnalysis(true, string.Empty, [], new AdvisorySeedPlan([], false));
         }
 
-        const int limit = 8;
-        var parser = new Parser(pattern, limit, advisoryMode: true);
+        if (TryAnalyzeSupportedPattern(pattern, limit, out var analysis))
+        {
+            return analysis;
+        }
+
+        return AnalyzeFallbackPattern(pattern, limit);
+    }
+
+    public static PatternAnalysis AnalyzeFallbackPattern(string pattern)
+    {
+        return AnalyzeFallbackPattern(pattern, limit: 8);
+    }
+
+    private static PatternAnalysis AnalyzeFallbackPattern(string pattern, int limit)
+    {
+        var parser = new FallbackParser(pattern, limit, advisoryMode: true);
         var result = parser.ParseExpression();
         return CreatePatternAnalysis(result, parser.IsComplete, parser.RequiresIgnoreCase, limit);
     }
 
     public static PatternAnalysis AnalyzePattern(Utf8RegexSyntax syntax)
     {
-        const int limit = 8;
+        return AnalyzePattern(syntax, limit: 8);
+    }
+
+    private static PatternAnalysis AnalyzePattern(Utf8RegexSyntax syntax, int limit)
+    {
         return CreatePatternAnalysis(
             AnalyzeSyntaxNode(syntax.Root, limit),
             isComplete: true,
             requiresIgnoreCase: false,
             limit);
+    }
+
+    private static bool TryAnalyzeSupportedPattern(
+        string pattern,
+        int limit,
+        out PatternAnalysis analysis)
+    {
+        var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
+        if (!Utf8RegexEngine.TryParseSyntax(query, CaseMode.Sensitive, out var syntax))
+        {
+            analysis = default;
+            return false;
+        }
+
+        analysis = AnalyzePattern(syntax, limit);
+        return true;
     }
 
     private static PatternAnalysis CreatePatternAnalysis(
@@ -133,7 +172,18 @@ internal static class RegexFragmentAnalyzer
             return true;
         }
 
-        var parser = new Parser(pattern, limit: 1);
+        if (TryAnalyzeSupportedPattern(pattern, limit: 1, out var analysis))
+        {
+            if (analysis.IsExactLiteral && analysis.ExactLiteral is { } exactLiteral)
+            {
+                literal = exactLiteral;
+                return true;
+            }
+
+            return false;
+        }
+
+        var parser = new FallbackParser(pattern, limit: 1);
         var result = parser.ParseExpression();
         if (!parser.IsComplete || result.ExactLiteral is null)
         {
@@ -156,7 +206,12 @@ internal static class RegexFragmentAnalyzer
             return [];
         }
 
-        var parser = new Parser(pattern, limit);
+        if (TryAnalyzeSupportedPattern(pattern, limit, out var analysis))
+        {
+            return analysis.MandatoryFragments;
+        }
+
+        var parser = new FallbackParser(pattern, limit);
         var result = parser.ParseExpression();
         if (!parser.IsComplete)
         {
@@ -188,7 +243,12 @@ internal static class RegexFragmentAnalyzer
             return new AdvisorySeedPlan([], false);
         }
 
-        var parser = new Parser(pattern, limit, advisoryMode: true);
+        if (TryAnalyzeSupportedPattern(pattern, limit, out var analysis))
+        {
+            return analysis.AdvisorySeeds;
+        }
+
+        var parser = new FallbackParser(pattern, limit, advisoryMode: true);
         var result = parser.ParseExpression();
         if (!parser.IsComplete)
         {
@@ -287,7 +347,9 @@ internal static class RegexFragmentAnalyzer
         return false;
     }
 
-    private sealed class Parser
+    // This parser intentionally covers .NET constructs that the UTF-8 executor
+    // rejects. Supported UTF-8 syntax is parsed once by Utf8RegexEngine instead.
+    private sealed class FallbackParser
     {
         private readonly string _pattern;
         private readonly int _limit;
@@ -296,12 +358,12 @@ internal static class RegexFragmentAnalyzer
         private bool _unsupported;
         private bool _requiresIgnoreCase;
 
-        public Parser(string pattern, int limit)
+        public FallbackParser(string pattern, int limit)
             : this(pattern, limit, advisoryMode: false)
         {
         }
 
-        public Parser(string pattern, int limit, bool advisoryMode)
+        public FallbackParser(string pattern, int limit, bool advisoryMode)
         {
             _pattern = pattern;
             _limit = limit;
