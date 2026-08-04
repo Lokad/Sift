@@ -205,6 +205,11 @@ internal sealed class CorpusStorage : ISiftStorage
         return _manifestCache.Read(ManifestPath);
     }
 
+    public CorpusManifest RefreshManifest()
+    {
+        return _manifestCache.Refresh(ManifestPath);
+    }
+
 
     public MappedSegment OpenSegment(ulong segmentId)
     {
@@ -533,7 +538,7 @@ internal sealed class CorpusStorage : ISiftStorage
             // A clear marker avoids the retired-generation sweep, but the current
             // lease remains the fail-closed authority for the live manifest.
             reclamation = default;
-            if (HasManifest && !IsCurrentGenerationLeaseValid(ReadManifest()))
+            if (HasManifest && !IsCurrentGenerationLeaseValid(RefreshManifest()))
             {
                 reclamation = reclamation with { IsBlocked = true };
             }
@@ -567,7 +572,7 @@ internal sealed class CorpusStorage : ISiftStorage
         // Publication leaves the marker clear only after every retired pack is gone.
         if (!IsReclamationPending())
         {
-            return IsCurrentGenerationLeaseValid(ReadManifest());
+            return IsCurrentGenerationLeaseValid(RefreshManifest());
         }
 
         var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
@@ -604,7 +609,7 @@ internal sealed class CorpusStorage : ISiftStorage
             try
             {
                 referencedSegmentIds = HasManifest
-                    ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
+                    ? RefreshManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
                     : [];
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -1236,7 +1241,7 @@ internal sealed class CorpusStorage : ISiftStorage
                 OldestLeasedGeneration: null));
         }
 
-        var manifest = ReadManifest();
+        var manifest = RefreshManifest();
         var manifestSegmentIds = manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
         var protection = InspectGenerationLeases(manifest, cancellationToken);
         if (protection.IsBlocked)

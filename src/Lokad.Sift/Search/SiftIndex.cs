@@ -616,7 +616,7 @@ public sealed class SiftIndex : ISiftIndex
             using var writeSession = _storage.AcquireWriteSession(cancellationToken);
             ThrowIfRebuildRequired();
             var hadManifest = _storage.HasManifest;
-            var currentManifest = hadManifest ? _storage.ReadManifest() : null;
+            var currentManifest = hadManifest ? _storage.RefreshManifest() : null;
             var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
             var committedIdentity = actualIdentity;
             if (options.ExpectedIdentity is { } expectedIdentity &&

@@ -107,7 +107,7 @@ internal sealed class IndexCompactor
         using var writeSession = _storage.AcquireWriteSession(cancellationToken);
         ensureIndexUsable();
         var manifest = _storage.HasManifest
-            ? _storage.ReadManifest()
+            ? _storage.RefreshManifest()
             : new CorpusManifest(Guid.NewGuid(), 0, []);
         var selectedSegmentIds = SelectSegments(
             manifest,

@@ -1395,6 +1395,7 @@ public sealed class StorageIntegrityTests
         }
 
         public CorpusManifest ReadManifest() => inner.ReadManifest();
+        public CorpusManifest RefreshManifest() => inner.RefreshManifest();
         public MappedSegment OpenSegment(ulong segmentId) => inner.OpenSegment(segmentId);
         public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken) =>
             inner.OpenSegment(segmentId, cancellationToken);
@@ -1442,6 +1443,7 @@ public sealed class StorageIntegrityTests
         }
 
         public CorpusManifest ReadManifest() => inner.ReadManifest();
+        public CorpusManifest RefreshManifest() => inner.RefreshManifest();
         public MappedSegment OpenSegment(ulong segmentId) => inner.OpenSegment(segmentId);
         public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken) =>
             inner.OpenSegment(segmentId, cancellationToken);

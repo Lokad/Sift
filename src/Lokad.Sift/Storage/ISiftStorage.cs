@@ -6,6 +6,7 @@ internal interface ISiftStorage
     bool IsReclamationPending { get; }
     IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken);
     CorpusManifest ReadManifest();
+    CorpusManifest RefreshManifest();
     MappedSegment OpenSegment(ulong segmentId);
     MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken);
     void ValidateSegment(ulong segmentId, CancellationToken cancellationToken);

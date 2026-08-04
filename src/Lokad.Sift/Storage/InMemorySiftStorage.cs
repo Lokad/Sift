@@ -81,6 +81,8 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
+    public CorpusManifest RefreshManifest() => ReadManifest();
+
     public MappedSegment OpenSegment(ulong segmentId)
     {
         return OpenSegment(segmentId, CancellationToken.None);

@@ -488,7 +488,10 @@ public sealed class StorageLifecycleTests
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         using var index = new SiftIndex(fixture.CorpusPath);
         await index.Build(fixture.CreateSource());
-        CorruptLastByte(TestHelpers.GetStorage(index).ManifestPath);
+        var manifestPath = TestHelpers.GetStorage(index).ManifestPath;
+        var lastWriteTime = File.GetLastWriteTimeUtc(manifestPath);
+        CorruptLastByte(manifestPath);
+        File.SetLastWriteTimeUtc(manifestPath, lastWriteTime);
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             index.Build(new InMemoryDocumentSource([("src/b.txt", "beta\n")])));

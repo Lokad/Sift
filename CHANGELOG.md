@@ -72,8 +72,9 @@
 
 ### Fixed
 
-- Made explicit validation reread the manifest so unchanged file timestamps and
-  lengths cannot conceal on-disk corruption behind the normal read cache.
+- Made explicit validation and mutation/reclamation decisions reread the
+  manifest so unchanged file timestamps and lengths cannot conceal on-disk
+  corruption behind the normal read cache.
 - Prevented oversized regex quantifiers and lone surrogate escapes from crashing
   Sift's advisory analyzers with implementation exceptions.
 - Treated supplementary-plane Unicode letters and digits as single word
