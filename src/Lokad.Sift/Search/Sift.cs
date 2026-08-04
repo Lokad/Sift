@@ -516,10 +516,10 @@ public sealed class Sift : ISift
         ValidateCompactOptions(options);
         try
         {
-            using var writerLock = _storage.AcquireWriterLock();
+            using var writeSession = _storage.AcquireWriteSession(CancellationToken.None);
             ThrowIfRebuildRequired();
             if (!_storage.HasManifest ||
-                !_storage.CanReplaceSegmentsUnderWriterLock())
+                !writeSession.CanReplaceSegments())
             {
                 return false;
             }
@@ -673,7 +673,7 @@ public sealed class Sift : ISift
         }
 
         var watch = Stopwatch.StartNew();
-        using var _ = _storage.AcquireWriterLock(cancellationToken);
+        using var writeSession = _storage.AcquireWriteSession(cancellationToken);
         ThrowIfRebuildRequired();
         var hadManifest = _storage.HasManifest;
         var currentManifest = hadManifest ? _storage.ReadManifest() : null;
@@ -724,7 +724,7 @@ public sealed class Sift : ISift
                 {
                     var segmentId = segmentSeed + (ulong)publishedSegments.Count;
                     attemptedSegmentIds.Add(segmentId);
-                    publishedSegments.Add(_storage.PublishSegment(
+                    publishedSegments.Add(writeSession.PublishSegment(
                         partition,
                         segmentId,
                         _options.MinimumFreeBytesAfterMutation,
@@ -849,14 +849,14 @@ public sealed class Sift : ISift
                     commitMetadata.ToArray(),
                     newSegments);
                 ResetValidationStats();
-                _storage.PublishManifest(manifest);
+                writeSession.PublishManifest(manifest);
                 ResetValidationStats();
                 committedIdentity = CreateIndexIdentity(manifest);
             }
         }
         catch
         {
-            _storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+            writeSession.CleanupFailedMutation(attemptedSegmentIds);
             throw;
         }
 
@@ -930,7 +930,7 @@ public sealed class Sift : ISift
     private CompactStats CompactCore(CompactOptions options, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
-        using var _ = _storage.AcquireWriterLock(cancellationToken);
+        using var writeSession = _storage.AcquireWriteSession(cancellationToken);
         ThrowIfRebuildRequired();
         var manifest = _storage.HasManifest
             ? _storage.ReadManifest()
@@ -952,7 +952,7 @@ public sealed class Sift : ISift
                 HasMoreWork: false);
         }
 
-        _storage.EnsureReplacementAllowedUnderWriterLock();
+        writeSession.EnsureReplacementAllowed();
 
         var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var attemptedSegmentIds = new List<ulong>();
@@ -961,6 +961,7 @@ public sealed class Sift : ISift
         try
         {
             publication = PublishCompactedSegments(
+                writeSession,
                 manifest,
                 selectedSegmentIds,
                 segmentSeed,
@@ -987,13 +988,13 @@ public sealed class Sift : ISift
                 [.. manifest.CommitMetadata],
                 mergedSegments);
             ResetValidationStats();
-            _storage.PublishManifest(newManifest);
+            writeSession.PublishManifest(newManifest);
             ResetValidationStats();
             manifest = newManifest;
         }
         catch
         {
-            _storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+            writeSession.CleanupFailedMutation(attemptedSegmentIds);
             throw;
         }
 
@@ -1005,7 +1006,7 @@ public sealed class Sift : ISift
             ContentBytes: publication.ContentBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds,
             PeakManagedBytes: 0,
-            HasMoreWork: _storage.CanReplaceSegmentsUnderWriterLock() &&
+            HasMoreWork: writeSession.CanReplaceSegments() &&
                 HasActionableCompactionWorkUnderWriterLock(
                     manifest,
                     options,
@@ -1411,10 +1412,10 @@ public sealed class Sift : ISift
         // A concurrent mutation can invalidate validation statistics while retaining
         // the immutable pack that failed. Resolve that edge under the writer lock so a
         // completed full build is not poisoned, while additive updates fail closed.
-        IDisposable writerLock;
+        IStorageWriteSession writeSession;
         try
         {
-            writerLock = _storage.AcquireWriterLock(cancellationToken);
+            writeSession = _storage.AcquireWriteSession(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1433,7 +1434,7 @@ public sealed class Sift : ISift
             throw;
         }
 
-        using var _ = writerLock;
+        using var _ = writeSession;
         Exception? currentFailure = null;
         try
         {
@@ -1787,6 +1788,7 @@ public sealed class Sift : ISift
     }
 
     private CompactionPublication PublishCompactedSegments(
+        IStorageWriteSession writeSession,
         CorpusManifest manifest,
         HashSet<ulong> selectedSegmentIds,
         ulong segmentSeed,
@@ -1838,7 +1840,7 @@ public sealed class Sift : ISift
                 {
                     var segmentId = segmentSeed + (ulong)published.Count;
                     attemptedSegmentIds.Add(segmentId);
-                    published.Add(_storage.PublishSegment(
+                    published.Add(writeSession.PublishSegment(
                         currentPartition,
                         segmentId,
                         options.MinimumFreeBytesAfterCompaction,
@@ -1862,7 +1864,7 @@ public sealed class Sift : ISift
             {
                 var segmentId = segmentSeed + (ulong)published.Count;
                 attemptedSegmentIds.Add(segmentId);
-                published.Add(_storage.PublishSegment(
+                published.Add(writeSession.PublishSegment(
                     currentPartition,
                     segmentId,
                     options.MinimumFreeBytesAfterCompaction,

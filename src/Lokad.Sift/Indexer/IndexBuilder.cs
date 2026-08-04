@@ -76,8 +76,8 @@ internal sealed class IndexBuilder
         CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
-        using var _ = _storage.AcquireWriterLock(cancellationToken);
-        _storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
+        using var writeSession = _storage.AcquireWriteSession(cancellationToken);
+        writeSession.PrepareFullBuild(discardCorruptState);
 
         var existing = _storage.HasManifest ? _storage.ReadManifest() : null;
         var corpusId = Guid.NewGuid();
@@ -94,7 +94,7 @@ internal sealed class IndexBuilder
                 {
                     var segmentId = segmentSeed + (ulong)entries.Count;
                     attemptedSegmentIds.Add(segmentId);
-                    entries.Add(_storage.PublishSegment(
+                    entries.Add(writeSession.PublishSegment(
                         partition,
                         segmentId,
                         _options.MinimumFreeBytesAfterMutation,
@@ -121,7 +121,7 @@ internal sealed class IndexBuilder
                     $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
             }
 
-            _storage.PublishManifest(new CorpusManifest(
+            writeSession.PublishManifest(new CorpusManifest(
                 CorpusId: corpusId,
                 ContentRevision: 1,
                 Generation: generation,
@@ -130,7 +130,7 @@ internal sealed class IndexBuilder
         }
         catch
         {
-            _storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+            writeSession.CleanupFailedMutation(attemptedSegmentIds);
             throw;
         }
 

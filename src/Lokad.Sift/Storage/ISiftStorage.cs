@@ -4,15 +4,7 @@ internal interface ISiftStorage
 {
     bool HasManifest { get; }
     bool IsReclamationPending { get; }
-    IDisposable AcquireWriterLock();
-    IDisposable AcquireWriterLock(CancellationToken cancellationToken);
-    SegmentManifestEntry PublishSegment<TDocument>(
-        IReadOnlyList<TDocument> documents,
-        ulong segmentId,
-        long minimumFreeBytesAfterPublication,
-        CancellationToken cancellationToken)
-        where TDocument : ISegmentBuildDocument;
-    void PublishManifest(CorpusManifest manifest);
+    IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken);
     CorpusManifest ReadManifest();
     MappedSegment OpenSegment(ulong segmentId);
     MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken);
@@ -23,12 +15,19 @@ internal interface ISiftStorage
     StorageReadSnapshot OpenReadSnapshot();
     StorageStats GetStorageStats();
     void ReclaimUnreferencedSegments(CancellationToken cancellationToken);
-    // Caller holds the writer lock; returns false when another replacement would exceed the retained-generation bound.
-    bool CanReplaceSegmentsUnderWriterLock();
-    // Caller holds the writer lock; this enforces the retained-generation disk bound.
-    void EnsureReplacementAllowedUnderWriterLock();
-    // Caller holds the writer lock; an explicit rebuild may discard corrupt index artifacts.
-    void PrepareFullBuildUnderWriterLock(bool discardCorruptState);
-    // Caller holds the writer lock; committed segment references are never removed.
-    void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds);
+}
+
+internal interface IStorageWriteSession : IDisposable
+{
+    SegmentManifestEntry PublishSegment<TDocument>(
+        IReadOnlyList<TDocument> documents,
+        ulong segmentId,
+        long minimumFreeBytesAfterPublication,
+        CancellationToken cancellationToken)
+        where TDocument : ISegmentBuildDocument;
+    void PublishManifest(CorpusManifest manifest);
+    bool CanReplaceSegments();
+    void EnsureReplacementAllowed();
+    void PrepareFullBuild(bool discardCorruptState);
+    void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds);
 }

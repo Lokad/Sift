@@ -133,7 +133,7 @@ public sealed class ConcurrencyTests
     {
         using var fixture = new CorpusFixture();
         var storage = new Lokad.Sift.Storage.CorpusStorage(fixture.CorpusPath);
-        using var writerLock = storage.AcquireWriterLock();
+        using var writeSession = storage.AcquireWriteSession(CancellationToken.None);
         var index = new SiftIndex(fixture.CorpusPath);
         var build = index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
 

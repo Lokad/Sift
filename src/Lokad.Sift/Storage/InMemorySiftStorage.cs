@@ -23,18 +23,23 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    public IDisposable AcquireWriterLock()
+    private IDisposable AcquireWriterLock()
     {
         return AcquireWriterLock(CancellationToken.None);
     }
 
-    public IDisposable AcquireWriterLock(CancellationToken cancellationToken)
+    private IDisposable AcquireWriterLock(CancellationToken cancellationToken)
     {
         _writerGate.Wait(cancellationToken);
         return new Releaser(_writerGate);
     }
 
-    public SegmentManifestEntry PublishSegment<TDocument>(
+    public IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken)
+    {
+        return new WriteSession(this, AcquireWriterLock(cancellationToken));
+    }
+
+    private SegmentManifestEntry PublishSegment<TDocument>(
         IReadOnlyList<TDocument> documents,
         ulong segmentId,
         long minimumFreeBytesAfterPublication,
@@ -58,7 +63,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
     }
 
-    public void PublishManifest(CorpusManifest manifest)
+    private void PublishManifest(CorpusManifest manifest)
     {
         lock (_stateLock)
         {
@@ -206,17 +211,12 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         _ = ReclaimUnreferencedSegmentsUnderWriterLock();
     }
 
-    void ISiftStorage.EnsureReplacementAllowedUnderWriterLock()
-    {
-        EnsureReplacementAllowedUnderWriterLock();
-    }
-
-    bool ISiftStorage.CanReplaceSegmentsUnderWriterLock()
+    private bool CanReplaceSegmentsUnderWriterLock()
     {
         return ReclaimUnreferencedSegmentsUnderWriterLock().DeferredSegmentCount == 0;
     }
 
-    void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
+    private void PrepareFullBuildUnderWriterLock(bool discardCorruptState)
     {
         lock (_stateLock)
         {
@@ -234,7 +234,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
+    private void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
         lock (_stateLock)
         {
@@ -378,6 +378,42 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             manifest.Generation,
             [.. manifest.CommitMetadata],
             segments);
+    }
+
+    private sealed class WriteSession(InMemorySiftStorage storage, IDisposable writerLock) : IStorageWriteSession
+    {
+        private IDisposable? _writerLock = writerLock;
+
+        public SegmentManifestEntry PublishSegment<TDocument>(
+            IReadOnlyList<TDocument> documents,
+            ulong segmentId,
+            long minimumFreeBytesAfterPublication,
+            CancellationToken cancellationToken)
+            where TDocument : ISegmentBuildDocument
+        {
+            return storage.PublishSegment(
+                documents,
+                segmentId,
+                minimumFreeBytesAfterPublication,
+                cancellationToken);
+        }
+
+        public void PublishManifest(CorpusManifest manifest) => storage.PublishManifest(manifest);
+
+        public bool CanReplaceSegments() => storage.CanReplaceSegmentsUnderWriterLock();
+
+        public void EnsureReplacementAllowed() => storage.EnsureReplacementAllowedUnderWriterLock();
+
+        public void PrepareFullBuild(bool discardCorruptState) =>
+            storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
+
+        public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+            storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _writerLock, null)?.Dispose();
+        }
     }
 
     private sealed class Releaser(SemaphoreSlim gate) : IDisposable

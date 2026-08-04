@@ -145,7 +145,7 @@ public sealed class StorageLifecycleTests
         var storage = TestHelpers.GetStorage(index);
         var leaseFilesBefore = Directory.EnumerateFiles(storage.GenerationLeasesPath, "*.lease").Count();
 
-        using var writerLock = storage.AcquireWriterLock();
+        using var writeSession = storage.AcquireWriteSession(CancellationToken.None);
         var openTask = Task.Run(() => index.OpenSnapshot());
         var completed = await Task.WhenAny(openTask, Task.Delay(TimeSpan.FromSeconds(2)));
 

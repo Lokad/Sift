@@ -91,12 +91,12 @@ internal sealed class CorpusStorage : ISiftStorage
         }
     }
 
-    public IDisposable AcquireWriterLock()
+    private IDisposable AcquireWriterLock()
     {
         return AcquireWriterLock(CancellationToken.None);
     }
 
-    public IDisposable AcquireWriterLock(CancellationToken cancellationToken)
+    private IDisposable AcquireWriterLock(CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_rootPath);
         Directory.CreateDirectory(LockPath);
@@ -146,9 +146,12 @@ internal sealed class CorpusStorage : ISiftStorage
         return errorCode is 11 or 32 or 33 or 35;
     }
 
-    IDisposable ISiftStorage.AcquireWriterLock(CancellationToken cancellationToken) => AcquireWriterLock(cancellationToken);
+    public IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken)
+    {
+        return new WriteSession(this, AcquireWriterLock(cancellationToken));
+    }
 
-    public SegmentManifestEntry PublishSegment<TDocument>(
+    private SegmentManifestEntry PublishSegment<TDocument>(
         IReadOnlyList<TDocument> documents,
         ulong segmentId,
         long minimumFreeBytesAfterPublication,
@@ -185,7 +188,7 @@ internal sealed class CorpusStorage : ISiftStorage
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
     }
 
-    public void PublishManifest(CorpusManifest manifest)
+    private void PublishManifest(CorpusManifest manifest)
     {
         EnsureLayout();
         WriteManifest(manifest);
@@ -735,12 +738,7 @@ internal sealed class CorpusStorage : ISiftStorage
         }
     }
 
-    void ISiftStorage.EnsureReplacementAllowedUnderWriterLock()
-    {
-        EnsureReplacementAllowedUnderWriterLock();
-    }
-
-    bool ISiftStorage.CanReplaceSegmentsUnderWriterLock()
+    private bool CanReplaceSegmentsUnderWriterLock()
     {
         if (!HasManifest)
         {
@@ -759,7 +757,7 @@ internal sealed class CorpusStorage : ISiftStorage
                reclamation.DeferredSegmentCount == 0;
     }
 
-    void ISiftStorage.PrepareFullBuildUnderWriterLock(bool discardCorruptState)
+    private void PrepareFullBuildUnderWriterLock(bool discardCorruptState)
     {
         if (!discardCorruptState)
         {
@@ -770,7 +768,7 @@ internal sealed class CorpusStorage : ISiftStorage
         ResetCorruptIndexUnderWriterLock();
     }
 
-    void ISiftStorage.CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
+    private void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
     {
         // With no current manifest, a flushed initial manifest may still name every
         // attempted pack. Roll it back before making those packs unreachable.
@@ -2026,6 +2024,42 @@ internal sealed class CorpusStorage : ISiftStorage
                     ? long.MaxValue
                     : available + bytes;
             }
+        }
+    }
+
+    private sealed class WriteSession(CorpusStorage storage, IDisposable writerLock) : IStorageWriteSession
+    {
+        private IDisposable? _writerLock = writerLock;
+
+        public SegmentManifestEntry PublishSegment<TDocument>(
+            IReadOnlyList<TDocument> documents,
+            ulong segmentId,
+            long minimumFreeBytesAfterPublication,
+            CancellationToken cancellationToken)
+            where TDocument : ISegmentBuildDocument
+        {
+            return storage.PublishSegment(
+                documents,
+                segmentId,
+                minimumFreeBytesAfterPublication,
+                cancellationToken);
+        }
+
+        public void PublishManifest(CorpusManifest manifest) => storage.PublishManifest(manifest);
+
+        public bool CanReplaceSegments() => storage.CanReplaceSegmentsUnderWriterLock();
+
+        public void EnsureReplacementAllowed() => storage.EnsureReplacementAllowedUnderWriterLock();
+
+        public void PrepareFullBuild(bool discardCorruptState) =>
+            storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
+
+        public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+            storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _writerLock, null)?.Dispose();
         }
     }
 
