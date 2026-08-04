@@ -21,14 +21,13 @@ public enum SearchStopReason
     MaxBytesScanned,
     MaxElapsedTime,
     RegexTimeout,
-    Cancelled
+    CollectorStopped
 }
 
 public enum TimeoutPolicy
 {
-    Default,
-    Throw,
-    StopSearch
+    StopSearch,
+    Throw
 }
 
 public enum RejectedUpsertPolicy

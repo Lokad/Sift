@@ -37,7 +37,7 @@ public sealed class CliSmokeTests
         Assert.Contains("pattern=Literal", explain.StandardOutput);
         Assert.Contains("candidate=DirectScan", explain.StandardOutput);
         Assert.Contains("combination=None", explain.StandardOutput);
-        Assert.Contains("timeout=Default", explain.StandardOutput);
+        Assert.Contains("timeout=StopSearch", explain.StandardOutput);
         Assert.Contains("pathPrefix=True", explain.StandardOutput);
         Assert.Contains("literalVerifier=True", explain.StandardOutput);
 

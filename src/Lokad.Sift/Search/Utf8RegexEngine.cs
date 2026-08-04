@@ -126,7 +126,7 @@ internal static class Utf8RegexEngine
                 hitsReturned++;
                 if (!shouldContinue)
                 {
-                    stopReason = SearchStopReason.Cancelled;
+                    stopReason = SearchStopReason.CollectorStopped;
                     return true;
                 }
 

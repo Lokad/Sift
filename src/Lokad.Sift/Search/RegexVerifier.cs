@@ -92,7 +92,7 @@ internal static class RegexVerifier
                 hitsReturned++;
                 if (!shouldContinue)
                 {
-                    stopReason = SearchStopReason.Cancelled;
+                    stopReason = SearchStopReason.CollectorStopped;
                     return true;
                 }
 

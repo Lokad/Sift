@@ -251,7 +251,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             verifierKind,
             runnerUp,
             runnerUp is null ? null : Math.Max(0d, runnerUp.EstimatedCost - (explainedPlan?.EstimatedCost ?? 0d)),
-            query.PatternMode == PatternMode.Regex ? query.TimeoutPolicy : TimeoutPolicy.Default,
+            query.PatternMode == PatternMode.Regex ? query.TimeoutPolicy : TimeoutPolicy.StopSearch,
             plannerAlternatives);
     }
 
@@ -441,7 +441,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         hitsReturned++;
                         if (!shouldContinue)
                         {
-                            stopReason = SearchStopReason.Cancelled;
+                            stopReason = SearchStopReason.CollectorStopped;
                             goto Done;
                         }
 
@@ -684,7 +684,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                 hitsReturned++;
                                 if (!shouldContinue)
                                 {
-                                    stopReason = SearchStopReason.Cancelled;
+                                    stopReason = SearchStopReason.CollectorStopped;
                                     batchCancellation.Cancel();
                                     break;
                                 }
@@ -1308,7 +1308,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             if (cancellationToken.IsCancellationRequested)
             {
                 operationCancellationToken.ThrowIfCancellationRequested();
-                segmentStopReason = SearchStopReason.Cancelled;
+                segmentStopReason = SearchStopReason.CollectorStopped;
                 break;
             }
 
@@ -1334,7 +1334,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 segmentHitDocuments++;
                 if (!shouldContinue)
                 {
-                    segmentStopReason = SearchStopReason.Cancelled;
+                    segmentStopReason = SearchStopReason.CollectorStopped;
                     break;
                 }
 
@@ -1461,7 +1461,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             hitsReturned++;
             if (!shouldContinue)
             {
-                stopReason = SearchStopReason.Cancelled;
+                stopReason = SearchStopReason.CollectorStopped;
             }
 
             return;
@@ -1534,7 +1534,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             hitsReturned++;
             if (!shouldContinue)
             {
-                stopReason = SearchStopReason.Cancelled;
+                stopReason = SearchStopReason.CollectorStopped;
                 return;
             }
 
@@ -1586,7 +1586,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             hitsReturned++;
             if (!shouldContinue)
             {
-                stopReason = SearchStopReason.Cancelled;
+                stopReason = SearchStopReason.CollectorStopped;
                 return;
             }
 

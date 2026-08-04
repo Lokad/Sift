@@ -2069,7 +2069,7 @@ public sealed class SearchIntegrationTests
             new PathFilter(),
             collector);
 
-        Assert.Equal(SearchStopReason.Cancelled, stats.StopReason);
+        Assert.Equal(SearchStopReason.CollectorStopped, stats.StopReason);
         Assert.Equal(1, stats.VerifiedDocuments);
         Assert.Equal(1, stats.HitsReturned);
     }
@@ -2077,7 +2077,7 @@ public sealed class SearchIntegrationTests
     [Theory]
     [InlineData(CaseMode.Sensitive)]
     [InlineData(CaseMode.Insensitive)]
-    public async Task SegmentParallelSearchPropagatesCollectorCancellation(CaseMode caseMode)
+    public async Task SegmentParallelSearchHonorsCollectorStop(CaseMode caseMode)
     {
         var repeatedMatches = string.Join(' ', Enumerable.Repeat("needle", 2_000));
         var documents = Enumerable.Range(0, 8)
@@ -2101,7 +2101,7 @@ public sealed class SearchIntegrationTests
             new PathFilter(),
             new StopAfterFirstHitCollector());
 
-        Assert.Equal(SearchStopReason.Cancelled, stats.StopReason);
+        Assert.Equal(SearchStopReason.CollectorStopped, stats.StopReason);
         Assert.Equal(1, stats.VerifiedDocuments);
         Assert.Equal(1, stats.HitsReturned);
     }

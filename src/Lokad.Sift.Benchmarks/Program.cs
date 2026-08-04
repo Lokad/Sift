@@ -2309,7 +2309,7 @@ static RealQueryResult CreateTimedOutQueryResult(RealQueryDefinition query, Sear
         0,
         0,
         0,
-        SearchStopReason.Cancelled.ToString(),
+        SearchStopReason.CollectorStopped.ToString(),
         true);
 }
 
