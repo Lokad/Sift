@@ -90,10 +90,10 @@ internal static class SearchQueryPreparer
             resolvedCaseMode,
             regexPlan,
             anchors,
-            anchors.GetMandatoryTexts(),
-            anchors.GetAdvisoryTexts(),
+            anchors.MandatoryTexts,
+            anchors.AdvisoryTexts,
             PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral),
-            PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode),
+            PrepareMandatoryFragments(anchors.MandatoryTexts, resolvedCaseMode),
             PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups),
             () => PrepareRegexExecution(query, resolvedCaseMode, regexPlan));
     }
@@ -122,18 +122,18 @@ internal static class SearchQueryPreparer
     }
 
     private static PreparedMandatoryFragment[] PrepareMandatoryFragments(
-        SearchLiteralAnchor[] mandatoryAnchors,
+        string[] mandatoryTexts,
         CaseMode resolvedCaseMode)
     {
-        if (mandatoryAnchors.Length == 0)
+        if (mandatoryTexts.Length == 0)
         {
             return [];
         }
 
-        var prepared = new PreparedMandatoryFragment[mandatoryAnchors.Length];
-        for (var i = 0; i < mandatoryAnchors.Length; i++)
+        var prepared = new PreparedMandatoryFragment[mandatoryTexts.Length];
+        for (var i = 0; i < mandatoryTexts.Length; i++)
         {
-            var text = mandatoryAnchors[i].Text;
+            var text = mandatoryTexts[i];
             var utf8Bytes = Encoding.UTF8.GetBytes(text);
             var isAscii = utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
             var loweredAsciiBytes = resolvedCaseMode == CaseMode.Insensitive && isAscii
@@ -217,23 +217,11 @@ internal static class SearchQueryPreparer
 
         var mandatoryFragments = GetMandatoryFragments(query, regexPlan.ExactLiteral, analysis);
         var advisorySeeds = GetAdvisorySeeds(query, regexPlan.ExactLiteral, mandatoryFragments, analysis, out var advisoryCaseMode);
-        var mandatoryAnchors = new SearchLiteralAnchor[mandatoryFragments.Length];
-        for (var i = 0; i < mandatoryFragments.Length; i++)
-        {
-            mandatoryAnchors[i] = new SearchLiteralAnchor(mandatoryFragments[i]);
-        }
-
-        var advisoryAnchors = new SearchLiteralAnchor[advisorySeeds.Length];
-        for (var i = 0; i < advisorySeeds.Length; i++)
-        {
-            advisoryAnchors[i] = new SearchLiteralAnchor(advisorySeeds[i]);
-        }
-
         var utf8RegexProgram = regexPlan.Utf8RegexProgram;
         var regexGroups = utf8RegexProgram?.OrderedAnchorGroups;
         if (utf8RegexProgram is null || regexGroups is null || regexGroups.Length == 0)
         {
-            return new SearchQueryAnchors(mandatoryAnchors, advisoryAnchors, advisoryCaseMode, []);
+            return new SearchQueryAnchors(mandatoryFragments, advisorySeeds, advisoryCaseMode, []);
         }
 
         var orderedAnchorGroups = new SearchOrderedAnchorGroup[regexGroups.Length];
@@ -251,7 +239,7 @@ internal static class SearchQueryPreparer
             orderedAnchorGroups[groupIndex] = new SearchOrderedAnchorGroup(anchors);
         }
 
-        return new SearchQueryAnchors(mandatoryAnchors, advisoryAnchors, advisoryCaseMode, orderedAnchorGroups);
+        return new SearchQueryAnchors(mandatoryFragments, advisorySeeds, advisoryCaseMode, orderedAnchorGroups);
     }
 
     private static string[] GetMandatoryFragments(

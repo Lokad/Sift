@@ -29,7 +29,7 @@ internal static class SearchPlanCandidateBuilder
             return candidates;
         }
 
-        var structuralUnion = TryCreateStructuredLeadingLiteralPlan(segment, scope, features.ResolvedCaseMode, features.Anchors.GetMandatoryTexts(), features.RegexPlan, options);
+        var structuralUnion = TryCreateStructuredLeadingLiteralPlan(segment, scope, features.ResolvedCaseMode, features.Anchors.MandatoryTexts, features.RegexPlan, options);
         if (structuralUnion.HasValue)
         {
             candidates.Add(CreateRegexIndexedCandidate(in features, scope, structuralUnion.Value.Plan, structuralUnion.Value.EstimatedCandidates, options));
@@ -37,9 +37,9 @@ internal static class SearchPlanCandidateBuilder
 
         if (!features.HasMandatoryFragments)
         {
-            if (features.RegexPlan.Kind == RegexExecutionKind.Fallback && features.Anchors.AdvisoryAnchors.Length > 0)
+            if (features.RegexPlan.Kind == RegexExecutionKind.Fallback && features.Anchors.AdvisoryTexts.Length > 0)
             {
-                var advisoryPlan = TryCreateLiteralSetPlan(segment, scope, features.Anchors.AdvisoryCaseMode, features.Anchors.GetAdvisoryTexts(), options, isAdvisory: true);
+                var advisoryPlan = TryCreateLiteralSetPlan(segment, scope, features.Anchors.AdvisoryCaseMode, features.Anchors.AdvisoryTexts, options, isAdvisory: true);
                 if (advisoryPlan.HasValue)
                 {
                     candidates.Add(CreateRegexIndexedCandidate(in features, scope, advisoryPlan.Value, SearchPlanner.EstimateCandidateUpperBound(advisoryPlan.Value.SelectedGrams, scope.Count), options));
@@ -55,10 +55,10 @@ internal static class SearchPlanCandidateBuilder
             return candidates;
         }
 
-        var fragmentPlans = new List<LiteralPlan>(features.Anchors.MandatoryAnchors.Length);
-        foreach (var fragment in features.Anchors.MandatoryAnchors)
+        var fragmentPlans = new List<LiteralPlan>(features.Anchors.MandatoryTexts.Length);
+        foreach (var fragment in features.Anchors.MandatoryTexts)
         {
-            var current = LiteralQueryPlanner.Create(segment, scope.Count, scope.Bytes, fragment.Text, features.ResolvedCaseMode, options);
+            var current = LiteralQueryPlanner.Create(segment, scope.Count, scope.Bytes, fragment, features.ResolvedCaseMode, options);
             if (current.IsMissingGram)
             {
                 candidates.Add(CreateRegexIndexedCandidate(in features, scope, current, estimatedCandidates: 0, options));
@@ -79,7 +79,7 @@ internal static class SearchPlanCandidateBuilder
                     features.ResolvedCaseMode,
             scope.Count,
                     scope.Bytes,
-                    string.Join("|", features.Anchors.GetMandatoryTexts()),
+                    string.Join("|", features.Anchors.MandatoryTexts),
                     selected,
                     anchor.IndexPair,
                     anchor.GramLength,

@@ -48,7 +48,7 @@ internal static class SearchPlanner
             anchors,
             regexPlan,
             query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral,
-            anchors.HasMandatoryAnchors);
+            anchors.HasMandatoryTexts);
     }
 
     private static SearchPlannerDecision FinalizePlan(List<SearchPlanCandidate> candidates)
