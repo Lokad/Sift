@@ -6,7 +6,7 @@ if (args.Length != 3)
     return 1;
 }
 
-using var index = new Sift(args[0]);
+using var index = new SiftIndex(args[0]);
 using var snapshot = index.OpenSnapshot();
 File.WriteAllText(args[1], "ready");
 

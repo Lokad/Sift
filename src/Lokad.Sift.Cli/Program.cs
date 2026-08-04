@@ -8,7 +8,7 @@ if (args.Length < 2)
 
 var command = args[0];
 var corpusPath = args[1];
-using var index = new Sift(corpusPath);
+using var index = new SiftIndex(corpusPath);
 
 switch (command)
 {

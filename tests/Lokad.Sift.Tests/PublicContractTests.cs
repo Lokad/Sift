@@ -7,7 +7,7 @@ public sealed class PublicContractTests
     [Fact]
     public void StorageAndCodecImplementationTypesAreNotExported()
     {
-        var exportedTypes = typeof(Sift).Assembly.GetExportedTypes();
+        var exportedTypes = typeof(SiftIndex).Assembly.GetExportedTypes();
 
         Assert.DoesNotContain(exportedTypes, static type =>
             type.Namespace is "Lokad.Sift.Storage" or "Lokad.Sift.LowLevel");
@@ -16,10 +16,10 @@ public sealed class PublicContractTests
     [Fact]
     public void InterfacesContainOnlyCanonicalOperationOverloads()
     {
-        Assert.Equal(2, CountMethods<ISift>(nameof(ISift.Build)));
-        Assert.Equal(4, CountMethods<ISift>(nameof(ISift.Update)));
-        Assert.Single(typeof(ISift).GetMethods(), static method => method.Name == nameof(ISift.Validate));
-        Assert.Single(typeof(ISift).GetMethods(), static method => method.Name == nameof(ISift.Compact));
+        Assert.Equal(2, CountMethods<ISiftIndex>(nameof(ISiftIndex.Build)));
+        Assert.Equal(4, CountMethods<ISiftIndex>(nameof(ISiftIndex.Update)));
+        Assert.Single(typeof(ISiftIndex).GetMethods(), static method => method.Name == nameof(ISiftIndex.Validate));
+        Assert.Single(typeof(ISiftIndex).GetMethods(), static method => method.Name == nameof(ISiftIndex.Compact));
         Assert.Single(typeof(IIndexSnapshot).GetMethods(), static method => method.Name == nameof(IIndexSnapshot.Search));
         Assert.Equal(2, CountMethods<IOverlaySnapshot>(nameof(IOverlaySnapshot.Update)));
         Assert.Single(typeof(IOverlaySnapshot).GetMethods(), static method => method.Name == nameof(IOverlaySnapshot.CommitToBase));
@@ -101,7 +101,7 @@ public sealed class PublicContractTests
     [Fact]
     public void PublicApiHasNoOptionalParameters()
     {
-        var optionalParameters = typeof(Sift).Assembly.GetExportedTypes()
+        var optionalParameters = typeof(SiftIndex).Assembly.GetExportedTypes()
             .SelectMany(static type => type
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
                 .Cast<MethodBase>()

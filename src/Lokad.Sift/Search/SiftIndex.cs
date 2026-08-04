@@ -8,7 +8,7 @@ using Lokad.Sift.Storage;
 
 namespace Lokad.Sift;
 
-public sealed class Sift : ISift
+public sealed class SiftIndex : ISiftIndex
 {
     private delegate ValueTask<StreamedDocuments> UpdateDocumentStreamer(
         IReadOnlySet<string> forbiddenPaths,
@@ -52,17 +52,17 @@ public sealed class Sift : ISift
     internal ISiftStorage Storage => _storage;
     public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;
 
-    public Sift(string rootPath)
+    public SiftIndex(string rootPath)
         : this(rootPath, new SiftOptions())
     {
     }
 
-    public Sift(string rootPath, SiftOptions options)
+    public SiftIndex(string rootPath, SiftOptions options)
         : this(new CorpusStorage(rootPath, options.MaximumPhysicalBytes), options)
     {
     }
 
-    internal Sift(ISiftStorage storage, SiftOptions options)
+    internal SiftIndex(ISiftStorage storage, SiftOptions options)
     {
         _options = options;
         ValidateSiftOptions(_options);
@@ -89,14 +89,14 @@ public sealed class Sift : ISift
         ScheduleReclamationIfPending();
     }
 
-    public static Sift CreateInMemory()
+    public static SiftIndex CreateInMemory()
     {
         return CreateInMemory(new SiftOptions());
     }
 
-    public static Sift CreateInMemory(SiftOptions options)
+    public static SiftIndex CreateInMemory(SiftOptions options)
     {
-        return new Sift(new InMemorySiftStorage(), options);
+        return new SiftIndex(new InMemorySiftStorage(), options);
     }
 
     public IIndexSnapshot OpenSnapshot(SearchOptions options)
@@ -1760,9 +1760,9 @@ public sealed class Sift : ISift
         }
     }
 
-    private sealed class ValidationScope(Sift owner) : IDisposable
+    private sealed class ValidationScope(SiftIndex owner) : IDisposable
     {
-        private Sift? _owner = owner;
+        private SiftIndex? _owner = owner;
 
         public void Dispose()
         {

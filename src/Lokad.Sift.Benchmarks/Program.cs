@@ -58,7 +58,7 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
 
     try
     {
-        using var index = new Sift(corpusPath, new SiftOptions
+        using var index = new SiftIndex(corpusPath, new SiftOptions
         {
             TargetSegmentDocumentCount = 1024,
             OverlayCompactionSegmentThreshold = 4
@@ -1419,7 +1419,7 @@ static RealCorpusBenchmarkResult RunRealCorpus(DiscoveredCorpus corpus, RealQuer
 
         var mappedBytesBefore = SiftProcessMetrics.MappedSegmentBytes;
         var openStart = Stopwatch.GetTimestamp();
-        using var index = new Sift(benchmarkRoot, new SiftOptions());
+        using var index = new SiftIndex(benchmarkRoot, new SiftOptions());
         using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
         var openElapsed = Stopwatch.GetElapsedTime(openStart);
         var mappedBytesDelta = SiftProcessMetrics.MappedSegmentBytes - mappedBytesBefore;
@@ -1453,7 +1453,7 @@ static RealCorpusBenchmarkResult RunRealCorpusWithCachedIndex(DiscoveredCorpus c
 
     var mappedBytesBefore = SiftProcessMetrics.MappedSegmentBytes;
     var openStart = Stopwatch.GetTimestamp();
-    using var index = new Sift(cachePath, new SiftOptions());
+    using var index = new SiftIndex(cachePath, new SiftOptions());
     using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
     var openElapsed = Stopwatch.GetElapsedTime(openStart);
     var mappedBytesDelta = SiftProcessMetrics.MappedSegmentBytes - mappedBytesBefore;
@@ -1474,7 +1474,7 @@ static RealCorpusBenchmarkResult RunRealCorpusWithCachedIndex(DiscoveredCorpus c
 static RealBuildMetrics BuildRealCorpusIndex(string indexRoot, DiscoveredCorpus corpus, BenchmarkOptions options)
 {
     var buildStart = Stopwatch.GetTimestamp();
-    using var index = new Sift(indexRoot, new SiftOptions());
+    using var index = new SiftIndex(indexRoot, new SiftOptions());
     var source = new FileSystemDocumentSource(corpus.Path, options.MaxFiles);
     var buildMeasurement = MeasureBuildMetrics(() => index.Build(source).GetAwaiter().GetResult());
     var buildStats = buildMeasurement.Stats;
@@ -1576,7 +1576,7 @@ static UpdateScenarioResult RunUpdateScenarioIsolated(
                 scenario.DeleteCount,
                 scenario.StartOffset + iteration + options.WarmupIterations);
             var storage = new CorpusStorage(workRoot);
-            using var index = new Sift(workRoot, new SiftOptions());
+            using var index = new SiftIndex(workRoot, new SiftOptions());
             var beforeManifest = storage.ReadManifest();
             var beforeManifestBytes = new FileInfo(storage.ManifestPath).Length;
             var source = new MemoryDocumentSource(files.Upserts);
@@ -1629,7 +1629,7 @@ static UpdateScenarioResult RunUpdateScenarioSteadyState(
     {
         CopyDirectory(cachedIndex.CachePath, workRoot);
         var storage = new CorpusStorage(workRoot);
-        using var index = new Sift(workRoot, new SiftOptions());
+        using var index = new SiftIndex(workRoot, new SiftOptions());
 
         for (var iteration = -options.WarmupIterations; iteration < options.MeasurementIterations; iteration++)
         {
@@ -1704,7 +1704,7 @@ static CompactScenarioResult RunCompactScenarioIsolated(
         {
             CopyDirectory(cachedIndex.CachePath, workRoot);
             var storage = new CorpusStorage(workRoot);
-            using var index = new Sift(workRoot, new SiftOptions());
+            using var index = new SiftIndex(workRoot, new SiftOptions());
             for (var round = 0; round < scenario.ChurnRounds; round++)
             {
                 var files = BuildScenarioFiles(
@@ -1783,7 +1783,7 @@ static CompactScenarioResult RunCompactScenarioSteadyState(
     {
         CopyDirectory(cachedIndex.CachePath, workRoot);
         var storage = new CorpusStorage(workRoot);
-        using var index = new Sift(workRoot, new SiftOptions());
+        using var index = new SiftIndex(workRoot, new SiftOptions());
 
         for (var iteration = -options.WarmupIterations; iteration < options.MeasurementIterations; iteration++)
         {

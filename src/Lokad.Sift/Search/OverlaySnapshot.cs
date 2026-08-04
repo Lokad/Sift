@@ -11,7 +11,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 {
     private readonly SearchSnapshot _baseSnapshot;
     private readonly IndexIdentity _baseIdentity;
-    private readonly Sift _overlayIndex;
+    private readonly SiftIndex _overlayIndex;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
     private readonly Dictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
@@ -34,7 +34,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseIdentity = baseSnapshot.Identity;
         _options = options;
         _searchOptions = searchOptions;
-        _overlayIndex = Sift.CreateInMemory(options);
+        _overlayIndex = SiftIndex.CreateInMemory(options);
         _overlaySnapshot = _overlayIndex.OpenSnapshot(searchOptions);
         _baseSegmentIds = new HashSet<ulong>(_baseSnapshot.GetSegmentIds());
     }
@@ -189,7 +189,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
     public Task<UpdateStats> CommitToBase(
-        ISift baseIndex,
+        ISiftIndex baseIndex,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
@@ -209,7 +209,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
     public Task<UpdateStats> ApplyDeltaTo(
-        ISift target,
+        ISiftIndex target,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
@@ -802,7 +802,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
     private async Task<UpdateStats> ApplyDeltaToCore(
-        ISift target,
+        ISiftIndex target,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {

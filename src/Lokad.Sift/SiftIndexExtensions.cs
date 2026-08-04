@@ -1,39 +1,39 @@
 namespace Lokad.Sift;
 
-public static class SiftContractExtensions
+public static class SiftIndexExtensions
 {
-    public static IIndexSnapshot OpenSnapshot(this ISift sift)
+    public static IIndexSnapshot OpenSnapshot(this ISiftIndex sift)
     {
         return sift.OpenSnapshot(new SearchOptions());
     }
 
-    public static IOverlaySnapshot OpenOverlaySnapshot(this ISift sift)
+    public static IOverlaySnapshot OpenOverlaySnapshot(this ISiftIndex sift)
     {
         return sift.OpenOverlaySnapshot(new SearchOptions());
     }
 
-    public static Task<IndexValidationStats> Validate(this ISift sift)
+    public static Task<IndexValidationStats> Validate(this ISiftIndex sift)
     {
         return sift.Validate(CancellationToken.None);
     }
 
-    public static Task<BuildStats> Build(this ISift sift, IDocumentSource documents)
+    public static Task<BuildStats> Build(this ISiftIndex sift, IDocumentSource documents)
         => Build(sift, documents, new BuildOptions(), CancellationToken.None);
 
     public static Task<BuildStats> Build(
-        this ISift sift,
+        this ISiftIndex sift,
         IDocumentSource documents,
         CancellationToken cancellationToken)
         => Build(sift, documents, new BuildOptions(), cancellationToken);
 
     public static Task<BuildStats> Build(
-        this ISift sift,
+        this ISiftIndex sift,
         IDocumentSource documents,
         BuildOptions options)
         => Build(sift, documents, options, CancellationToken.None);
 
     private static Task<BuildStats> Build(
-        ISift sift,
+        ISiftIndex sift,
         IDocumentSource documents,
         BuildOptions options,
         CancellationToken cancellationToken)
@@ -41,23 +41,23 @@ public static class SiftContractExtensions
         return sift.Build(documents, options, cancellationToken);
     }
 
-    public static Task<BuildStats> Build(this ISift sift, IAsyncEnumerable<SubmittedDocument> documents)
+    public static Task<BuildStats> Build(this ISiftIndex sift, IAsyncEnumerable<SubmittedDocument> documents)
         => Build(sift, documents, new BuildOptions(), CancellationToken.None);
 
     public static Task<BuildStats> Build(
-        this ISift sift,
+        this ISiftIndex sift,
         IAsyncEnumerable<SubmittedDocument> documents,
         CancellationToken cancellationToken)
         => Build(sift, documents, new BuildOptions(), cancellationToken);
 
     public static Task<BuildStats> Build(
-        this ISift sift,
+        this ISiftIndex sift,
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options)
         => Build(sift, documents, options, CancellationToken.None);
 
     private static Task<BuildStats> Build(
-        ISift sift,
+        ISiftIndex sift,
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options,
         CancellationToken cancellationToken)
@@ -66,7 +66,7 @@ public static class SiftContractExtensions
     }
 
     public static Task<UpdateStats> Update(
-        this ISift sift,
+        this ISiftIndex sift,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
@@ -74,7 +74,7 @@ public static class SiftContractExtensions
     }
 
     public static Task<UpdateStats> Update(
-        this ISift sift,
+        this ISiftIndex sift,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
@@ -83,7 +83,7 @@ public static class SiftContractExtensions
     }
 
     public static Task<UpdateStats> Update(
-        this ISift sift,
+        this ISiftIndex sift,
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
@@ -91,7 +91,7 @@ public static class SiftContractExtensions
     }
 
     public static Task<UpdateStats> Update(
-        this ISift sift,
+        this ISiftIndex sift,
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
@@ -99,7 +99,7 @@ public static class SiftContractExtensions
         return sift.Update(upserts, deletions, options, CancellationToken.None);
     }
 
-    public static Task<CompactStats> Compact(this ISift sift, CompactOptions options)
+    public static Task<CompactStats> Compact(this ISiftIndex sift, CompactOptions options)
     {
         return sift.Compact(options, CancellationToken.None);
     }
@@ -137,48 +137,48 @@ public static class SiftContractExtensions
         return snapshot.Update(upserts, deletions, options, CancellationToken.None);
     }
 
-    public static Task<UpdateStats> CommitToBase(this IOverlaySnapshot snapshot, ISift baseIndex)
+    public static Task<UpdateStats> CommitToBase(this IOverlaySnapshot snapshot, ISiftIndex baseIndex)
         => CommitToBase(snapshot, baseIndex, new UpdateOptions(), CancellationToken.None);
 
     public static Task<UpdateStats> CommitToBase(
         this IOverlaySnapshot snapshot,
-        ISift baseIndex,
+        ISiftIndex baseIndex,
         CancellationToken cancellationToken)
         => CommitToBase(snapshot, baseIndex, new UpdateOptions(), cancellationToken);
 
     public static Task<UpdateStats> CommitToBase(
         this IOverlaySnapshot snapshot,
-        ISift baseIndex,
+        ISiftIndex baseIndex,
         UpdateOptions options)
         => CommitToBase(snapshot, baseIndex, options, CancellationToken.None);
 
     private static Task<UpdateStats> CommitToBase(
         IOverlaySnapshot snapshot,
-        ISift baseIndex,
+        ISiftIndex baseIndex,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
         return snapshot.CommitToBase(baseIndex, options, cancellationToken);
     }
 
-    public static Task<UpdateStats> ApplyDeltaTo(this IOverlaySnapshot snapshot, ISift target)
+    public static Task<UpdateStats> ApplyDeltaTo(this IOverlaySnapshot snapshot, ISiftIndex target)
         => ApplyDeltaTo(snapshot, target, new UpdateOptions(), CancellationToken.None);
 
     public static Task<UpdateStats> ApplyDeltaTo(
         this IOverlaySnapshot snapshot,
-        ISift target,
+        ISiftIndex target,
         CancellationToken cancellationToken)
         => ApplyDeltaTo(snapshot, target, new UpdateOptions(), cancellationToken);
 
     public static Task<UpdateStats> ApplyDeltaTo(
         this IOverlaySnapshot snapshot,
-        ISift target,
+        ISiftIndex target,
         UpdateOptions options)
         => ApplyDeltaTo(snapshot, target, options, CancellationToken.None);
 
     private static Task<UpdateStats> ApplyDeltaTo(
         IOverlaySnapshot snapshot,
-        ISift target,
+        ISiftIndex target,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {

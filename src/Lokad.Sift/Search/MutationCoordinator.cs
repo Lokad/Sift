@@ -84,7 +84,7 @@ internal sealed class MutationCoordinator : IDisposable
     {
         lock (_sync)
         {
-            ObjectDisposedException.ThrowIf(_stopped, typeof(Sift));
+            ObjectDisposedException.ThrowIf(_stopped, typeof(SiftIndex));
             if (++_requests == 1)
             {
                 _idle.Reset();

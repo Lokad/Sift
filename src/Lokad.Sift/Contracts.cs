@@ -1157,11 +1157,11 @@ public interface IOverlaySnapshot : IIndexSnapshot
         IReadOnlyList<DocumentKey> deletions,
         OverlayUpdateOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> CommitToBase(ISift baseIndex, UpdateOptions options, CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyDeltaTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
+    Task<UpdateStats> CommitToBase(ISiftIndex baseIndex, UpdateOptions options, CancellationToken cancellationToken);
+    Task<UpdateStats> ApplyDeltaTo(ISiftIndex target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
-public interface ISift : IDisposable
+public interface ISiftIndex : IDisposable
 {
     bool RequiresRebuild { get; }
     IndexIdentity GetIndexIdentity();
