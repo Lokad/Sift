@@ -27,6 +27,30 @@ public sealed class CacheTests
     }
 
     [Fact]
+    public async Task ConcurrentPreparedQueryUsersReportOneUtf8RegexMiss()
+    {
+        const int concurrency = 8;
+        var suffix = Guid.NewGuid().ToString("N");
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", $"alpha123{suffix}")]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery($"alpha[0-9]*{suffix}", PatternMode.Regex, CaseMode.Sensitive);
+        using var barrier = new Barrier(concurrency);
+        var tasks = Enumerable.Range(0, concurrency)
+            .Select(_ => Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                return snapshot.Search(query, new PathFilter(), new HitBuffer());
+            }))
+            .ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        Assert.Equal(1, results.Sum(static result => result.Utf8RegexCacheMisses));
+        Assert.Equal(concurrency - 1, results.Sum(static result => result.Utf8RegexCacheHits));
+    }
+
+    [Fact]
     public void BoundedLruCacheEvictsLeastRecentlyUsedEntry()
     {
         var cache = new BoundedLruCache<int, string>(capacity: 2);

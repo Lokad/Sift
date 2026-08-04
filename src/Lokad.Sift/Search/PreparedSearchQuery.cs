@@ -26,6 +26,7 @@ internal readonly record struct PreparedQueryKey(
 internal sealed class PreparedSearchQuery
 {
     private readonly Lazy<PreparedRegexExecution> _regexExecution;
+    private int _utf8RegexReturned;
 
     public PreparedSearchQuery(
         CaseMode resolvedCaseMode,
@@ -60,17 +61,25 @@ internal sealed class PreparedSearchQuery
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
     public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
 
-    public PreparedRegexExecution GetRegexExecution()
+    public PreparedRegexExecutionAccess GetRegexExecution()
     {
-        var wasPrepared = _regexExecution.IsValueCreated;
         var execution = _regexExecution.Value;
-        if (!wasPrepared || execution.Utf8Regex is not { CacheHit: false } utf8Regex)
-        {
-            return execution;
-        }
+        bool? utf8RegexCacheHit = execution.Utf8Regex is { } utf8Regex
+            ? utf8Regex.CacheHit || Interlocked.Exchange(ref _utf8RegexReturned, 1) != 0
+            : null;
+        return new PreparedRegexExecutionAccess(execution, utf8RegexCacheHit);
+    }
+}
 
-        execution.MarkUtf8CacheHit(utf8Regex);
-        return execution;
+internal readonly record struct PreparedRegexExecutionAccess(
+    PreparedRegexExecution Execution,
+    bool? Utf8RegexCacheHit)
+{
+    public PreparedUtf8Regex? Utf8Regex => Execution.Utf8Regex;
+
+    public PreparedRegexVerifier? GetFallbackRegex()
+    {
+        return Execution.GetFallbackRegex();
     }
 }
 
@@ -110,7 +119,7 @@ internal sealed class PreparedRegexExecution
     {
     }
 
-    public PreparedUtf8Regex? Utf8Regex { get; private set; }
+    public PreparedUtf8Regex? Utf8Regex { get; }
 
     public PreparedRegexVerifier? GetFallbackRegex()
     {
@@ -126,11 +135,6 @@ internal sealed class PreparedRegexExecution
         }
 
         return fallback;
-    }
-
-    public void MarkUtf8CacheHit(PreparedUtf8Regex utf8Regex)
-    {
-        Utf8Regex = utf8Regex with { CacheHit = true };
     }
 }
 

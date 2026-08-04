@@ -232,8 +232,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var nonBacktrackingRegexInvocations = 0;
         var byteRegexMatchedDocuments = 0;
         long byteRegexStartPositionsTried = 0;
-        long byteRegexCacheHits = preparedRegex.Utf8Regex?.CacheHit == true ? 1 : 0;
-        long byteRegexCacheMisses = preparedRegex.Utf8Regex?.CacheHit == false ? 1 : 0;
+        long byteRegexCacheHits = preparedRegex.Utf8RegexCacheHit == true ? 1 : 0;
+        long byteRegexCacheMisses = preparedRegex.Utf8RegexCacheHit == false ? 1 : 0;
         var hitsReturned = 0;
         var hitDocuments = 0;
         var stopReason = SearchStopReason.None;
@@ -454,8 +454,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var nonBacktrackingRegexInvocations = 0;
         var byteRegexMatchedDocuments = 0;
         long byteRegexStartPositionsTried = 0;
-        long byteRegexCacheHits = preparedRegex.Utf8Regex?.CacheHit == true ? 1 : 0;
-        long byteRegexCacheMisses = preparedRegex.Utf8Regex?.CacheHit == false ? 1 : 0;
+        long byteRegexCacheHits = preparedRegex.Utf8RegexCacheHit == true ? 1 : 0;
+        long byteRegexCacheMisses = preparedRegex.Utf8RegexCacheHit == false ? 1 : 0;
         var hitsReturned = 0;
         var stopReason = SearchStopReason.None;
 
@@ -1040,7 +1040,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         PreparedMandatoryFragment[] preparedMandatoryFragments,
         PreparedOrderedAnchor[][] preparedOrderedAnchorGroups,
         RegexExecutionPlan regexPlan,
-        PreparedRegexExecution preparedRegex,
+        PreparedRegexExecutionAccess preparedRegex,
         IPathVisibility? pathVisibility,
         Stopwatch watch,
         IHitCollector collector,
