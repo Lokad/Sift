@@ -277,7 +277,7 @@ public sealed class SiftIndex : ISiftIndex
                 _validationGate.Wait(operationCancellation.Token);
                 acquiredGate = true;
                 validationRevision = BeginValidationAttempt();
-                return ValidateCore(operationCancellation.Token, validationRevision);
+                return ValidateIndex(operationCancellation.Token, validationRevision);
             }
             catch (OperationCanceledException)
             {
@@ -312,104 +312,104 @@ public sealed class SiftIndex : ISiftIndex
                 validation.Dispose();
             }
         });
-    }
 
-    private IndexValidationStats ValidateCore(
-        CancellationToken cancellationToken,
-        long validationRevision)
-    {
-        long GetSegmentBytes(ulong segmentId)
+        IndexValidationStats ValidateIndex(
+            CancellationToken cancellationToken,
+            long validationRevision)
         {
-            try
+            long GetSegmentBytes(ulong segmentId)
             {
-                return _storage.GetSegmentBytes(segmentId);
+                try
+                {
+                    return _storage.GetSegmentBytes(segmentId);
+                }
+                catch (Exception exception) when (IsIndexCorruption(exception))
+                {
+                    PreserveRetainedSegmentFailure(
+                        validationRevision,
+                        segmentId,
+                        exception,
+                        cancellationToken);
+                    throw;
+                }
             }
-            catch (Exception exception) when (IsIndexCorruption(exception))
+
+            void ValidateSegment(ulong segmentId)
             {
-                PreserveRetainedSegmentFailure(
-                    validationRevision,
-                    segmentId,
-                    exception,
-                    cancellationToken);
-                throw;
+                try
+                {
+                    _storage.ValidateSegment(segmentId, cancellationToken);
+                }
+                catch (Exception exception) when (IsIndexCorruption(exception))
+                {
+                    PreserveRetainedSegmentFailure(
+                        validationRevision,
+                        segmentId,
+                        exception,
+                        cancellationToken);
+                    throw;
+                }
             }
-        }
 
-        void ValidateSegment(ulong segmentId)
-        {
-            try
+            var watch = Stopwatch.StartNew();
+            using var snapshot = _storage.OpenReadSnapshot();
+            var manifest = snapshot.Manifest;
+            var segmentBytes = new long[manifest.Segments.Count];
+            long totalBytes = 0;
+            for (var i = 0; i < manifest.Segments.Count; i++)
             {
-                _storage.ValidateSegment(segmentId, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                segmentBytes[i] = GetSegmentBytes(manifest.Segments[i].SegmentId);
+                totalBytes = checked(totalBytes + segmentBytes[i]);
             }
-            catch (Exception exception) when (IsIndexCorruption(exception))
-            {
-                PreserveRetainedSegmentFailure(
-                    validationRevision,
-                    segmentId,
-                    exception,
-                    cancellationToken);
-                throw;
-            }
-        }
 
-        var watch = Stopwatch.StartNew();
-        using var snapshot = _storage.OpenReadSnapshot();
-        var manifest = snapshot.Manifest;
-        var segmentBytes = new long[manifest.Segments.Count];
-        long totalBytes = 0;
-        for (var i = 0; i < manifest.Segments.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            segmentBytes[i] = GetSegmentBytes(manifest.Segments[i].SegmentId);
-            totalBytes = checked(totalBytes + segmentBytes[i]);
-        }
-
-        if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
-            IndexValidationState.Running,
-            manifest.Generation,
-            manifest.Segments.Count,
-            ValidatedSegments: 0,
-            totalBytes,
-            ValidatedBytes: 0,
-            ElapsedMilliseconds: 0,
-            Failure: null)))
-        {
-            return GetValidationStats();
-        }
-
-        long validatedBytes = 0;
-        for (var i = 0; i < manifest.Segments.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ValidateSegment(manifest.Segments[i].SegmentId);
-            validatedBytes += segmentBytes[i];
             if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
                 IndexValidationState.Running,
                 manifest.Generation,
                 manifest.Segments.Count,
-                i + 1,
+                ValidatedSegments: 0,
                 totalBytes,
-                validatedBytes,
-                watch.ElapsedMilliseconds,
+                ValidatedBytes: 0,
+                ElapsedMilliseconds: 0,
                 Failure: null)))
             {
                 return GetValidationStats();
             }
-        }
 
-        watch.Stop();
-        var completed = new IndexValidationStats(
-            IndexValidationState.Ready,
-            manifest.Generation,
-            manifest.Segments.Count,
-            manifest.Segments.Count,
-            totalBytes,
-            totalBytes,
-            watch.ElapsedMilliseconds,
-            Failure: null);
-        return TrySetValidationStats(validationRevision, completed)
-            ? completed
-            : GetValidationStats();
+            long validatedBytes = 0;
+            for (var i = 0; i < manifest.Segments.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ValidateSegment(manifest.Segments[i].SegmentId);
+                validatedBytes += segmentBytes[i];
+                if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
+                    IndexValidationState.Running,
+                    manifest.Generation,
+                    manifest.Segments.Count,
+                    i + 1,
+                    totalBytes,
+                    validatedBytes,
+                    watch.ElapsedMilliseconds,
+                    Failure: null)))
+                {
+                    return GetValidationStats();
+                }
+            }
+
+            watch.Stop();
+            var completed = new IndexValidationStats(
+                IndexValidationState.Ready,
+                manifest.Generation,
+                manifest.Segments.Count,
+                manifest.Segments.Count,
+                totalBytes,
+                totalBytes,
+                watch.ElapsedMilliseconds,
+                Failure: null);
+            return TrySetValidationStats(validationRevision, completed)
+                ? completed
+                : GetValidationStats();
+        }
     }
 
     public MaintenanceStats GetMaintenanceStats()
@@ -627,7 +627,7 @@ public sealed class SiftIndex : ISiftIndex
         UpdateDocumentStreamer streamDocuments,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken callerCancellationToken)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -638,11 +638,7 @@ public sealed class SiftIndex : ISiftIndex
             {
                 try
                 {
-                    return await UpdateCoreAsync(
-                        streamDocuments,
-                        deletions,
-                        options,
-                        operationCancellation).ConfigureAwait(false);
+                    return await ApplyUpdate(operationCancellation).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (IsIndexCorruption(exception))
                 {
@@ -650,7 +646,7 @@ public sealed class SiftIndex : ISiftIndex
                     throw;
                 }
             },
-            cancellationToken);
+            callerCancellationToken);
 
         static void ValidateUpdateOptions(UpdateOptions options)
         {
@@ -659,136 +655,228 @@ public sealed class SiftIndex : ISiftIndex
                 throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
             }
         }
-    }
 
-    private async ValueTask<UpdateStats> UpdateCoreAsync(
-        UpdateDocumentStreamer streamDocuments,
-        IReadOnlyList<DocumentKey> deletions,
-        UpdateOptions options,
-        CancellationToken cancellationToken)
-    {
-        static uint[] MergeDeadOrdinals(uint[] existing, List<LiveDocumentKey> added)
+        async ValueTask<UpdateStats> ApplyUpdate(CancellationToken cancellationToken)
         {
-            var merged = new uint[existing.Length + added.Count];
-            var existingIndex = 0;
-            var addedIndex = 0;
-            var mergedIndex = 0;
-            while (existingIndex < existing.Length && addedIndex < added.Count)
+            static uint[] MergeDeadOrdinals(uint[] existing, List<LiveDocumentKey> added)
             {
-                if (existing[existingIndex] < added[addedIndex].Ordinal)
+                var merged = new uint[existing.Length + added.Count];
+                var existingIndex = 0;
+                var addedIndex = 0;
+                var mergedIndex = 0;
+                while (existingIndex < existing.Length && addedIndex < added.Count)
                 {
-                    merged[mergedIndex++] = existing[existingIndex++];
+                    if (existing[existingIndex] < added[addedIndex].Ordinal)
+                    {
+                        merged[mergedIndex++] = existing[existingIndex++];
+                    }
+                    else
+                    {
+                        merged[mergedIndex++] = added[addedIndex++].Ordinal;
+                    }
                 }
-                else
+
+                existing.AsSpan(existingIndex).CopyTo(merged.AsSpan(mergedIndex));
+                mergedIndex += existing.Length - existingIndex;
+                while (addedIndex < added.Count)
                 {
                     merged[mergedIndex++] = added[addedIndex++].Ordinal;
                 }
+
+                return merged;
             }
 
-            existing.AsSpan(existingIndex).CopyTo(merged.AsSpan(mergedIndex));
-            mergedIndex += existing.Length - existingIndex;
-            while (addedIndex < added.Count)
+            var watch = Stopwatch.StartNew();
+            using var writeSession = _storage.AcquireWriteSession(cancellationToken);
+            ThrowIfRebuildRequired();
+            var hadManifest = _storage.HasManifest;
+            var currentManifest = hadManifest ? _storage.ReadManifest() : null;
+            var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
+            var committedIdentity = actualIdentity;
+            if (options.ExpectedIdentity is { } expectedIdentity &&
+                (expectedIdentity.CorpusId != actualIdentity.CorpusId ||
+                 expectedIdentity.ContentRevision != actualIdentity.ContentRevision))
             {
-                merged[mergedIndex++] = added[addedIndex++].Ordinal;
+                throw new StaleIndexStateException(expectedIdentity, actualIdentity);
             }
 
-            return merged;
-        }
+            var existingManifest = currentManifest ?? new CorpusManifest(
+                Guid.NewGuid(),
+                ContentRevision: 0,
+                Generation: 0,
+                CommitMetadata: [],
+                Segments: []);
 
-        var watch = Stopwatch.StartNew();
-        using var writeSession = _storage.AcquireWriteSession(cancellationToken);
-        ThrowIfRebuildRequired();
-        var hadManifest = _storage.HasManifest;
-        var currentManifest = hadManifest ? _storage.ReadManifest() : null;
-        var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
-        var committedIdentity = actualIdentity;
-        if (options.ExpectedIdentity is { } expectedIdentity &&
-            (expectedIdentity.CorpusId != actualIdentity.CorpusId ||
-             expectedIdentity.ContentRevision != actualIdentity.ContentRevision))
-        {
-            throw new StaleIndexStateException(expectedIdentity, actualIdentity);
-        }
-
-        var existingManifest = currentManifest ?? new CorpusManifest(
-            Guid.NewGuid(),
-            ContentRevision: 0,
-            Generation: 0,
-            CommitMetadata: [],
-            Segments: []);
-
-        var deletionSet = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var deletion in deletions)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var normalized = deletion.Path;
-            if (!deletionSet.Add(normalized))
+            var deletionSet = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var deletion in deletions)
             {
-                throw new InvalidOperationException($"Duplicate deletion path in update batch: '{normalized}'.");
-            }
-        }
-
-        var publishedSegments = new List<SegmentManifestEntry>();
-        var attemptedSegmentIds = new List<ulong>();
-        var existingUpsertKeys = new Dictionary<string, LiveDocumentKey>(StringComparer.Ordinal);
-        var deletedDocuments = 0;
-        StreamedDocuments upsertLoad;
-        try
-        {
-            var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-            upsertLoad = await streamDocuments(
-                deletionSet,
-                options.RejectedUpsertPolicy,
-                partition => RemoveUnchangedDocuments(
-                    existingManifest,
-                    partition,
-                    existingUpsertKeys,
-                    cancellationToken),
-                partition =>
+                cancellationToken.ThrowIfCancellationRequested();
+                var normalized = deletion.Path;
+                if (!deletionSet.Add(normalized))
                 {
-                    var segmentId = segmentSeed + (ulong)publishedSegments.Count;
-                    attemptedSegmentIds.Add(segmentId);
-                    publishedSegments.Add(writeSession.PublishSegment(
+                    throw new InvalidOperationException($"Duplicate deletion path in update batch: '{normalized}'.");
+                }
+            }
+
+            var publishedSegments = new List<SegmentManifestEntry>();
+            var attemptedSegmentIds = new List<ulong>();
+            var existingUpsertKeys = new Dictionary<string, LiveDocumentKey>(StringComparer.Ordinal);
+            var deletedDocuments = 0;
+            StreamedDocuments upsertLoad;
+            try
+            {
+                var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+                upsertLoad = await streamDocuments(
+                    deletionSet,
+                    options.RejectedUpsertPolicy,
+                    partition => RemoveUnchangedDocuments(
+                        existingManifest,
                         partition,
-                        segmentId,
-                        _options.MinimumFreeBytesAfterMutation,
-                        cancellationToken));
-                },
-                cancellationToken).ConfigureAwait(false);
-            var removalPaths = new HashSet<string>(deletionSet, StringComparer.Ordinal);
-            if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
-            {
-                removalPaths.UnionWith(upsertLoad.RejectedDocuments.Select(static document => document.Path));
-            }
-
-            var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
-            affectedPaths.UnionWith(removalPaths);
-            var liveDocumentKeys = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
-            foreach (var path in upsertLoad.AcceptedPaths)
-            {
-                if (existingUpsertKeys.TryGetValue(path, out var key))
+                        existingUpsertKeys,
+                        cancellationToken),
+                    partition =>
+                    {
+                        var segmentId = segmentSeed + (ulong)publishedSegments.Count;
+                        attemptedSegmentIds.Add(segmentId);
+                        publishedSegments.Add(writeSession.PublishSegment(
+                            partition,
+                            segmentId,
+                            _options.MinimumFreeBytesAfterMutation,
+                            cancellationToken));
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                var removalPaths = new HashSet<string>(deletionSet, StringComparer.Ordinal);
+                if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
                 {
-                    liveDocumentKeys.Add(path, key);
+                    removalPaths.UnionWith(upsertLoad.RejectedDocuments.Select(static document => document.Path));
+                }
+
+                var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
+                affectedPaths.UnionWith(removalPaths);
+                var liveDocumentKeys = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
+                foreach (var path in upsertLoad.AcceptedPaths)
+                {
+                    if (existingUpsertKeys.TryGetValue(path, out var key))
+                    {
+                        liveDocumentKeys.Add(path, key);
+                    }
+                }
+
+                foreach (var pair in FindLiveDocumentKeys(
+                    existingManifest,
+                    removalPaths,
+                    cancellationToken))
+                {
+                    liveDocumentKeys.Add(pair.Key, pair.Value);
+                }
+                foreach (var path in removalPaths)
+                {
+                    if (liveDocumentKeys.ContainsKey(path))
+                    {
+                        deletedDocuments++;
+                    }
+                }
+
+                var requiresManifestMigration = existingManifest.Segments.Any(
+                    static segment => segment.DeadContentBytes < 0);
+                var pendingStats = new UpdateStats(
+                    submittedUpserts: upsertLoad.Submitted,
+                    upsertedDocuments: upsertLoad.Accepted,
+                    skippedUpserts: upsertLoad.Skipped,
+                    rejectedUpserts: upsertLoad.Rejected,
+                    deletedDocuments: deletedDocuments,
+                    publishedSegments: publishedSegments.Count,
+                    submittedBytes: upsertLoad.SubmittedBytes,
+                    contentBytes: upsertLoad.AcceptedBytes,
+                    skippedBytes: upsertLoad.SkippedBytes,
+                    rejectedBytes: upsertLoad.RejectedBytes,
+                    rejectedDocuments: upsertLoad.RejectedDocuments,
+                    elapsedMilliseconds: watch.ElapsedMilliseconds,
+                    committedIdentity: default);
+                var commitMetadata = options.CommitMetadataProvider is null
+                    ? existingManifest.CommitMetadata
+                    : options.CommitMetadataProvider(pendingStats).ToArray();
+                if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
+                }
+
+                var contentChanged = !hadManifest ||
+                    publishedSegments.Count > 0 ||
+                    liveDocumentKeys.Count > 0;
+                var commitMetadataChanged = !commitMetadata.AsSpan().SequenceEqual(existingManifest.CommitMetadata);
+                if (contentChanged || requiresManifestMigration || commitMetadataChanged)
+                {
+                    var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
+                    var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
+
+                    // Retire prior versions replaced or removed by this update.
+                    foreach (var path in affectedPaths)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (liveDocumentKeys.TryGetValue(path, out var current))
+                        {
+                            if (!newlyDeadBySegment.TryGetValue(current.SegmentId, out var newlyDead))
+                            {
+                                newlyDead = [];
+                                newlyDeadBySegment.Add(current.SegmentId, newlyDead);
+                            }
+
+                            newlyDead.Add(current);
+                        }
+                    }
+
+                    foreach (var segment in existingManifest.Segments)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        // Preserve both the entry and its dead-ordinal array when this
+                        // batch did not replace or delete anything in the segment.
+                        if (!newlyDeadBySegment.TryGetValue(segment.SegmentId, out var newlyDead))
+                        {
+                            newSegments.Add(segment);
+                            continue;
+                        }
+
+                        newlyDead.Sort(static (left, right) => left.Ordinal.CompareTo(right.Ordinal));
+                        var deadContentBytes = segment.DeadContentBytes;
+                        if (deadContentBytes >= 0)
+                        {
+                            foreach (var document in newlyDead)
+                            {
+                                deadContentBytes = checked(deadContentBytes + document.ContentLength);
+                            }
+                        }
+
+                        newSegments.Add(segment with
+                        {
+                            DeadOrdinals = MergeDeadOrdinals(segment.DeadOrdinals, newlyDead),
+                            DeadContentBytes = deadContentBytes
+                        });
+                    }
+
+                    newSegments.AddRange(publishedSegments);
+
+                    var manifest = new CorpusManifest(
+                        existingManifest.CorpusId,
+                        existingManifest.ContentRevision + (contentChanged ? 1UL : 0UL),
+                        existingManifest.Generation + 1UL,
+                        commitMetadata.ToArray(),
+                        newSegments);
+                    ResetValidationStats();
+                    writeSession.PublishManifest(manifest);
+                    ResetValidationStats();
+                    committedIdentity = CreateIndexIdentity(manifest);
                 }
             }
-
-            foreach (var pair in FindLiveDocumentKeys(
-                existingManifest,
-                removalPaths,
-                cancellationToken))
+            catch
             {
-                liveDocumentKeys.Add(pair.Key, pair.Value);
-            }
-            foreach (var path in removalPaths)
-            {
-                if (liveDocumentKeys.ContainsKey(path))
-                {
-                    deletedDocuments++;
-                }
+                writeSession.CleanupFailedMutation(attemptedSegmentIds);
+                throw;
             }
 
-            var requiresManifestMigration = existingManifest.Segments.Any(
-                static segment => segment.DeadContentBytes < 0);
-            var pendingStats = new UpdateStats(
+            watch.Stop();
+            return new UpdateStats(
                 submittedUpserts: upsertLoad.Submitted,
                 upsertedDocuments: upsertLoad.Accepted,
                 skippedUpserts: upsertLoad.Skipped,
@@ -801,104 +889,8 @@ public sealed class SiftIndex : ISiftIndex
                 rejectedBytes: upsertLoad.RejectedBytes,
                 rejectedDocuments: upsertLoad.RejectedDocuments,
                 elapsedMilliseconds: watch.ElapsedMilliseconds,
-                committedIdentity: default);
-            var commitMetadata = options.CommitMetadataProvider is null
-                ? existingManifest.CommitMetadata
-                : options.CommitMetadataProvider(pendingStats).ToArray();
-            if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
-            {
-                throw new InvalidOperationException(
-                    $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
-            }
-
-            var contentChanged = !hadManifest ||
-                publishedSegments.Count > 0 ||
-                liveDocumentKeys.Count > 0;
-            var commitMetadataChanged = !commitMetadata.AsSpan().SequenceEqual(existingManifest.CommitMetadata);
-            if (contentChanged || requiresManifestMigration || commitMetadataChanged)
-            {
-                var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
-                var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
-
-                // Retire prior versions replaced or removed by this update.
-                foreach (var path in affectedPaths)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (liveDocumentKeys.TryGetValue(path, out var current))
-                    {
-                        if (!newlyDeadBySegment.TryGetValue(current.SegmentId, out var newlyDead))
-                        {
-                            newlyDead = [];
-                            newlyDeadBySegment.Add(current.SegmentId, newlyDead);
-                        }
-
-                        newlyDead.Add(current);
-                    }
-                }
-
-                foreach (var segment in existingManifest.Segments)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    // Preserve both the entry and its dead-ordinal array when this
-                    // batch did not replace or delete anything in the segment.
-                    if (!newlyDeadBySegment.TryGetValue(segment.SegmentId, out var newlyDead))
-                    {
-                        newSegments.Add(segment);
-                        continue;
-                    }
-
-                    newlyDead.Sort(static (left, right) => left.Ordinal.CompareTo(right.Ordinal));
-                    var deadContentBytes = segment.DeadContentBytes;
-                    if (deadContentBytes >= 0)
-                    {
-                        foreach (var document in newlyDead)
-                        {
-                            deadContentBytes = checked(deadContentBytes + document.ContentLength);
-                        }
-                    }
-
-                    newSegments.Add(segment with
-                    {
-                        DeadOrdinals = MergeDeadOrdinals(segment.DeadOrdinals, newlyDead),
-                        DeadContentBytes = deadContentBytes
-                    });
-                }
-
-                newSegments.AddRange(publishedSegments);
-
-                var manifest = new CorpusManifest(
-                    existingManifest.CorpusId,
-                    existingManifest.ContentRevision + (contentChanged ? 1UL : 0UL),
-                    existingManifest.Generation + 1UL,
-                    commitMetadata.ToArray(),
-                    newSegments);
-                ResetValidationStats();
-                writeSession.PublishManifest(manifest);
-                ResetValidationStats();
-                committedIdentity = CreateIndexIdentity(manifest);
-            }
+                committedIdentity: committedIdentity);
         }
-        catch
-        {
-            writeSession.CleanupFailedMutation(attemptedSegmentIds);
-            throw;
-        }
-
-        watch.Stop();
-        return new UpdateStats(
-            submittedUpserts: upsertLoad.Submitted,
-            upsertedDocuments: upsertLoad.Accepted,
-            skippedUpserts: upsertLoad.Skipped,
-            rejectedUpserts: upsertLoad.Rejected,
-            deletedDocuments: deletedDocuments,
-            publishedSegments: publishedSegments.Count,
-            submittedBytes: upsertLoad.SubmittedBytes,
-            contentBytes: upsertLoad.AcceptedBytes,
-            skippedBytes: upsertLoad.SkippedBytes,
-            rejectedBytes: upsertLoad.RejectedBytes,
-            rejectedDocuments: upsertLoad.RejectedDocuments,
-            elapsedMilliseconds: watch.ElapsedMilliseconds,
-            committedIdentity: committedIdentity);
     }
 
     private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)
