@@ -14,22 +14,115 @@ public sealed class StorageLifecycleTests
         IndexIdentity updatedIdentity;
         using (var index = new SiftIndex(fixture.CorpusPath))
         {
-            Assert.Equal(new IndexIdentity(Guid.Empty, 0), index.GetIndexIdentity());
+            Assert.Equal(new IndexIdentity(Guid.Empty, 0, 0), index.GetIndexIdentity());
             await index.Build(fixture.CreateSource());
             var builtIdentity = index.GetIndexIdentity();
             Assert.NotEqual(Guid.Empty, builtIdentity.CorpusId);
-            Assert.Equal(1ul, builtIdentity.Generation);
+            Assert.Equal(1ul, builtIdentity.ContentRevision);
+            Assert.Equal(1ul, builtIdentity.StorageGeneration);
 
             await index.Update(
                 new InMemoryDocumentSource([("src/b.txt", "beta\n")]),
                 []);
             updatedIdentity = index.GetIndexIdentity();
             Assert.Equal(builtIdentity.CorpusId, updatedIdentity.CorpusId);
-            Assert.True(updatedIdentity.Generation > builtIdentity.Generation);
+            Assert.Equal(builtIdentity.ContentRevision + 1, updatedIdentity.ContentRevision);
+            Assert.True(updatedIdentity.StorageGeneration > builtIdentity.StorageGeneration);
         }
 
         using var reopened = new SiftIndex(fixture.CorpusPath);
         Assert.Equal(updatedIdentity, reopened.GetIndexIdentity());
+    }
+
+    [Fact]
+    public async Task FullBuildStartsNewLogicalCorpusEpoch()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        var first = index.GetIndexIdentity();
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+
+        await index.Build(new InMemoryDocumentSource([("src/c.txt", "gamma")]));
+        var rebuilt = index.GetIndexIdentity();
+
+        Assert.NotEqual(first.CorpusId, rebuilt.CorpusId);
+        Assert.Equal(1UL, rebuilt.ContentRevision);
+        Assert.True(rebuilt.StorageGeneration > first.StorageGeneration);
+    }
+
+    [Fact]
+    public async Task CommitMetadataIsAtomicAndSurvivesCompactionAndReopen()
+    {
+        using var fixture = new CorpusFixture();
+        IndexState compactedState;
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(
+                new InMemoryDocumentSource([("src/a.txt", "alpha")]),
+                new BuildOptions
+                {
+                    CommitMetadataProvider = stats =>
+                    {
+                        Assert.Equal(1, stats.IndexedDocuments);
+                        return "initial"u8.ToArray();
+                    }
+                });
+            var builtState = index.GetIndexState();
+            Assert.Equal("initial"u8.ToArray(), builtState.CommitMetadata.ToArray());
+
+            await index.Update(
+                new InMemoryDocumentSource([]),
+                [],
+                new UpdateOptions
+                {
+                    CommitMetadataProvider = stats =>
+                    {
+                        Assert.Equal(0, stats.UpsertedDocuments);
+                        return "advanced"u8.ToArray();
+                    }
+                });
+            var metadataOnlyState = index.GetIndexState();
+            Assert.Equal(builtState.Identity.ContentRevision, metadataOnlyState.Identity.ContentRevision);
+            Assert.True(metadataOnlyState.Identity.StorageGeneration > builtState.Identity.StorageGeneration);
+            Assert.Equal("advanced"u8.ToArray(), metadataOnlyState.CommitMetadata.ToArray());
+
+            await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+            var updatedState = index.GetIndexState();
+            Assert.Equal(metadataOnlyState.Identity.ContentRevision + 1, updatedState.Identity.ContentRevision);
+            Assert.Equal("advanced"u8.ToArray(), updatedState.CommitMetadata.ToArray());
+
+            var compact = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+            Assert.True(compact.InputSegments > 0);
+            compactedState = index.GetIndexState();
+            Assert.Equal(updatedState.Identity.ContentRevision, compactedState.Identity.ContentRevision);
+            Assert.True(compactedState.Identity.StorageGeneration > updatedState.Identity.StorageGeneration);
+            Assert.Equal("advanced"u8.ToArray(), compactedState.CommitMetadata.ToArray());
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        var reopenedState = reopened.GetIndexState();
+        Assert.Equal(compactedState.Identity, reopenedState.Identity);
+        Assert.Equal(compactedState.CommitMetadata.ToArray(), reopenedState.CommitMetadata.ToArray());
+    }
+
+    [Fact]
+    public async Task CommitMetadataProviderFailureDoesNotPublishUpdate()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        var before = index.GetIndexState();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => index.Update(
+            new InMemoryDocumentSource([("src/b.txt", "beta")]),
+            [],
+            new UpdateOptions
+            {
+                CommitMetadataProvider = _ => throw new InvalidOperationException("checkpoint failed")
+            }));
+
+        Assert.Equal(before.Identity, index.GetIndexState().Identity);
+        using var snapshot = index.OpenSnapshot();
+        Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
     }
 
     [Fact]

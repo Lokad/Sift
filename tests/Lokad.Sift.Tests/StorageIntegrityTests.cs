@@ -408,9 +408,11 @@ public sealed class StorageIntegrityTests
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = new CorpusManifest(
-            Guid.NewGuid(),
-            3,
-            [
+            CorpusId: Guid.NewGuid(),
+            ContentRevision: 2,
+            Generation: 3,
+            CommitMetadata: "checkpoint"u8.ToArray(),
+            Segments: [
                 new SegmentManifestEntry(42, 6000, 100, [1, 2, 3, 1000, 5000], DeadContentBytes: 5)
             ]);
 
@@ -418,8 +420,15 @@ public sealed class StorageIntegrityTests
         var roundTripped = storage.ReadManifest();
 
         Assert.Equal(manifest.Generation, roundTripped.Generation);
+        Assert.Equal(manifest.ContentRevision, roundTripped.ContentRevision);
+        Assert.Equal(manifest.CommitMetadata, roundTripped.CommitMetadata);
         Assert.Equal(manifest.Segments[0].DeadOrdinals, roundTripped.Segments[0].DeadOrdinals);
-        Assert.True(new FileInfo(storage.ManifestPath).Length < 56 + 28 + 8 + manifest.Segments[0].DeadOrdinals.Length * 4);
+        Assert.True(new FileInfo(storage.ManifestPath).Length <
+            SegmentFormat.ManifestHeaderSize +
+            SegmentFormat.ManifestEntryHeaderSize +
+            manifest.CommitMetadata.Length +
+            sizeof(ulong) +
+            manifest.Segments[0].DeadOrdinals.Length * sizeof(uint));
     }
 
     [Fact]
@@ -1092,21 +1101,28 @@ public sealed class StorageIntegrityTests
         var currentSegmentTableLength = BinaryPrimitives.ReadInt32LittleEndian(current.AsSpan(44));
         var legacySegmentTableLength = currentSegmentTableLength -
             count * (SegmentFormat.ManifestEntryHeaderSize - SegmentFormat.LegacyManifestEntryHeaderSize);
-        var checksumOffset = segmentTableOffset + legacySegmentTableLength;
+        var legacySegmentTableOffset = SegmentFormat.LegacyManifestHeaderSize;
+        var checksumOffset = legacySegmentTableOffset + legacySegmentTableLength;
         var legacy = new byte[checksumOffset + sizeof(ulong)];
-        current.AsSpan(0, SegmentFormat.ManifestHeaderSize).CopyTo(legacy);
+        current.AsSpan(0, SegmentFormat.LegacyManifestHeaderSize).CopyTo(legacy);
         BinaryPrimitives.WriteInt32LittleEndian(
             legacy.AsSpan(8),
             SegmentFormat.LegacyManifestFormatVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            legacy.AsSpan(40),
+            legacySegmentTableOffset);
         BinaryPrimitives.WriteInt32LittleEndian(
             legacy.AsSpan(44),
             legacySegmentTableLength);
         BinaryPrimitives.WriteInt32LittleEndian(
             legacy.AsSpan(48),
             checksumOffset);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            legacy.AsSpan(52),
+            sizeof(ulong));
 
         var currentOffset = segmentTableOffset;
-        var legacyOffset = segmentTableOffset;
+        var legacyOffset = legacySegmentTableOffset;
         for (var i = 0; i < count; i++)
         {
             var deadOrdinalBytes = BinaryPrimitives.ReadInt32LittleEndian(

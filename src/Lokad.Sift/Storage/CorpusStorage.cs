@@ -192,7 +192,7 @@ public sealed class CorpusStorage : ISiftStorage
     private static CorpusManifest ReadManifest(string manifestPath)
     {
         using var stream = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        if (stream.Length < SegmentFormat.ManifestHeaderSize + sizeof(ulong) ||
+        if (stream.Length < SegmentFormat.LegacyManifestHeaderSize + sizeof(ulong) ||
             stream.Length > int.MaxValue)
         {
             throw new InvalidDataException("Invalid Sift manifest length.");
@@ -209,6 +209,7 @@ public sealed class CorpusStorage : ISiftStorage
 
         var version = LittleEndianCodec.ReadInt32(span[8..]);
         if (version is not SegmentFormat.LegacyManifestFormatVersion and
+            not SegmentFormat.PreviousManifestFormatVersion and
             not SegmentFormat.ManifestFormatVersion)
         {
             throw new InvalidDataException($"Unsupported Sift manifest version: {version}.");
@@ -219,14 +220,24 @@ public sealed class CorpusStorage : ISiftStorage
         var count = LittleEndianCodec.ReadInt32(span[36..]);
         var segmentTableOffset = LittleEndianCodec.ReadInt32(span[40..]);
         var segmentTableLength = LittleEndianCodec.ReadInt32(span[44..]);
-        var checksumOffset = LittleEndianCodec.ReadInt32(span[48..]);
-        var checksumLength = LittleEndianCodec.ReadInt32(span[52..]);
+        var metadataOffset = version == SegmentFormat.ManifestFormatVersion
+            ? LittleEndianCodec.ReadInt32(span[48..])
+            : segmentTableOffset + segmentTableLength;
+        var metadataLength = version == SegmentFormat.ManifestFormatVersion
+            ? LittleEndianCodec.ReadInt32(span[52..])
+            : 0;
+        var checksumOffset = LittleEndianCodec.ReadInt32(span[(version == SegmentFormat.ManifestFormatVersion ? 56 : 48)..]);
+        var checksumLength = LittleEndianCodec.ReadInt32(span[(version == SegmentFormat.ManifestFormatVersion ? 60 : 52)..]);
+        var contentRevision = version == SegmentFormat.ManifestFormatVersion
+            ? LittleEndianCodec.ReadUInt64(span[64..])
+            : generation;
         if (count < 0)
         {
             throw new InvalidDataException("Invalid Sift manifest segment count.");
         }
 
         ValidateManifestBounds(segmentTableOffset, segmentTableLength, bytes.Length, "segment table");
+        ValidateManifestBounds(metadataOffset, metadataLength, bytes.Length, "commit metadata");
         ValidateManifestBounds(checksumOffset, checksumLength, bytes.Length, "checksum region");
         if (checksumLength != 8)
         {
@@ -239,15 +250,25 @@ public sealed class CorpusStorage : ISiftStorage
             throw new InvalidDataException("Invalid Sift manifest checksum.");
         }
 
-        if (segmentTableOffset != SegmentFormat.ManifestHeaderSize)
+        var expectedHeaderSize = version == SegmentFormat.ManifestFormatVersion
+            ? SegmentFormat.ManifestHeaderSize
+            : SegmentFormat.LegacyManifestHeaderSize;
+        if (segmentTableOffset != expectedHeaderSize)
         {
             throw new InvalidDataException("Unexpected Sift manifest segment table offset.");
+        }
+
+        if (metadataLength > SegmentFormat.MaximumCommitMetadataBytes ||
+            metadataOffset != segmentTableOffset + segmentTableLength ||
+            checksumOffset != metadataOffset + metadataLength)
+        {
+            throw new InvalidDataException("Invalid Sift manifest commit metadata region.");
         }
 
         var segments = new SegmentManifestEntry[count];
         var offset = segmentTableOffset;
         var limit = segmentTableOffset + segmentTableLength;
-        var entryHeaderSize = version == SegmentFormat.ManifestFormatVersion
+        var entryHeaderSize = version is SegmentFormat.ManifestFormatVersion or SegmentFormat.PreviousManifestFormatVersion
             ? SegmentFormat.ManifestEntryHeaderSize
             : SegmentFormat.LegacyManifestEntryHeaderSize;
         for (var i = 0; i < count; i++)
@@ -262,7 +283,7 @@ public sealed class CorpusStorage : ISiftStorage
             var contentBytes = LittleEndianCodec.ReadInt64(span[(offset + 12)..]);
             var deadCount = LittleEndianCodec.ReadInt32(span[(offset + 20)..]);
             var deadBytes = LittleEndianCodec.ReadInt32(span[(offset + 24)..]);
-            var deadContentBytes = version == SegmentFormat.ManifestFormatVersion
+            var deadContentBytes = version is SegmentFormat.ManifestFormatVersion or SegmentFormat.PreviousManifestFormatVersion
                 ? LittleEndianCodec.ReadInt64(span[(offset + 28)..])
                 : -1;
             offset += entryHeaderSize;
@@ -271,7 +292,7 @@ public sealed class CorpusStorage : ISiftStorage
                 deadCount < 0 ||
                 deadCount > documentCount ||
                 deadBytes < 0 ||
-                deadContentBytes < (version == SegmentFormat.ManifestFormatVersion ? 0 : -1) ||
+                deadContentBytes < (version is SegmentFormat.ManifestFormatVersion or SegmentFormat.PreviousManifestFormatVersion ? 0 : -1) ||
                 deadContentBytes > contentBytes ||
                 offset > limit - deadBytes)
             {
@@ -313,7 +334,12 @@ public sealed class CorpusStorage : ISiftStorage
             throw new InvalidDataException("Unexpected trailing bytes in Sift manifest segment table.");
         }
 
-        return new CorpusManifest(corpusId, generation, segments);
+        return new CorpusManifest(
+            corpusId,
+            contentRevision,
+            generation,
+            span.Slice(metadataOffset, metadataLength).ToArray(),
+            segments);
     }
 
     public MappedSegment OpenSegment(ulong segmentId)
@@ -789,6 +815,11 @@ public sealed class CorpusStorage : ISiftStorage
     private void WriteManifest(CorpusManifest manifest)
     {
         manifest = ResolveLegacyDeadContentBytes(manifest);
+        if (manifest.CommitMetadata.Length > SegmentFormat.MaximumCommitMetadataBytes)
+        {
+            throw new InvalidOperationException("Sift commit metadata exceeds the on-disk format limit.");
+        }
+
         // Set the retry marker and publish the reader lease before making the generation discoverable.
         SetReclamationPending(isPending: true);
         EnsureGenerationLease(manifest);
@@ -800,7 +831,9 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         var segmentTableOffset = SegmentFormat.ManifestHeaderSize;
-        var checksumOffset = segmentTableOffset + segmentTableLength;
+        var metadataOffset = segmentTableOffset + segmentTableLength;
+        var metadataLength = manifest.CommitMetadata.Length;
+        var checksumOffset = metadataOffset + metadataLength;
         var checksumLength = 8;
         var size = checksumOffset + checksumLength;
         var bytes = GC.AllocateUninitializedArray<byte>(size);
@@ -812,8 +845,11 @@ public sealed class CorpusStorage : ISiftStorage
         LittleEndianCodec.WriteInt32(span[36..], manifest.Segments.Count);
         LittleEndianCodec.WriteInt32(span[40..], segmentTableOffset);
         LittleEndianCodec.WriteInt32(span[44..], segmentTableLength);
-        LittleEndianCodec.WriteInt32(span[48..], checksumOffset);
-        LittleEndianCodec.WriteInt32(span[52..], checksumLength);
+        LittleEndianCodec.WriteInt32(span[48..], metadataOffset);
+        LittleEndianCodec.WriteInt32(span[52..], metadataLength);
+        LittleEndianCodec.WriteInt32(span[56..], checksumOffset);
+        LittleEndianCodec.WriteInt32(span[60..], checksumLength);
+        LittleEndianCodec.WriteUInt64(span[64..], manifest.ContentRevision);
 
         var offset = segmentTableOffset;
         foreach (var segment in manifest.Segments)
@@ -833,6 +869,8 @@ public sealed class CorpusStorage : ISiftStorage
                 previous = dead;
             }
         }
+
+        manifest.CommitMetadata.CopyTo(span[metadataOffset..]);
 
         LittleEndianCodec.WriteUInt64(span.Slice(checksumOffset, checksumLength), Hashing.Fnv1A64(span.Slice(0, checksumOffset)));
 
@@ -1241,8 +1279,7 @@ public sealed class CorpusStorage : ISiftStorage
                 using var activeLease = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 var lease = ReadGenerationLease(activeLease);
                 var fileName = Path.GetFileNameWithoutExtension(leasePath);
-                if (lease.CorpusId != manifest.CorpusId ||
-                    fileName.Length != 16 ||
+                if (fileName.Length != 16 ||
                     !ulong.TryParse(fileName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var fileGeneration) ||
                     fileGeneration != lease.Generation)
                 {

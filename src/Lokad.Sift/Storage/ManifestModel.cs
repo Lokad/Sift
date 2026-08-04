@@ -12,5 +12,16 @@ public readonly record struct SegmentManifestEntry(
 
 public sealed record CorpusManifest(
     Guid CorpusId,
+    ulong ContentRevision,
     ulong Generation,
-    IReadOnlyList<SegmentManifestEntry> Segments);
+    byte[] CommitMetadata,
+    IReadOnlyList<SegmentManifestEntry> Segments)
+{
+    public CorpusManifest(
+        Guid corpusId,
+        ulong generation,
+        IReadOnlyList<SegmentManifestEntry> segments)
+        : this(corpusId, generation, generation, [], segments)
+    {
+    }
+}

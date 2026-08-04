@@ -156,32 +156,62 @@ public sealed class Sift : ISift
 
     public Task<BuildStats> Build(IDocumentSource documents)
     {
-        return Build(documents, CancellationToken.None);
+        return Build(documents, new BuildOptions(), CancellationToken.None);
     }
 
     public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken)
     {
+        return Build(documents, new BuildOptions(), cancellationToken);
+    }
+
+    public Task<BuildStats> Build(IDocumentSource documents, BuildOptions options)
+    {
+        return Build(documents, options, CancellationToken.None);
+    }
+
+    public Task<BuildStats> Build(
+        IDocumentSource documents,
+        BuildOptions options,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
-                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, isRecovery, token)),
+                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, options, isRecovery, token)),
                 operationCancellation),
             cancellationToken);
     }
 
     public Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents)
     {
-        return Build(documents, CancellationToken.None);
+        return Build(documents, new BuildOptions(), CancellationToken.None);
     }
 
     public Task<BuildStats> Build(
         IAsyncEnumerable<SubmittedDocument> documents,
         CancellationToken cancellationToken)
     {
+        return Build(documents, new BuildOptions(), cancellationToken);
+    }
+
+    public Task<BuildStats> Build(
+        IAsyncEnumerable<SubmittedDocument> documents,
+        BuildOptions options)
+    {
+        return Build(documents, options, CancellationToken.None);
+    }
+
+    public Task<BuildStats> Build(
+        IAsyncEnumerable<SubmittedDocument> documents,
+        BuildOptions options,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
-                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, isRecovery, token)),
+                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, options, isRecovery, token)),
                 operationCancellation),
             cancellationToken);
     }
@@ -264,14 +294,22 @@ public sealed class Sift : ISift
 
     public IndexIdentity GetIndexIdentity()
     {
+        return GetIndexState().Identity;
+    }
+
+    public IndexState GetIndexState()
+    {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         try
         {
             using var snapshot = _storage.OpenReadSnapshot();
-            return new IndexIdentity(
-                snapshot.Manifest.CorpusId,
-                snapshot.Manifest.Generation);
+            return new IndexState(
+                new IndexIdentity(
+                    snapshot.Manifest.CorpusId,
+                    snapshot.Manifest.ContentRevision,
+                    snapshot.Manifest.Generation),
+                snapshot.Manifest.CommitMetadata.ToArray());
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
@@ -740,7 +778,12 @@ public sealed class Sift : ISift
         var hadManifest = _storage.HasManifest;
         var existingManifest = hadManifest
             ? _storage.ReadManifest()
-            : new CorpusManifest(Guid.NewGuid(), 0, []);
+            : new CorpusManifest(
+                Guid.NewGuid(),
+                ContentRevision: 0,
+                Generation: 0,
+                CommitMetadata: [],
+                Segments: []);
 
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
@@ -814,16 +857,38 @@ public sealed class Sift : ISift
 
             var requiresManifestMigration = existingManifest.Segments.Any(
                 static segment => segment.DeadContentBytes < 0);
-            if (!hadManifest ||
+            var pendingStats = new UpdateStats(
+                SubmittedUpserts: upsertLoad.Submitted,
+                UpsertedDocuments: upsertLoad.Accepted,
+                SkippedUpserts: upsertLoad.Skipped,
+                RejectedUpserts: upsertLoad.Rejected,
+                DeletedDocuments: deletedDocuments,
+                PublishedSegments: publishedSegments.Count,
+                SubmittedBytes: upsertLoad.SubmittedBytes,
+                ContentBytes: upsertLoad.AcceptedBytes,
+                SkippedBytes: upsertLoad.SkippedBytes,
+                RejectedBytes: upsertLoad.RejectedBytes,
+                RejectedDocuments: upsertLoad.RejectedDocuments,
+                ElapsedMilliseconds: watch.ElapsedMilliseconds);
+            var commitMetadata = options.CommitMetadataProvider is null
+                ? existingManifest.CommitMetadata
+                : options.CommitMetadataProvider(pendingStats).ToArray();
+            if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
+            }
+
+            var contentChanged = !hadManifest ||
                 publishedSegments.Count > 0 ||
-                liveDocumentKeys.Count > 0 ||
-                requiresManifestMigration)
+                liveDocumentKeys.Count > 0;
+            var commitMetadataChanged = !commitMetadata.AsSpan().SequenceEqual(existingManifest.CommitMetadata);
+            if (contentChanged || requiresManifestMigration || commitMetadataChanged)
             {
                 var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
                 var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
 
-                // A rejected replacement never became durable, so keep the prior
-                // searchable version until a valid upsert or explicit deletion arrives.
+                // Retire prior versions replaced or removed by this update.
                 foreach (var path in affectedPaths)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -869,7 +934,12 @@ public sealed class Sift : ISift
 
                 newSegments.AddRange(publishedSegments);
 
-                var manifest = new CorpusManifest(existingManifest.CorpusId, existingManifest.Generation + 1UL, newSegments);
+                var manifest = new CorpusManifest(
+                    existingManifest.CorpusId,
+                    existingManifest.ContentRevision + (contentChanged ? 1UL : 0UL),
+                    existingManifest.Generation + 1UL,
+                    commitMetadata.ToArray(),
+                    newSegments);
                 ResetValidationStats();
                 _storage.PublishManifest(manifest);
                 ResetValidationStats();
@@ -904,6 +974,7 @@ public sealed class Sift : ISift
         {
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
         }
+
     }
 
     public Task<CompactStats> Compact(CompactOptions options)
@@ -994,7 +1065,12 @@ public sealed class Sift : ISift
                 mergedSegments[retainedSegments.Length + i] = newSegments[i];
             }
 
-            var newManifest = new CorpusManifest(manifest.CorpusId, manifest.Generation + 1UL, mergedSegments);
+            var newManifest = new CorpusManifest(
+                manifest.CorpusId,
+                manifest.ContentRevision,
+                manifest.Generation + 1UL,
+                [.. manifest.CommitMetadata],
+                mergedSegments);
             ResetValidationStats();
             _storage.PublishManifest(newManifest);
             ResetValidationStats();
@@ -1275,6 +1351,14 @@ public sealed class Sift : ISift
         if (!Enum.IsDefined(options.RejectedUpsertPolicy))
         {
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
+        }
+
+        if (options.MaxCommitMetadataBytes < 0 ||
+            options.MaxCommitMetadataBytes > SegmentFormat.MaximumCommitMetadataBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"MaxCommitMetadataBytes must be between zero and {SegmentFormat.MaximumCommitMetadataBytes}.");
         }
     }
 

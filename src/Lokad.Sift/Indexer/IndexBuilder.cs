@@ -27,6 +27,7 @@ internal sealed class IndexBuilder
 
     public BuildStats Build(
         IDocumentSource source,
+        BuildOptions options,
         bool discardCorruptState,
         CancellationToken cancellationToken)
     {
@@ -42,11 +43,13 @@ internal sealed class IndexBuilder
                 preparePartition,
                 publishPartition),
             discardCorruptState,
+            options,
             cancellationToken);
     }
 
     public BuildStats Build(
         IAsyncEnumerable<SubmittedDocument> source,
+        BuildOptions options,
         bool discardCorruptState,
         CancellationToken cancellationToken)
     {
@@ -62,12 +65,14 @@ internal sealed class IndexBuilder
                 preparePartition,
                 publishPartition),
             discardCorruptState,
+            options,
             cancellationToken);
     }
 
     private BuildStats BuildCore(
         BuildDocumentStreamer streamDocuments,
         bool discardCorruptState,
+        BuildOptions options,
         CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
@@ -75,7 +80,7 @@ internal sealed class IndexBuilder
         _storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
 
         var existing = _storage.HasManifest ? _storage.ReadManifest() : null;
-        var corpusId = existing?.CorpusId ?? Guid.NewGuid();
+        var corpusId = Guid.NewGuid();
         var generation = (existing?.Generation ?? 0UL) + 1UL;
         var segmentSeed = generation ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var entries = new List<SegmentManifestEntry>();
@@ -96,7 +101,29 @@ internal sealed class IndexBuilder
                         cancellationToken));
                 });
 
-            _storage.PublishManifest(new CorpusManifest(corpusId, generation, entries));
+            var pendingStats = new BuildStats(
+                SubmittedDocuments: load.Submitted,
+                IndexedDocuments: load.Accepted,
+                RejectedDocuments: load.Rejected,
+                SegmentCount: entries.Count,
+                SubmittedBytes: load.SubmittedBytes,
+                ContentBytes: load.AcceptedBytes,
+                RejectedBytes: load.RejectedBytes,
+                ElapsedMilliseconds: watch.ElapsedMilliseconds,
+                PeakManagedBytes: 0);
+            var commitMetadata = options.CommitMetadataProvider?.Invoke(pendingStats).ToArray() ?? [];
+            if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
+            }
+
+            _storage.PublishManifest(new CorpusManifest(
+                CorpusId: corpusId,
+                ContentRevision: 1,
+                Generation: generation,
+                CommitMetadata: commitMetadata,
+                Segments: entries));
         }
         catch
         {

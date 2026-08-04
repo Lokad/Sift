@@ -361,7 +361,12 @@ public sealed class InMemorySiftStorage : ISiftStorage
             segments[i] = segment with { DeadOrdinals = [.. segment.DeadOrdinals] };
         }
 
-        return new CorpusManifest(manifest.CorpusId, manifest.Generation, segments);
+        return new CorpusManifest(
+            manifest.CorpusId,
+            manifest.ContentRevision,
+            manifest.Generation,
+            [.. manifest.CommitMetadata],
+            segments);
     }
 
     private sealed class Releaser(object syncRoot) : IDisposable

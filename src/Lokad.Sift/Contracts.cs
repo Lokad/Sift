@@ -245,6 +245,15 @@ public sealed class SiftOptions
     public int MaxPathFilterCharacters { get; init; } = 16 * 1024;
     // Prevents consumers from checkpointing an event whose replacement was not indexed.
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; } = RejectedUpsertPolicy.FailUpdate;
+    // Bounds opaque consumer state committed atomically with a manifest.
+    public int MaxCommitMetadataBytes { get; init; } = 64 * 1024;
+}
+
+public sealed record BuildOptions
+{
+    // Invoked after ingestion succeeds and before the manifest is published.
+    // The returned bytes are copied into the new manifest.
+    public Func<BuildStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
 public sealed record UpdateOptions
@@ -260,6 +269,9 @@ public sealed record UpdateOptions
     }
 
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
+    // Invoked after ingestion succeeds and before the manifest is published.
+    // The returned bytes are copied into the new manifest.
+    public Func<UpdateStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
 public sealed class RejectedUpsertException : Exception
@@ -463,9 +475,16 @@ public readonly record struct ActivityStats(
     SiftActivity CurrentActivity);
 
 public readonly record struct IndexIdentity(
-    // Distinguishes replacement corpora that happen to reuse a generation number.
+    // Changes whenever a full build replaces the logical corpus.
     Guid CorpusId,
-    ulong Generation);
+    // Changes only when the visible document set or content changes.
+    ulong ContentRevision,
+    // Changes whenever a manifest is published, including compaction and metadata-only commits.
+    ulong StorageGeneration);
+
+public readonly record struct IndexState(
+    IndexIdentity Identity,
+    ReadOnlyMemory<byte> CommitMetadata);
 
 public enum IndexValidationState
 {
@@ -618,6 +637,7 @@ public interface ISift : IDisposable
 {
     bool RequiresRebuild { get; }
     IndexIdentity GetIndexIdentity();
+    IndexState GetIndexState();
     IIndexSnapshot OpenSnapshot();
     IIndexSnapshot OpenSnapshot(SearchOptions options);
     IOverlaySnapshot OpenOverlaySnapshot();
@@ -632,8 +652,18 @@ public interface ISift : IDisposable
     Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
     Task<BuildStats> Build(IDocumentSource documents);
     Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
+    Task<BuildStats> Build(IDocumentSource documents, BuildOptions options);
+    Task<BuildStats> Build(
+        IDocumentSource documents,
+        BuildOptions options,
+        CancellationToken cancellationToken);
     Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents);
     Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents, CancellationToken cancellationToken);
+    Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents, BuildOptions options);
+    Task<BuildStats> Build(
+        IAsyncEnumerable<SubmittedDocument> documents,
+        BuildOptions options,
+        CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, UpdateOptions options);
