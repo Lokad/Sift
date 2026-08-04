@@ -46,9 +46,10 @@ public enum DocumentRejectionReason
 
 public enum DocumentContentLifetime
 {
-    // The source may reuse or mutate the buffer on its next TryReadNext call.
+    /// <summary>The source may reuse or mutate the buffer on its next read.</summary>
     UntilNextRead,
-    // The bytes remain immutable until the Build, Update, or Apply operation completes.
+
+    /// <summary>The bytes remain immutable until the build, update, or apply operation completes.</summary>
     UntilOperationCompletes
 }
 
@@ -186,6 +187,7 @@ public readonly record struct DocumentKey
         _path = DocumentPath.Normalize(path);
     }
 
+    /// <summary>Gets the normalized logical path.</summary>
     public string Path => _path ?? throw new InvalidOperationException("The document key is uninitialized.");
 }
 
@@ -224,9 +226,14 @@ public readonly record struct SubmittedDocument
         ContentLifetime = contentLifetime;
     }
 
+    /// <summary>Gets the normalized logical path.</summary>
     public string Path => _path ?? throw new InvalidOperationException("The submitted document is uninitialized.");
+
+    /// <summary>Gets the UTF-8 document body.</summary>
     public ReadOnlyMemory<byte> Content { get; }
     public DateTimeOffset? LastModifiedUtc { get; }
+
+    /// <summary>Gets how long the source guarantees that <see cref="Content"/> remains immutable.</summary>
     public DocumentContentLifetime ContentLifetime { get; }
 }
 
@@ -1054,6 +1061,11 @@ public readonly record struct DocumentVisitStats(
 
 public interface IDocumentSource
 {
+    /// <summary>Reads the next document, or returns <see langword="false"/> at the end of the source.</summary>
+    /// <remarks>
+    ///     The returned content must remain immutable for the lifetime declared by
+    ///     <see cref="SubmittedDocument.ContentLifetime"/>.
+    /// </remarks>
     bool TryReadNext(out SubmittedDocument document);
 }
 
@@ -1063,12 +1075,18 @@ public interface IIndexSnapshot : IDisposable
     SearchPlan Explain(SearchQuery query, in PathFilter pathFilter);
     SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
+
+    /// <summary>Gets a document body owned by this snapshot.</summary>
+    /// <remarks>The returned memory remains valid until this snapshot is disposed.</remarks>
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
 }
 
 public interface IOverlaySnapshot : IIndexSnapshot
 {
+    /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
     Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
+
+    /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
     Task<UpdateStats> Apply(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
@@ -1099,16 +1117,24 @@ public interface ISift : IDisposable
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options,
         CancellationToken cancellationToken);
+
+    /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
     Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
+
+    /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
     Task<UpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken);
+
+    /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
     Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken);
+
+    /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
     Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions,

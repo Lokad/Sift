@@ -114,7 +114,7 @@ var upserts = new InMemoryDocumentSource(
         """))
 ]);
 
-ReadOnlySpan<DocumentKey> deletions =
+IReadOnlyList<DocumentKey> deletions =
 [
     new DocumentKey("src/app/program.cs")
 ];
@@ -163,6 +163,9 @@ Document bodies are conservatively treated as borrowed until the next
 operation can set `ContentLifetime` to
 `DocumentContentLifetime.UntilOperationCompletes`; Sift then avoids copying the
 body before unchanged-update detection and segment publication.
+Deletion lists passed to `Update` or `Apply` are read asynchronously without an
+eager copy; keep the list and its entries unchanged until the returned task
+completes.
 
 For transient overlay workspaces, open an overlay snapshot on top of the shared base index:
 

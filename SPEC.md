@@ -761,10 +761,10 @@ The primary consumer surface is the root `Lokad.Sift` namespace. In addition, `L
 ```csharp
 public enum PatternMode { Literal, Regex }
 public enum CaseMode { Sensitive, Insensitive, Smart }
-public enum TimeoutPolicy { Default, Throw, StopSearch }
+public enum TimeoutPolicy { StopSearch, Throw }
 public enum DocumentContentLifetime { UntilNextRead, UntilOperationCompletes }
 
-public readonly record struct SearchQuery
+public sealed record SearchQuery
 {
     public SearchQuery(string pattern)
         : this(pattern, PatternMode.Regex, CaseMode.Smart) { }
@@ -815,7 +815,7 @@ public readonly record struct SearchQuery
         MaxElapsedMilliseconds = maxElapsedMilliseconds;
     }
 
-    public string Pattern { get; init; }
+    public string Pattern { get; }
     public PatternMode PatternMode { get; init; }
     public CaseMode CaseMode { get; init; }
     public bool WholeWord { get; init; }
@@ -861,8 +861,17 @@ public readonly record struct RawHit(
     int StartLine,
     int EndLine);
 
-public readonly record struct DocumentKey(
-    string Path);
+public readonly record struct DocumentKey
+{
+    private readonly string? _path;
+
+    public DocumentKey(string path)
+    {
+        _path = DocumentPath.Normalize(path);
+    }
+
+    public string Path => _path ?? throw new InvalidOperationException("The document key is uninitialized.");
+}
 
 public readonly record struct SubmittedDocument
 {
@@ -891,15 +900,20 @@ public readonly record struct SubmittedDocument
         ContentLifetime = contentLifetime;
     }
 
-    public string Path { get; init; }
-    public ReadOnlyMemory<byte> Content { get; init; }
-    public DateTimeOffset? LastModifiedUtc { get; init; }
-    public DocumentContentLifetime ContentLifetime { get; init; }
+    public string Path { get; }
+    public ReadOnlyMemory<byte> Content { get; }
+    public DateTimeOffset? LastModifiedUtc { get; }
+    public DocumentContentLifetime ContentLifetime { get; }
 }
 
 public interface IHitCollector
 {
     bool OnHit(in RawHit hit);
+}
+
+public interface IDocumentKeyCollector
+{
+    bool OnDocument(DocumentKey key);
 }
 
 public interface IDocumentSource
@@ -909,43 +923,67 @@ public interface IDocumentSource
 
 public interface IIndexSnapshot : IDisposable
 {
-    SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter);
-    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector);
-    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
+    DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
+    SearchPlan Explain(SearchQuery query, in PathFilter pathFilter);
+    SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
 }
 
 public interface IOverlaySnapshot : IIndexSnapshot
 {
-    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
-    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyTo(ISift target);
-    Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken);
+    Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Apply(
+        IDocumentSource upserts,
+        IReadOnlyList<DocumentKey> deletions,
+        OverlayApplyOptions options,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
 public interface ISift : IDisposable
 {
     bool RequiresRebuild { get; }
-    IIndexSnapshot OpenSnapshot();
+    IndexIdentity GetIndexIdentity();
+    IndexState GetIndexState();
     IIndexSnapshot OpenSnapshot(SearchOptions options);
-    IOverlaySnapshot OpenOverlaySnapshot();
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
     ActivityStats GetActivityStats();
     IndexValidationStats GetValidationStats();
     MaintenanceStats GetMaintenanceStats();
     StorageStats GetStorageStats();
     bool ShouldCompact(CompactOptions options);
-    Task<IndexValidationStats> Validate();
     Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
-    Task<BuildStats> Build(IDocumentSource documents);
-    Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
-    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
-    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<CompactStats> Compact(CompactOptions options);
+    Task<BuildStats> Build(IDocumentSource documents, BuildOptions options, CancellationToken cancellationToken);
+    Task<BuildStats> Build(
+        IAsyncEnumerable<SubmittedDocument> documents,
+        BuildOptions options,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> Update(
+        IDocumentSource upserts,
+        IReadOnlyList<DocumentKey> deletions,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> Update(
+        IDocumentSource upserts,
+        IReadOnlyList<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        IReadOnlyList<DocumentKey> deletions,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        IReadOnlyList<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken);
     Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken);
 }
 ```
+
+Convenience overloads that supply default options or cancellation tokens are
+extension methods in `SiftContractExtensions`; the interfaces keep their core
+contracts explicit.
 
 Memory ownership rule:
 
@@ -953,6 +991,7 @@ Memory ownership rule:
 * for `UntilNextRead`, Sift fully consumes or copies `Content` before calling `TryReadNext` again, and the source may reuse the buffer in that next call
 * for `UntilOperationCompletes`, the source keeps `Content` immutable until the enclosing build, update, or apply task completes
 * the core library must not retain caller-owned buffers beyond the declared lifetime
+* deletion lists passed to update or apply remain unchanged until the returned task completes
 
 API rules:
 
