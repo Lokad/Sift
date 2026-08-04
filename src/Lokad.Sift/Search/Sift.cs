@@ -22,13 +22,11 @@ public sealed class Sift : ISift
     private readonly IndexBuilder _builder;
     private readonly SiftOptions _options;
     private readonly IDisposable? _retainedIndexingWorkspaceLease;
-    private readonly CancellationTokenSource _writerCancellation = new();
-    private readonly ManualResetEventSlim _writersIdle = new(initialState: true);
+    private readonly MutationCoordinator _mutations = new();
     private readonly CancellationTokenSource _reclamationCancellation = new();
     private readonly ManualResetEventSlim _reclamationIdle = new(initialState: true);
     private readonly CancellationTokenSource _validationCancellation = new();
     private readonly ManualResetEventSlim _validationsIdle = new(initialState: true);
-    private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private readonly SemaphoreSlim _validationGate = new(1, 1);
     private readonly ConcurrentDictionary<LegacyMaintenanceKey, long> _legacyDeadContentBytes = new();
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
@@ -45,9 +43,7 @@ public sealed class Sift : ISift
         ValidatedBytes: 0,
         ElapsedMilliseconds: 0,
         Failure: null);
-    private int _activeWriters;
     private int _activeValidations;
-    private int _currentActivity;
     private int _reclamationRequests;
     private int _reclamationWorkerActive;
     private int _disposed;
@@ -200,23 +196,8 @@ public sealed class Sift : ISift
         Func<CancellationToken, ValueTask<TResult>> mutation,
         CancellationToken cancellationToken)
     {
-        using var request = BeginMutationRequest();
-        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            _writerCancellation.Token);
-        await _mutationGate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
-        try
-        {
-            using var activityScope = BeginActivity(activity);
-            using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
-            return await Task.Run(
-                async () => await mutation(operationCancellation.Token).ConfigureAwait(false),
-                CancellationToken.None).ConfigureAwait(false);
-        }
-        finally
-        {
-            _mutationGate.Release();
-        }
+        ThrowIfDisposed();
+        return await _mutations.Run(activity, mutation, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<BuildStats> BuildCore(
@@ -249,9 +230,7 @@ public sealed class Sift : ISift
     public ActivityStats GetActivityStats()
     {
         ThrowIfDisposed();
-        var isBusy = Volatile.Read(ref _activeWriters) > 0;
-        var currentActivity = (SiftActivity)Volatile.Read(ref _currentActivity);
-        return new ActivityStats(isBusy, isBusy ? currentActivity : SiftActivity.Idle);
+        return _mutations.GetActivityStats();
     }
 
     public IndexValidationStats GetValidationStats()
@@ -1062,11 +1041,11 @@ public sealed class Sift : ISift
             }
 
             Volatile.Write(ref _disposed, 1);
-            _writerCancellation.Cancel();
             _validationCancellation.Cancel();
         }
 
-        _writersIdle.Wait();
+        _mutations.Stop();
+        _mutations.WaitForIdle();
         _validationsIdle.Wait();
         lock (_reclamationSync)
         {
@@ -1075,11 +1054,9 @@ public sealed class Sift : ISift
 
         _reclamationIdle.Wait();
         _retainedIndexingWorkspaceLease?.Dispose();
-        _writerCancellation.Dispose();
-        _writersIdle.Dispose();
+        _mutations.Dispose();
         _validationCancellation.Dispose();
         _validationsIdle.Dispose();
-        _mutationGate.Dispose();
         _validationGate.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
@@ -1314,26 +1291,6 @@ public sealed class Sift : ISift
         }
     }
 
-    private IDisposable BeginMutationRequest()
-    {
-        lock (_activitySync)
-        {
-            ThrowIfDisposed();
-            if (++_activeWriters == 1)
-            {
-                _writersIdle.Reset();
-            }
-        }
-
-        return new MutationRequestScope(this);
-    }
-
-    private IDisposable BeginActivity(SiftActivity activity)
-    {
-        Volatile.Write(ref _currentActivity, (int)activity);
-        return new ActivityScope(this);
-    }
-
     private IDisposable BeginValidation()
     {
         lock (_activitySync)
@@ -1535,49 +1492,6 @@ public sealed class Sift : ISift
     private static bool IsIndexCorruption(Exception exception)
     {
         return exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException;
-    }
-
-    private sealed class ActivityScope : IDisposable
-    {
-        private Sift? _owner;
-
-        public ActivityScope(Sift owner)
-        {
-            _owner = owner;
-        }
-
-        public void Dispose()
-        {
-            var owner = Interlocked.Exchange(ref _owner, null);
-            if (owner is null)
-            {
-                return;
-            }
-
-            Volatile.Write(ref owner._currentActivity, (int)SiftActivity.Idle);
-        }
-    }
-
-    private sealed class MutationRequestScope(Sift owner) : IDisposable
-    {
-        private Sift? _owner = owner;
-
-        public void Dispose()
-        {
-            var currentOwner = Interlocked.Exchange(ref _owner, null);
-            if (currentOwner is null)
-            {
-                return;
-            }
-
-            lock (currentOwner._activitySync)
-            {
-                if (--currentOwner._activeWriters == 0)
-                {
-                    currentOwner._writersIdle.Set();
-                }
-            }
-        }
     }
 
     private sealed class ManagedMemoryPeakMeasurement : IDisposable
