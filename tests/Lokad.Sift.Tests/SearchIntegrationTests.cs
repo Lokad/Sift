@@ -1629,6 +1629,79 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task ExplainAggregatesDifferentSegmentStrategiesWithoutInventingAGlobalPlan()
+    {
+        var options = new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1,
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0,
+            DirectScanCandidateDensityThreshold = 0.5
+        };
+        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive);
+
+        using var matchingIndex = SiftIndex.CreateInMemory(options);
+        await matchingIndex.Build(new InMemoryDocumentSource([("src/match.txt", "needle\n")]));
+        using var matchingSnapshot = matchingIndex.OpenSnapshot();
+        var matchingPlan = matchingSnapshot.Explain(query, new PathFilter());
+
+        using var missingIndex = SiftIndex.CreateInMemory(options);
+        await missingIndex.Build(new InMemoryDocumentSource([("src/miss.txt", "unrelated\n")]));
+        using var missingSnapshot = missingIndex.OpenSnapshot();
+        var missingPlan = missingSnapshot.Explain(query, new PathFilter());
+
+        Assert.NotEqual(matchingPlan.CandidateKind, missingPlan.CandidateKind);
+
+        using var combinedIndex = SiftIndex.CreateInMemory(options);
+        await combinedIndex.Build(new InMemoryDocumentSource([
+            ("src/match.txt", "needle\n"),
+            ("src/miss.txt", "unrelated\n")
+        ]));
+        using var combinedSnapshot = combinedIndex.OpenSnapshot();
+        var combinedPlan = combinedSnapshot.Explain(query, new PathFilter());
+
+        Assert.Equal(2, combinedPlan.SegmentCount);
+        Assert.Equal(SearchCandidateKind.Mixed, combinedPlan.CandidateKind);
+        Assert.Equal(
+            matchingPlan.EstimatedCost + missingPlan.EstimatedCost,
+            combinedPlan.EstimatedCost,
+            precision: 10);
+        Assert.Equal(
+            matchingPlan.EstimatedPathFilterCost + missingPlan.EstimatedPathFilterCost,
+            combinedPlan.EstimatedPathFilterCost,
+            precision: 10);
+        Assert.Contains(combinedPlan.PlannerAlternatives, static alternative =>
+            alternative.CandidateKind == SearchCandidateKind.DirectScan &&
+            alternative.SegmentCount == 2 &&
+            alternative.ScopeDocumentCount == 2);
+        Assert.True(combinedPlan.RunnerUp is null || combinedPlan.RunnerUp.SegmentCount == 2);
+    }
+
+    [Fact]
+    public async Task OverlayExplainPreservesDifferentBaseAndOverlayStrategies()
+    {
+        var options = new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1,
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0,
+            DirectScanCandidateDensityThreshold = 0.5
+        };
+        using var index = SiftIndex.CreateInMemory(options);
+        await index.Build(new InMemoryDocumentSource([("src/match.txt", "needle\n")]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Apply(new InMemoryDocumentSource([("src/miss.txt", "unrelated\n")]), []);
+
+        var plan = overlay.Explain(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter());
+
+        Assert.Equal(2, plan.SegmentCount);
+        Assert.Equal(SearchCandidateKind.Mixed, plan.CandidateKind);
+        Assert.True(plan.RunnerUp is null || plan.RunnerUp.SegmentCount == 2);
+    }
+
+    [Fact]
     public async Task DefaultPlannerUsesIndexForMailboxShapedSegment()
     {
         var filler = new string('x', 4096);

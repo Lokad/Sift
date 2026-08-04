@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using Lokad.Sift;
 using Lokad.Sift.Indexer;
@@ -243,20 +244,48 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
 
         var overlayPlan = _overlaySnapshot.Explain(query, pathFilter);
-        var dominantPlan = basePlan.ScopeByteCount >= overlayPlan.ScopeByteCount ? basePlan : overlayPlan;
+        var segmentCount = basePlan.SegmentCount + overlayPlan.SegmentCount;
+        var candidateKind = MergeStrategy(
+            basePlan.CandidateKind,
+            basePlan.SegmentCount,
+            overlayPlan.CandidateKind,
+            overlayPlan.SegmentCount,
+            SearchCandidateKind.Mixed);
+        var candidateCombination = MergeStrategy(
+            basePlan.CandidateCombination,
+            basePlan.SegmentCount,
+            overlayPlan.CandidateCombination,
+            overlayPlan.SegmentCount,
+            SearchCandidateCombination.Mixed);
+        var verifierKind = MergeStrategy(
+            basePlan.VerifierKind,
+            basePlan.SegmentCount,
+            overlayPlan.VerifierKind,
+            overlayPlan.SegmentCount,
+            SearchVerifierKind.Mixed);
+        var estimatedCost = basePlan.EstimatedCost + overlayPlan.EstimatedCost;
+        var plannerAlternatives = MergePlannerAlternatives(
+            basePlan.PlannerAlternatives,
+            overlayPlan.PlannerAlternatives);
+        var runnerUp = plannerAlternatives.FirstOrDefault(alternative =>
+            alternative.SegmentCount == segmentCount &&
+            (alternative.CandidateKind != candidateKind ||
+             alternative.CandidateCombination != candidateCombination ||
+             alternative.VerifierKind != verifierKind));
 
         return new SearchPlan(
-            dominantPlan.PatternKind,
-            dominantPlan.ResolvedCaseMode,
+            basePlan.PatternKind,
+            basePlan.ResolvedCaseMode,
             basePlan.ScopeDocumentCount + overlayPlan.ScopeDocumentCount,
             basePlan.ScopeByteCount + overlayPlan.ScopeByteCount,
+            segmentCount,
             MergeStrings(basePlan.MandatoryFragments, overlayPlan.MandatoryFragments),
             MergeStrings(basePlan.AdvisorySeeds, overlayPlan.AdvisorySeeds),
             MergeSelectedNgrams(basePlan.SelectedNgrams, overlayPlan.SelectedNgrams),
-            dominantPlan.UsesPathPrefixFilter,
-            dominantPlan.UsesPathRegexFilter,
-            dominantPlan.UsesIncludeGlobs,
-            dominantPlan.UsesExcludeGlobs,
+            basePlan.UsesPathPrefixFilter,
+            basePlan.UsesPathRegexFilter,
+            basePlan.UsesIncludeGlobs,
+            basePlan.UsesExcludeGlobs,
             basePlan.UsesPathIndex || overlayPlan.UsesPathIndex,
             basePlan.UsesIndex || overlayPlan.UsesIndex,
             basePlan.CanUseLiteralVerifier && overlayPlan.CanUseLiteralVerifier,
@@ -267,14 +296,63 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             basePlan.EstimatedDirectScanCost + overlayPlan.EstimatedDirectScanCost,
             SumNullable(basePlan.EstimatedIndexedCost, overlayPlan.EstimatedIndexedCost),
             basePlan.EstimatedCandidateDocuments + overlayPlan.EstimatedCandidateDocuments,
-            basePlan.EstimatedCost + overlayPlan.EstimatedCost,
-            dominantPlan.CandidateKind,
-            dominantPlan.CandidateCombination,
-            dominantPlan.VerifierKind,
-            dominantPlan.RunnerUp,
-            dominantPlan.RunnerUpEstimatedCostDelta,
-            dominantPlan.TimeoutPolicy,
-            dominantPlan.PlannerAlternatives);
+            estimatedCost,
+            candidateKind,
+            candidateCombination,
+            verifierKind,
+            runnerUp,
+            runnerUp is null ? null : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
+            basePlan.TimeoutPolicy,
+            plannerAlternatives);
+
+        static T MergeStrategy<T>(T left, int leftSegments, T right, int rightSegments, T mixed)
+            where T : struct, Enum
+        {
+            if (leftSegments == 0)
+            {
+                return right;
+            }
+
+            if (rightSegments == 0)
+            {
+                return left;
+            }
+
+            return EqualityComparer<T>.Default.Equals(left, right) ? left : mixed;
+        }
+
+        static PlannerAlternative[] MergePlannerAlternatives(
+            IReadOnlyList<PlannerAlternative> left,
+            IReadOnlyList<PlannerAlternative> right)
+        {
+            var sums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
+            Add(left);
+            Add(right);
+            return sums
+                .Select(static pair => pair.Value.ToPlannerAlternative(
+                    pair.Key.CandidateKind,
+                    pair.Key.CandidateCombination,
+                    pair.Key.VerifierKind,
+                    pair.Key.UsesIndex))
+                .OrderBy(static alternative => alternative.EstimatedCost)
+                .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
+                .ToArray();
+
+            void Add(IReadOnlyList<PlannerAlternative> alternatives)
+            {
+                for (var i = 0; i < alternatives.Count; i++)
+                {
+                    var alternative = alternatives[i];
+                    var key = (
+                        alternative.CandidateKind,
+                        alternative.CandidateCombination,
+                        alternative.VerifierKind,
+                        alternative.UsesIndex);
+                    ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(sums, key, out _);
+                    accumulator.Add(alternative);
+                }
+            }
+        }
     }
 
     public SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
@@ -559,27 +637,26 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return [.. left];
         }
 
-        var merged = new List<SelectedNgram>(left.Count + right.Count);
-        var seen = new HashSet<(string Text, int ByteLength)>();
+        var merged = new Dictionary<(string Text, int ByteLength), int>();
         for (var i = 0; i < left.Count; i++)
         {
             var key = (left[i].Text, left[i].ByteLength);
-            if (seen.Add(key))
-            {
-                merged.Add(left[i]);
-            }
+            merged.TryGetValue(key, out var documentFrequency);
+            merged[key] = checked(documentFrequency + left[i].DocumentFrequency);
         }
 
         for (var i = 0; i < right.Count; i++)
         {
             var key = (right[i].Text, right[i].ByteLength);
-            if (seen.Add(key))
-            {
-                merged.Add(right[i]);
-            }
+            merged.TryGetValue(key, out var documentFrequency);
+            merged[key] = checked(documentFrequency + right[i].DocumentFrequency);
         }
 
-        return [.. merged];
+        return merged
+            .Select(static pair => new SelectedNgram(pair.Key.Text, pair.Key.ByteLength, pair.Value))
+            .OrderBy(static gram => gram.ByteLength)
+            .ThenBy(static gram => gram.Text, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static double? SumNullable(double? left, double? right)

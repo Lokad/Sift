@@ -384,7 +384,8 @@ public enum SearchCandidateKind
     DirectScan,
     Index,
     BigramIndex,
-    TrigramIndex
+    TrigramIndex,
+    Mixed
 }
 
 public enum SearchCandidateCombination
@@ -392,7 +393,8 @@ public enum SearchCandidateCombination
     None,
     Intersection,
     Union,
-    BranchUnion
+    BranchUnion,
+    Mixed
 }
 
 public enum SearchVerifierKind
@@ -400,7 +402,8 @@ public enum SearchVerifierKind
     Literal,
     Utf8Regex,
     Utf8RegexWithUnicodeFallback,
-    RegexFallback
+    RegexFallback,
+    Mixed
 }
 
 public sealed class PlannerAlternative
@@ -414,7 +417,9 @@ public sealed class PlannerAlternative
         double? estimatedIndexedCost,
         double estimatedCandidateDocuments,
         double estimatedCost,
-        int segmentCount)
+        int segmentCount,
+        int scopeDocumentCount,
+        long scopeByteCount)
     {
         CandidateKind = candidateKind;
         CandidateCombination = candidateCombination;
@@ -425,6 +430,8 @@ public sealed class PlannerAlternative
         EstimatedCandidateDocuments = estimatedCandidateDocuments;
         EstimatedCost = estimatedCost;
         SegmentCount = segmentCount;
+        ScopeDocumentCount = scopeDocumentCount;
+        ScopeByteCount = scopeByteCount;
     }
 
     public SearchCandidateKind CandidateKind { get; }
@@ -436,6 +443,8 @@ public sealed class PlannerAlternative
     public double EstimatedCandidateDocuments { get; }
     public double EstimatedCost { get; }
     public int SegmentCount { get; }
+    public int ScopeDocumentCount { get; }
+    public long ScopeByteCount { get; }
 }
 
 public sealed class SearchPlan
@@ -445,6 +454,7 @@ public sealed class SearchPlan
         CaseMode resolvedCaseMode,
         int scopeDocumentCount,
         long scopeByteCount,
+        int segmentCount,
         IReadOnlyList<string> mandatoryFragments,
         IReadOnlyList<string> advisorySeeds,
         IReadOnlyList<SelectedNgram> selectedNgrams,
@@ -475,6 +485,7 @@ public sealed class SearchPlan
         ResolvedCaseMode = resolvedCaseMode;
         ScopeDocumentCount = scopeDocumentCount;
         ScopeByteCount = scopeByteCount;
+        SegmentCount = segmentCount;
         MandatoryFragments = PublicResultCollection.Freeze(mandatoryFragments);
         AdvisorySeeds = PublicResultCollection.Freeze(advisorySeeds);
         SelectedNgrams = PublicResultCollection.Freeze(selectedNgrams);
@@ -506,6 +517,7 @@ public sealed class SearchPlan
     public CaseMode ResolvedCaseMode { get; }
     public int ScopeDocumentCount { get; }
     public long ScopeByteCount { get; }
+    public int SegmentCount { get; }
     public IReadOnlyList<string> MandatoryFragments { get; }
     public IReadOnlyList<string> AdvisorySeeds { get; }
     public IReadOnlyList<SelectedNgram> SelectedNgrams { get; }

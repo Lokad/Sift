@@ -146,12 +146,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var advisorySeeds = preparedQuery.AdvisorySeeds;
         var scopeDocuments = 0;
         long scopeBytes = 0;
-        var selected = new List<SelectedNgram>(4);
+        var selected = new Dictionary<(string Text, int ByteLength), int>();
         var usesIndex = false;
         var usesUnicodeFallback = false;
-        SearchPlanCandidate? explainedPlan = null;
-        long explainedScopeBytes = -1;
-        var explainedPathCost = 0d;
+        SearchCandidateKind? candidateKind = null;
+        SearchCandidateCombination? candidateCombination = null;
+        SearchVerifierKind? verifierKind = null;
+        var estimatedPathFilterCost = 0d;
+        var estimatedDirectScanCost = 0d;
+        double? estimatedIndexedCost = null;
+        var estimatedCandidateDocuments = 0d;
+        var estimatedCost = 0d;
+        var segmentCount = 0;
         var alternativeSums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
 
         foreach (var entry in _segments)
@@ -168,33 +174,39 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 CancellationToken.None);
             scopeDocuments += segmentPlan.Scope.Count;
             scopeBytes += segmentPlan.Scope.Bytes;
+            segmentCount++;
+            var chosenPlan = segmentPlan.ContentPlan.ChosenPlan;
             usesUnicodeFallback |=
-                segmentPlan.ContentPlan.ChosenPlan.VerifierKind ==
+                chosenPlan.VerifierKind ==
                 SearchVerifierKind.Utf8RegexWithUnicodeFallback;
-            if (explainedPlan is null || segmentPlan.Scope.Bytes > explainedScopeBytes)
+            usesIndex |= chosenPlan.CandidatePlan.UsesIndex;
+            candidateKind = Merge(candidateKind, chosenPlan.CandidateKind, SearchCandidateKind.Mixed);
+            candidateCombination = Merge(
+                candidateCombination,
+                chosenPlan.CandidateCombination,
+                SearchCandidateCombination.Mixed);
+            verifierKind = Merge(verifierKind, chosenPlan.VerifierKind, SearchVerifierKind.Mixed);
+            estimatedPathFilterCost += segmentPlan.EstimatedPathFilterCost;
+            estimatedDirectScanCost += chosenPlan.EstimatedDirectScanCost;
+            if (chosenPlan.EstimatedIndexedCost is double indexedCost)
             {
-                explainedPlan = segmentPlan.ContentPlan.ChosenPlan;
-                explainedScopeBytes = segmentPlan.Scope.Bytes;
-                explainedPathCost = segmentPlan.EstimatedPathFilterCost;
+                estimatedIndexedCost = (estimatedIndexedCost ?? 0d) + indexedCost;
             }
 
-            if (segmentPlan.ContentPlan.ChosenPlan.CandidatePlan.UsesIndex)
+            estimatedCandidateDocuments += chosenPlan.EstimatedCandidateDocuments;
+            estimatedCost += chosenPlan.EstimatedCost;
+            foreach (var gram in chosenPlan.SelectedNgrams)
             {
-                usesIndex = true;
-                if (selected.Count == 0)
-                {
-                    foreach (var gram in segmentPlan.ContentPlan.ChosenPlan.SelectedNgrams)
-                    {
-                        selected.Add(gram);
-                    }
-                }
+                var key = (gram.Text, gram.ByteLength);
+                selected.TryGetValue(key, out var documentFrequency);
+                selected[key] = checked(documentFrequency + gram.DocumentFrequency);
             }
 
             foreach (var alternative in segmentPlan.ContentPlan.Alternatives)
             {
                 var key = (alternative.CandidateKind, alternative.CandidateCombination, alternative.VerifierKind, alternative.CandidatePlan.UsesIndex);
                 ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(alternativeSums, key, out _);
-                accumulator.Add(alternative);
+                accumulator.Add(alternative, segmentPlan.Scope);
             }
         }
 
@@ -205,13 +217,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             RegexExecutionPlanner.NeedsUnicodeDecode(query, mandatoryFragments, resolvedCaseMode, regexPlan) ||
             usesUnicodeFallback;
         var mayRequireWholeDocumentVerification = query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral || query.WholeLine || query.Multiline;
-        var selectedSpan = CollectionsMarshal.AsSpan(selected);
-        var candidateKind = explainedPlan?.CandidateKind ?? SearchPlanner.GetCandidateKind(selectedSpan, usesIndex);
-        var candidateCombination = explainedPlan?.CandidateCombination ??
-            SearchPlanner.GetCandidateCombination(selectedSpan, usesIndex, unionCandidates: false, branchUnion: false);
-        var verifierKind = usesUnicodeFallback
-            ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
-            : explainedPlan?.VerifierKind ?? SearchPlanKinds.GetVerifierKind(query, regexPlan);
+        var selectedNgrams = selected
+            .Select(static pair => new SelectedNgram(
+                pair.Key.Text,
+                pair.Key.ByteLength,
+                pair.Value))
+            .OrderBy(static gram => gram.ByteLength)
+            .ThenBy(static gram => gram.Text, StringComparer.Ordinal)
+            .ToArray();
+        var resolvedCandidateKind = candidateKind ?? SearchPlanner.GetCandidateKind(selectedNgrams, usesIndex);
+        var resolvedCandidateCombination = candidateCombination ??
+            SearchPlanner.GetCandidateCombination(selectedNgrams, usesIndex, unionCandidates: false, branchUnion: false);
+        var resolvedVerifierKind = verifierKind ?? SearchPlanKinds.GetVerifierKind(query, regexPlan);
         var plannerAlternatives = alternativeSums
             .Select(static pair => pair.Value.ToPlannerAlternative(pair.Key.CandidateKind, pair.Key.CandidateCombination, pair.Key.VerifierKind, pair.Key.UsesIndex))
             .OrderBy(static alternative => alternative.EstimatedCost)
@@ -219,18 +236,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             .ToArray();
         var runnerUp = plannerAlternatives
             .FirstOrDefault(alternative =>
-                alternative.CandidateKind != candidateKind ||
-                alternative.CandidateCombination != candidateCombination ||
-                alternative.VerifierKind != verifierKind);
+                alternative.SegmentCount == segmentCount &&
+                (alternative.CandidateKind != resolvedCandidateKind ||
+                 alternative.CandidateCombination != resolvedCandidateCombination ||
+                 alternative.VerifierKind != resolvedVerifierKind));
 
         return new SearchPlan(
             patternKind,
             resolvedCaseMode,
             scopeDocuments,
             scopeBytes,
+            segmentCount,
             mandatoryFragments,
             advisorySeeds,
-            [.. selected],
+            selectedNgrams,
             matcher.PathPrefix is not null,
             !string.IsNullOrWhiteSpace(pathFilter.PathRegex),
             pathFilter.IncludeGlobs is { Length: > 0 },
@@ -241,18 +260,26 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             canUseNonBacktracking,
             needsUnicodeDecode,
             mayRequireWholeDocumentVerification,
-            explainedPathCost,
-            explainedPlan?.EstimatedDirectScanCost ?? 0d,
-            explainedPlan?.EstimatedIndexedCost,
-            explainedPlan?.EstimatedCandidateDocuments ?? 0d,
-            explainedPlan?.EstimatedCost ?? 0d,
-            candidateKind,
-            candidateCombination,
-            verifierKind,
+            estimatedPathFilterCost,
+            estimatedDirectScanCost,
+            estimatedIndexedCost,
+            estimatedCandidateDocuments,
+            estimatedCost,
+            resolvedCandidateKind,
+            resolvedCandidateCombination,
+            resolvedVerifierKind,
             runnerUp,
-            runnerUp is null ? null : Math.Max(0d, runnerUp.EstimatedCost - (explainedPlan?.EstimatedCost ?? 0d)),
+            runnerUp is null ? null : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
             query.PatternMode == PatternMode.Regex ? query.TimeoutPolicy : TimeoutPolicy.StopSearch,
             plannerAlternatives);
+
+        static T Merge<T>(T? aggregate, T value, T mixed)
+            where T : struct, Enum
+        {
+            return aggregate is null || EqualityComparer<T>.Default.Equals(aggregate.Value, value)
+                ? value
+                : mixed;
+        }
     }
 
     public SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
@@ -2466,8 +2493,10 @@ internal struct PlannerAlternativeAccumulator
     public double EstimatedCandidateDocuments;
     public double EstimatedCost;
     public int SegmentCount;
+    public int ScopeDocumentCount;
+    public long ScopeByteCount;
 
-    public void Add(in SearchPlanCandidate plan)
+    public void Add(in SearchPlanCandidate plan, in SegmentScope scope)
     {
         EstimatedDirectScanCost += plan.EstimatedDirectScanCost;
         if (plan.EstimatedIndexedCost is double estimatedIndexedCost)
@@ -2478,6 +2507,23 @@ internal struct PlannerAlternativeAccumulator
         EstimatedCandidateDocuments += plan.EstimatedCandidateDocuments;
         EstimatedCost += plan.EstimatedCost;
         SegmentCount++;
+        ScopeDocumentCount += scope.Count;
+        ScopeByteCount += scope.Bytes;
+    }
+
+    public void Add(PlannerAlternative alternative)
+    {
+        EstimatedDirectScanCost += alternative.EstimatedDirectScanCost;
+        if (alternative.EstimatedIndexedCost is double estimatedIndexedCost)
+        {
+            EstimatedIndexedCost = (EstimatedIndexedCost ?? 0d) + estimatedIndexedCost;
+        }
+
+        EstimatedCandidateDocuments += alternative.EstimatedCandidateDocuments;
+        EstimatedCost += alternative.EstimatedCost;
+        SegmentCount += alternative.SegmentCount;
+        ScopeDocumentCount += alternative.ScopeDocumentCount;
+        ScopeByteCount += alternative.ScopeByteCount;
     }
 
     public PlannerAlternative ToPlannerAlternative(
@@ -2495,7 +2541,9 @@ internal struct PlannerAlternativeAccumulator
             EstimatedIndexedCost,
             EstimatedCandidateDocuments,
             EstimatedCost,
-            SegmentCount);
+            SegmentCount,
+            ScopeDocumentCount,
+            ScopeByteCount);
     }
 }
 
