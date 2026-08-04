@@ -8,6 +8,50 @@ namespace Lokad.Sift.Tests;
 public sealed class MutationIntegrationTests
 {
     [Fact]
+    public async Task BuildPullsDocumentsFromAsynchronousSource()
+    {
+        static async IAsyncEnumerable<SubmittedDocument> ReadDocuments()
+        {
+            await Task.Yield();
+            yield return new SubmittedDocument("src/a.txt", "alpha"u8.ToArray());
+            await Task.Yield();
+            yield return new SubmittedDocument("src/b.txt", "beta"u8.ToArray());
+        }
+
+        using var index = SiftIndex.CreateInMemory();
+
+        var stats = await index.Build(ReadDocuments());
+
+        Assert.Equal(2, stats.IndexedDocuments);
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+    }
+
+    [Fact]
+    public async Task UpdatePullsDocumentsFromAsynchronousSource()
+    {
+        static async IAsyncEnumerable<SubmittedDocument> ReadDocuments()
+        {
+            await Task.Yield();
+            yield return new SubmittedDocument("src/a.txt", "omega"u8.ToArray());
+            await Task.Yield();
+            yield return new SubmittedDocument("src/b.txt", "beta"u8.ToArray());
+        }
+
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+
+        var stats = await index.Update(ReadDocuments(), []);
+
+        Assert.Equal(2, stats.UpsertedDocuments);
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var replaced));
+        Assert.Equal("omega"u8.ToArray(), replaced.ToArray());
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+    }
+
+    [Fact]
     public async Task UpdateAppliesUpsertsAndDeletions()
     {
         using var fixture = new CorpusFixture(

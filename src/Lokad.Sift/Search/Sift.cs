@@ -10,6 +10,13 @@ namespace Lokad.Sift;
 
 public sealed class Sift : ISift
 {
+    private delegate StreamedDocuments UpdateDocumentStreamer(
+        IReadOnlySet<string> forbiddenPaths,
+        RejectedUpsertPolicy rejectedUpsertPolicy,
+        Action<List<StoredDocument>> preparePartition,
+        Action<IReadOnlyList<StoredDocument>> publishPartition,
+        CancellationToken cancellationToken);
+
     private const long EstimatedReplacementPackOverheadBytes = 64L * 1024;
     private readonly ISiftStorage _storage;
     private readonly IndexBuilder _builder;
@@ -154,6 +161,35 @@ public sealed class Sift : ISift
 
     public Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(documents);
+        return RunBuild(
+            operationCancellation => BuildCore(
+                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, isRecovery, token)),
+                operationCancellation),
+            cancellationToken);
+    }
+
+    public Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents)
+    {
+        return Build(documents, CancellationToken.None);
+    }
+
+    public Task<BuildStats> Build(
+        IAsyncEnumerable<SubmittedDocument> documents,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        return RunBuild(
+            operationCancellation => BuildCore(
+                (isRecovery, token) => new ValueTask<BuildStats>(_builder.Build(documents, isRecovery, token)),
+                operationCancellation),
+            cancellationToken);
+    }
+
+    private Task<BuildStats> RunBuild(
+        Func<CancellationToken, ValueTask<BuildStats>> build,
+        CancellationToken cancellationToken)
+    {
         var activity = BeginActivity(SiftActivity.Build);
         return Task.Run(async () =>
         {
@@ -166,7 +202,7 @@ public sealed class Sift : ISift
                 await _buildGate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
                 acquiredGate = true;
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
-                var stats = BuildCore(documents, operationCancellation.Token);
+                var stats = await build(operationCancellation.Token).ConfigureAwait(false);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
                 return stats with { PeakManagedBytes = peakManagedBytes };
             }
@@ -182,13 +218,15 @@ public sealed class Sift : ISift
         });
     }
 
-    private BuildStats BuildCore(IDocumentSource documents, CancellationToken cancellationToken)
+    private async ValueTask<BuildStats> BuildCore(
+        Func<bool, CancellationToken, ValueTask<BuildStats>> build,
+        CancellationToken cancellationToken)
     {
         var isRecovery = RequiresRebuild;
         ResetValidationStats();
         try
         {
-            var stats = _builder.Build(documents, isRecovery, cancellationToken);
+            var stats = await build(isRecovery, cancellationToken).ConfigureAwait(false);
             ResetValidationStats();
             Volatile.Write(ref _rebuildCause, null);
             return stats;
@@ -553,6 +591,85 @@ public sealed class Sift : ISift
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(upserts);
+        return RunUpdate(
+            (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
+                IndexBuilder.StreamDocuments(
+                    upserts,
+                    operationCancellation,
+                    _options,
+                    operationName: "update",
+                    forbiddenPaths,
+                    rejectedUpsertPolicy,
+                    collectAcceptedPaths: true,
+                    preparePartition,
+                    publishPartition),
+            deletions,
+            options,
+            cancellationToken);
+    }
+
+    public Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        ReadOnlySpan<DocumentKey> deletions)
+    {
+        return Update(
+            upserts,
+            deletions,
+            new UpdateOptions(_options.RejectedUpsertPolicy),
+            CancellationToken.None);
+    }
+
+    public Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        CancellationToken cancellationToken)
+    {
+        return Update(
+            upserts,
+            deletions,
+            new UpdateOptions(_options.RejectedUpsertPolicy),
+            cancellationToken);
+    }
+
+    public Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options)
+    {
+        return Update(upserts, deletions, options, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(upserts);
+        return RunUpdate(
+            (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
+                IndexBuilder.StreamDocuments(
+                    upserts,
+                    operationCancellation,
+                    _options,
+                    operationName: "update",
+                    forbiddenPaths,
+                    rejectedUpsertPolicy,
+                    collectAcceptedPaths: true,
+                    preparePartition,
+                    publishPartition),
+            deletions,
+            options,
+            cancellationToken);
+    }
+
+    private Task<UpdateStats> RunUpdate(
+        UpdateDocumentStreamer streamDocuments,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         ValidateUpdateOptions(options);
@@ -565,7 +682,11 @@ public sealed class Sift : ISift
                 _writerCancellation.Token);
             try
             {
-                return UpdateCore(upserts, deletionArray, options, operationCancellation.Token);
+                return UpdateCore(
+                    streamDocuments,
+                    deletionArray,
+                    options,
+                    operationCancellation.Token);
             }
             catch (Exception exception) when (IsIndexCorruption(exception))
             {
@@ -580,13 +701,11 @@ public sealed class Sift : ISift
     }
 
     private UpdateStats UpdateCore(
-        IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        UpdateDocumentStreamer streamDocuments,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(upserts);
-
         static uint[] MergeDeadOrdinals(uint[] existing, List<LiveDocumentKey> added)
         {
             var merged = new uint[existing.Length + added.Count];
@@ -642,15 +761,10 @@ public sealed class Sift : ISift
         try
         {
             var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-            upsertLoad = IndexBuilder.StreamDocuments(
-                upserts,
-                cancellationToken,
-                _options,
-                operationName: "update",
-                forbiddenPaths: deletionSet,
-                rejectedUpsertPolicy: options.RejectedUpsertPolicy,
-                collectAcceptedPaths: true,
-                preparePartition: partition => RemoveUnchangedDocuments(
+            upsertLoad = streamDocuments(
+                deletionSet,
+                options.RejectedUpsertPolicy,
+                partition => RemoveUnchangedDocuments(
                     existingManifest,
                     partition,
                     existingUpsertKeys,
@@ -664,7 +778,8 @@ public sealed class Sift : ISift
                         segmentId,
                         _options.MinimumFreeBytesAfterMutation,
                         cancellationToken));
-                });
+                },
+                cancellationToken);
             var removalPaths = new HashSet<string>(deletionSet, StringComparer.Ordinal);
             if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
             {

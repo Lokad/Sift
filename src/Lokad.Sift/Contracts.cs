@@ -632,11 +632,27 @@ public interface ISift : IDisposable
     Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
     Task<BuildStats> Build(IDocumentSource documents);
     Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
+    Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents);
+    Task<BuildStats> Build(IAsyncEnumerable<SubmittedDocument> documents, CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, UpdateOptions options);
     Task<UpdateStats> Update(
         IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> Update(IAsyncEnumerable<SubmittedDocument> upserts, ReadOnlySpan<DocumentKey> deletions);
+    Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        CancellationToken cancellationToken);
+    Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options);
+    Task<UpdateStats> Update(
+        IAsyncEnumerable<SubmittedDocument> upserts,
         ReadOnlySpan<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken);

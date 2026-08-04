@@ -8,6 +8,10 @@ namespace Lokad.Sift.Indexer;
 
 internal sealed class IndexBuilder
 {
+    private delegate StreamedDocuments BuildDocumentStreamer(
+        Action<List<StoredDocument>> preparePartition,
+        Action<IReadOnlyList<StoredDocument>> publishPartition);
+
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     internal const int DefaultMaxDocumentBytes = 32 * 1024 * 1024;
     internal const int DefaultTargetSegmentDocumentCount = 50_000;
@@ -26,6 +30,46 @@ internal sealed class IndexBuilder
         bool discardCorruptState,
         CancellationToken cancellationToken)
     {
+        return BuildCore(
+            (preparePartition, publishPartition) => StreamDocuments(
+                source,
+                cancellationToken,
+                _options,
+                operationName: "build",
+                forbiddenPaths: null,
+                rejectedUpsertPolicy: RejectedUpsertPolicy.PreserveExisting,
+                collectAcceptedPaths: false,
+                preparePartition,
+                publishPartition),
+            discardCorruptState,
+            cancellationToken);
+    }
+
+    public BuildStats Build(
+        IAsyncEnumerable<SubmittedDocument> source,
+        bool discardCorruptState,
+        CancellationToken cancellationToken)
+    {
+        return BuildCore(
+            (preparePartition, publishPartition) => StreamDocuments(
+                source,
+                cancellationToken,
+                _options,
+                operationName: "build",
+                forbiddenPaths: null,
+                rejectedUpsertPolicy: RejectedUpsertPolicy.PreserveExisting,
+                collectAcceptedPaths: false,
+                preparePartition,
+                publishPartition),
+            discardCorruptState,
+            cancellationToken);
+    }
+
+    private BuildStats BuildCore(
+        BuildDocumentStreamer streamDocuments,
+        bool discardCorruptState,
+        CancellationToken cancellationToken)
+    {
         var watch = Stopwatch.StartNew();
         using var _ = _storage.AcquireWriterLock(cancellationToken);
         _storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
@@ -39,15 +83,8 @@ internal sealed class IndexBuilder
         StreamedDocuments load;
         try
         {
-            load = StreamDocuments(
-                source,
-                cancellationToken,
-                _options,
-                operationName: "build",
-                forbiddenPaths: null,
-                rejectedUpsertPolicy: RejectedUpsertPolicy.PreserveExisting,
-                collectAcceptedPaths: false,
-                preparePartition: static _ => { },
+            load = streamDocuments(
+                static _ => { },
                 partition =>
                 {
                     var segmentId = segmentSeed + (ulong)entries.Count;
@@ -92,65 +129,90 @@ internal sealed class IndexBuilder
         Action<List<StoredDocument>> preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
-        var submitted = 0;
-        long submittedBytes = 0;
-        var accepted = 0;
-        long acceptedBytes = 0;
-        var skipped = 0;
-        long skippedBytes = 0;
-        var rejected = 0;
-        long rejectedBytes = 0;
-        var rejectedDocuments = new List<RejectedDocument>();
-        var submittedPaths = new HashSet<string>(StringComparer.Ordinal);
-        var acceptedPaths = collectAcceptedPaths
-            ? new HashSet<string>(StringComparer.Ordinal)
-            : null;
-        var partition = new List<StoredDocument>();
-        long partitionBytes = 0;
-
-        void FlushPartition()
-        {
-            if (partition.Count == 0)
-            {
-                return;
-            }
-
-            partition.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
-            var candidateCount = partition.Count;
-            var candidateBytes = partitionBytes;
-            preparePartition(partition);
-            partitionBytes = partition.Sum(static document => (long)document.Content.Length);
-            skipped += candidateCount - partition.Count;
-            skippedBytes = checked(skippedBytes + candidateBytes - partitionBytes);
-            accepted += partition.Count;
-            acceptedBytes = checked(acceptedBytes + partitionBytes);
-            if (acceptedPaths is not null)
-            {
-                foreach (var document in partition)
-                {
-                    acceptedPaths.Add(document.Path);
-                }
-            }
-
-            if (partition.Count > 0)
-            {
-                for (var i = 0; i < partition.Count; i++)
-                {
-                    Materialize(partition[i]);
-                }
-
-                publishPartition(partition);
-            }
-
-            partition = [];
-            partitionBytes = 0;
-        }
+        var accumulator = new StreamedDocumentAccumulator(
+            options,
+            operationName,
+            forbiddenPaths,
+            rejectedUpsertPolicy,
+            collectAcceptedPaths,
+            preparePartition,
+            publishPartition);
 
         while (source.TryReadNext(out var submittedDocument))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            submitted++;
-            submittedBytes = checked(submittedBytes + submittedDocument.Content.Length);
+            accumulator.Add(submittedDocument);
+        }
+
+        return accumulator.Complete();
+    }
+
+    public static StreamedDocuments StreamDocuments(
+        IAsyncEnumerable<SubmittedDocument> source,
+        CancellationToken cancellationToken,
+        SiftOptions options,
+        string operationName,
+        IReadOnlySet<string>? forbiddenPaths,
+        RejectedUpsertPolicy rejectedUpsertPolicy,
+        bool collectAcceptedPaths,
+        Action<List<StoredDocument>> preparePartition,
+        Action<IReadOnlyList<StoredDocument>> publishPartition)
+    {
+        var accumulator = new StreamedDocumentAccumulator(
+            options,
+            operationName,
+            forbiddenPaths,
+            rejectedUpsertPolicy,
+            collectAcceptedPaths,
+            preparePartition,
+            publishPartition);
+
+        var enumerator = source.GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                accumulator.Add(enumerator.Current);
+            }
+        }
+        finally
+        {
+            enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        return accumulator.Complete();
+    }
+
+    private sealed class StreamedDocumentAccumulator(
+        SiftOptions options,
+        string operationName,
+        IReadOnlySet<string>? forbiddenPaths,
+        RejectedUpsertPolicy rejectedUpsertPolicy,
+        bool collectAcceptedPaths,
+        Action<List<StoredDocument>> preparePartition,
+        Action<IReadOnlyList<StoredDocument>> publishPartition)
+    {
+        private readonly HashSet<string> _submittedPaths = new(StringComparer.Ordinal);
+        private readonly HashSet<string>? _acceptedPaths = collectAcceptedPaths
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : null;
+        private readonly List<RejectedDocument> _rejectedDocuments = [];
+        private List<StoredDocument> _partition = [];
+        private int _submitted;
+        private long _submittedBytes;
+        private int _accepted;
+        private long _acceptedBytes;
+        private int _skipped;
+        private long _skippedBytes;
+        private int _rejected;
+        private long _rejectedBytes;
+        private long _partitionBytes;
+
+        public void Add(SubmittedDocument submittedDocument)
+        {
+            _submitted++;
+            _submittedBytes = checked(_submittedBytes + submittedDocument.Content.Length);
 
             var document = Normalize(
                 submittedDocument,
@@ -158,7 +220,7 @@ internal sealed class IndexBuilder
                 retainContentBeyondOperation: false,
                 out var normalizedPath,
                 out var rejectionReason);
-            if (!submittedPaths.Add(normalizedPath))
+            if (!_submittedPaths.Add(normalizedPath))
             {
                 throw new InvalidOperationException(
                     $"Duplicate canonical path in {operationName} batch: '{normalizedPath}'.");
@@ -184,36 +246,77 @@ internal sealed class IndexBuilder
                         [rejection]);
                 }
 
-                rejected++;
-                rejectedBytes = checked(rejectedBytes + submittedDocument.Content.Length);
-                rejectedDocuments.Add(rejection);
-                continue;
+                _rejected++;
+                _rejectedBytes = checked(_rejectedBytes + submittedDocument.Content.Length);
+                _rejectedDocuments.Add(rejection);
+                return;
             }
 
-            var nextPartitionBytes = checked(partitionBytes + document.Content.Length);
-            if (partition.Count > 0 &&
-                (partition.Count >= options.TargetSegmentDocumentCount ||
+            var nextPartitionBytes = checked(_partitionBytes + document.Content.Length);
+            if (_partition.Count > 0 &&
+                (_partition.Count >= options.TargetSegmentDocumentCount ||
                  nextPartitionBytes > options.TargetSegmentContentBytes))
             {
                 FlushPartition();
             }
 
-            partition.Add(document);
-            partitionBytes += document.Content.Length;
+            _partition.Add(document);
+            _partitionBytes += document.Content.Length;
         }
 
-        FlushPartition();
-        return new StreamedDocuments(
-            submitted,
-            accepted,
-            skipped,
-            rejected,
-            submittedBytes,
-            acceptedBytes,
-            skippedBytes,
-            rejectedBytes,
-            acceptedPaths ?? [],
-            rejectedDocuments);
+        public StreamedDocuments Complete()
+        {
+            FlushPartition();
+            return new StreamedDocuments(
+                _submitted,
+                _accepted,
+                _skipped,
+                _rejected,
+                _submittedBytes,
+                _acceptedBytes,
+                _skippedBytes,
+                _rejectedBytes,
+                _acceptedPaths ?? [],
+                _rejectedDocuments);
+        }
+
+        private void FlushPartition()
+        {
+            if (_partition.Count == 0)
+            {
+                return;
+            }
+
+            _partition.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
+            var candidateCount = _partition.Count;
+            var candidateBytes = _partitionBytes;
+            preparePartition(_partition);
+            _partitionBytes = _partition.Sum(static document => (long)document.Content.Length);
+            _skipped += candidateCount - _partition.Count;
+            _skippedBytes = checked(_skippedBytes + candidateBytes - _partitionBytes);
+            _accepted += _partition.Count;
+            _acceptedBytes = checked(_acceptedBytes + _partitionBytes);
+            if (_acceptedPaths is not null)
+            {
+                foreach (var document in _partition)
+                {
+                    _acceptedPaths.Add(document.Path);
+                }
+            }
+
+            if (_partition.Count > 0)
+            {
+                for (var i = 0; i < _partition.Count; i++)
+                {
+                    Materialize(_partition[i]);
+                }
+
+                publishPartition(_partition);
+            }
+
+            _partition = [];
+            _partitionBytes = 0;
+        }
     }
 
     public static LoadedDocuments LoadDocuments(
