@@ -173,7 +173,13 @@ internal sealed class CorpusStorage : ISiftStorage
             documents,
             segmentBytes => EnsureCapacity(segmentBytes, minimumFreeBytesAfterPublication),
             cancellationToken);
-        ValidateNewSegmentPack(tempSegmentPath, segmentId, cancellationToken);
+        // SegmentWriter produced and checksummed every byte immediately before this
+        // reopen. Validate the durable layout and identity without hashing the pack twice.
+        OpenAndValidateIdentity(
+            tempSegmentPath,
+            segmentId,
+            validateChecksums: false,
+            cancellationToken).Dispose();
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterSegmentFlushBeforePublish);
         var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.ToString("X16"));
         var finalSegmentPath = Path.Combine(finalSegmentDirectory, "segment.pack");
@@ -1083,20 +1089,6 @@ internal sealed class CorpusStorage : ISiftStorage
         return resolvedSegments is null
             ? manifest
             : manifest with { Segments = resolvedSegments };
-    }
-
-    private static void ValidateNewSegmentPack(
-        string path,
-        ulong expectedSegmentId,
-        CancellationToken cancellationToken)
-    {
-        // SegmentWriter produced and checksummed every byte immediately before this
-        // reopen. Validate the durable layout and identity without hashing the pack twice.
-        using var _ = OpenAndValidateIdentity(
-            path,
-            expectedSegmentId,
-            validateChecksums: false,
-            cancellationToken);
     }
 
     private static MappedSegment OpenAndValidateIdentity(

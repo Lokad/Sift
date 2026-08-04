@@ -630,6 +630,14 @@ public sealed class Sift : ISift
                 }
             },
             cancellationToken);
+
+        static void ValidateUpdateOptions(UpdateOptions options)
+        {
+            if (!Enum.IsDefined(options.RejectedUpsertPolicy))
+            {
+                throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
+            }
+        }
     }
 
     private async ValueTask<UpdateStats> UpdateCoreAsync(
@@ -870,15 +878,6 @@ public sealed class Sift : ISift
             rejectedDocuments: upsertLoad.RejectedDocuments,
             elapsedMilliseconds: watch.ElapsedMilliseconds,
             committedIdentity: committedIdentity);
-    }
-
-    private static void ValidateUpdateOptions(UpdateOptions options)
-    {
-        if (!Enum.IsDefined(options.RejectedUpsertPolicy))
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
-        }
-
     }
 
     private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)

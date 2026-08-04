@@ -53,6 +53,32 @@ internal sealed class PathFilterMatcher
             : CreateRegex(filter.PathRegex);
         _accelerationFragments = BuildAccelerationFragments(filter);
         _pathTrigrams = BuildPathTrigrams(_accelerationFragments);
+
+        static int[] BuildPathTrigrams(string[] accelerationFragments)
+        {
+            if (accelerationFragments.Length == 0)
+            {
+                return [];
+            }
+
+            var grams = new HashSet<int>();
+            foreach (var fragment in accelerationFragments)
+            {
+                if (fragment.Length < 3)
+                {
+                    continue;
+                }
+
+                var bytes = System.Text.Encoding.UTF8.GetBytes(fragment);
+                for (var i = 0; i <= bytes.Length - 3; i++)
+                {
+                    var gram = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+                    grams.Add(gram);
+                }
+            }
+
+            return [.. grams];
+        }
     }
 
     public string? PathPrefix => _pathPrefix;
@@ -133,32 +159,6 @@ internal sealed class PathFilterMatcher
     }
 
     public int[] GetPathTrigrams() => _pathTrigrams;
-
-    private static int[] BuildPathTrigrams(string[] accelerationFragments)
-    {
-        if (accelerationFragments.Length == 0)
-        {
-            return [];
-        }
-
-        var grams = new HashSet<int>();
-        foreach (var fragment in accelerationFragments)
-        {
-            if (fragment.Length < 3)
-            {
-                continue;
-            }
-
-            var bytes = System.Text.Encoding.UTF8.GetBytes(fragment);
-            for (var i = 0; i <= bytes.Length - 3; i++)
-            {
-                var gram = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-                grams.Add(gram);
-            }
-        }
-
-        return [.. grams];
-    }
 
     private static GlobMatcher[] CompileGlobs(string[]? globs)
     {
