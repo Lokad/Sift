@@ -334,6 +334,49 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayCompactsExcessSegmentsAndDropsIrrelevantTombstones()
+    {
+        const int compactionThreshold = 3;
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            OverlayCompactionSegmentThreshold = compactionThreshold
+        });
+        await index.Build(new InMemoryDocumentSource([("src/base.txt", "base")]));
+        using var overlay = Assert.IsType<OverlaySnapshot>(index.OpenOverlaySnapshot());
+
+        for (var revision = 0; revision < 12; revision++)
+        {
+            await overlay.Apply(
+                new InMemoryDocumentSource([("src/overlay.txt", $"revision {revision}")]),
+                [new DocumentKey($"src/missing-{revision}.txt")]);
+        }
+
+        var maintenance = overlay.GetOverlayMaintenanceStats();
+        Assert.InRange(maintenance.SegmentCount, 1, compactionThreshold);
+        Assert.InRange(maintenance.DeadDocuments, 0, compactionThreshold - 1);
+        Assert.Equal(0, overlay.GetRetainedTombstoneCount());
+    }
+
+    [Fact]
+    public async Task OverlayFoldBackHonorsTransactionalUpdateOptions()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Apply(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
+        var expectedIdentity = index.GetIndexIdentity();
+
+        var update = await overlay.ApplyTo(index, new UpdateOptions
+        {
+            ExpectedIdentity = expectedIdentity,
+            CommitMetadataProvider = static _ => "overlay-commit"u8.ToArray()
+        });
+
+        Assert.NotEqual(expectedIdentity, update.CommittedIdentity);
+        Assert.Equal("overlay-commit"u8.ToArray(), index.GetIndexState().CommitMetadata.ToArray());
+    }
+
+    [Fact]
     public async Task UpdateRejectsConflictingBatch()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));

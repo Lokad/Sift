@@ -247,6 +247,9 @@ public sealed class SiftOptions
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; } = RejectedUpsertPolicy.FailUpdate;
     // Bounds opaque consumer state committed atomically with a manifest.
     public int MaxCommitMetadataBytes { get; init; } = 64 * 1024;
+    // Compacts an overlay once it retains this many segments beyond the minimum
+    // needed for its current live document and byte counts.
+    public int OverlayCompactionSegmentThreshold { get; init; } = 8;
 }
 
 public sealed record BuildOptions
@@ -275,6 +278,21 @@ public sealed record UpdateOptions
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest.
     public Func<UpdateStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
+}
+
+public sealed record OverlayApplyOptions
+{
+    public OverlayApplyOptions()
+        : this(RejectedUpsertPolicy.FailUpdate)
+    {
+    }
+
+    public OverlayApplyOptions(RejectedUpsertPolicy rejectedUpsertPolicy)
+    {
+        RejectedUpsertPolicy = rejectedUpsertPolicy;
+    }
+
+    public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
 }
 
 public sealed class StaleIndexStateException : Exception
@@ -671,14 +689,16 @@ public interface IOverlaySnapshot : IIndexSnapshot
 {
     Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, UpdateOptions options);
+    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, OverlayApplyOptions options);
     Task<UpdateStats> Apply(
         IDocumentSource upserts,
         ReadOnlySpan<DocumentKey> deletions,
-        UpdateOptions options,
+        OverlayApplyOptions options,
         CancellationToken cancellationToken);
     Task<UpdateStats> ApplyTo(ISift target);
     Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken);
+    Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options);
+    Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
 public interface ISift : IDisposable

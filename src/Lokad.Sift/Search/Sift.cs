@@ -1377,6 +1377,13 @@ public sealed class Sift : ISift
                 nameof(options),
                 $"MaxCommitMetadataBytes must be between zero and {SegmentFormat.MaximumCommitMetadataBytes}.");
         }
+
+        if (options.OverlayCompactionSegmentThreshold <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "OverlayCompactionSegmentThreshold must be positive.");
+        }
     }
 
     private IDisposable BeginActivity(SiftActivity activity)

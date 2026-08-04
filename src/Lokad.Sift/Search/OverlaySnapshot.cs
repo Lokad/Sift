@@ -12,7 +12,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly Sift _overlayIndex;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
-    private readonly Dictionary<string, StoredDocument> _overlayDocuments = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
     private readonly HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
     private readonly HashSet<ulong> _baseSegmentIds;
     private readonly Dictionary<ulong, ulong> _overlayToSyntheticSegmentIds = [];
@@ -22,6 +22,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly SemaphoreSlim _applyLock = new(1, 1);
     private readonly object _syntheticSync = new();
     private IIndexSnapshot _overlaySnapshot;
+    private HiddenPathVisibility _hiddenPathVisibility = HiddenPathVisibility.Empty;
     private ulong _nextSyntheticSegmentId = ulong.MaxValue;
     private int _disposed;
 
@@ -40,7 +41,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return Apply(
             upserts,
             deletions,
-            new UpdateOptions(_options.RejectedUpsertPolicy),
+            new OverlayApplyOptions(_options.RejectedUpsertPolicy),
             CancellationToken.None);
     }
 
@@ -52,14 +53,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return Apply(
             upserts,
             deletions,
-            new UpdateOptions(_options.RejectedUpsertPolicy),
+            new OverlayApplyOptions(_options.RejectedUpsertPolicy),
             cancellationToken);
     }
 
     public Task<UpdateStats> Apply(
         IDocumentSource upserts,
         ReadOnlySpan<DocumentKey> deletions,
-        UpdateOptions options)
+        OverlayApplyOptions options)
     {
         return Apply(upserts, deletions, options, CancellationToken.None);
     }
@@ -67,7 +68,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     public Task<UpdateStats> Apply(
         IDocumentSource upserts,
         ReadOnlySpan<DocumentKey> deletions,
-        UpdateOptions options,
+        OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -83,7 +84,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private async Task<UpdateStats> ApplyCore(
         IDocumentSource upserts,
         IReadOnlyCollection<DocumentKey> deletions,
-        UpdateOptions options,
+        OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(upserts);
@@ -102,9 +103,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private async Task<UpdateStats> ApplyCoreUnderLock(
         IDocumentSource upserts,
         IReadOnlyCollection<DocumentKey> deletions,
-        UpdateOptions options,
+        OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
+        var watch = Stopwatch.StartNew();
         var load = IndexBuilder.LoadDocuments(
             upserts,
             cancellationToken,
@@ -147,6 +149,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var overlayUpdate = await _overlayIndex.Update(
             new StoredDocumentSource(load.Documents),
             CreateDeletionKeys(deletionSet),
+            new UpdateOptions(options.RejectedUpsertPolicy),
             cancellationToken);
 
         var deletedDocuments = 0;
@@ -156,29 +159,36 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             for (var i = 0; i < load.Documents.Count; i++)
             {
                 var document = load.Documents[i];
-                _overlayDocuments[document.Path] = document;
+                _overlayDocuments[document.Path] = document.MTimeUtcTicks;
                 _deletedPaths.Remove(document.Path);
             }
 
             foreach (var path in deletionSet)
             {
                 var removedOverlayDocument = _overlayDocuments.Remove(path);
-                if (removedOverlayDocument ||
-                    (!_deletedPaths.Contains(path) &&
-                     _baseSnapshot.ContainsDocument(new DocumentKey(path))))
+                var baseDocumentExists = _baseSnapshot.ContainsDocument(new DocumentKey(path));
+                var newlyHiddenBaseDocument = baseDocumentExists && _deletedPaths.Add(path);
+                if (removedOverlayDocument || newlyHiddenBaseDocument)
                 {
                     deletedDocuments++;
                 }
 
-                _deletedPaths.Add(path);
+                if (!baseDocumentExists)
+                {
+                    _deletedPaths.Remove(path);
+                }
             }
 
             RefreshOverlaySnapshot();
+            RefreshHiddenPathVisibility();
         }
         finally
         {
             _stateLock.ExitWriteLock();
         }
+
+        await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
+        watch.Stop();
 
         return new UpdateStats(
             load.Submitted,
@@ -192,22 +202,35 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayUpdate.SkippedBytes,
             load.RejectedBytes,
             load.RejectedDocuments,
-            overlayUpdate.ElapsedMilliseconds);
+            watch.ElapsedMilliseconds)
+        {
+            CommittedIdentity = overlayUpdate.CommittedIdentity
+        };
     }
 
     public Task<UpdateStats> ApplyTo(ISift target)
     {
-        return ApplyTo(target, CancellationToken.None);
+        return ApplyTo(target, new UpdateOptions(), CancellationToken.None);
     }
 
     public Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken)
     {
+        return ApplyTo(target, new UpdateOptions(), cancellationToken);
+    }
+
+    public Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options)
+    {
+        return ApplyTo(target, options, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> ApplyTo(
+        ISift target,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(target);
-        using var state = BeginRead();
-        return target.Update(
-            new StoredDocumentSource(GetSortedOverlayDocuments()),
-            CreateDeletionKeys(_deletedPaths),
-            cancellationToken);
+        ArgumentNullException.ThrowIfNull(options);
+        return ApplyToCore(target, options, cancellationToken);
     }
 
     public DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector)
@@ -315,7 +338,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return overlayStats with { StopReason = SearchStopReason.MaxElapsedTime };
         }
 
-        var hiddenPaths = BuildHiddenPathList();
         var baseCollector = new TrackingCollector(collector);
         var baseStats = _baseSnapshot.Search(
             query with
@@ -327,7 +349,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             },
             pathFilter,
             baseCollector,
-            new HiddenPathVisibility(hiddenPaths),
+            _hiddenPathVisibility,
             cancellationToken);
 
         return CombineStats(overlayStats, baseStats);
@@ -355,10 +377,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         using var state = BeginRead();
         var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
-        if (_overlayDocuments.TryGetValue(normalizedPath, out var document))
+        if (_overlayDocuments.ContainsKey(normalizedPath))
         {
-            content = document.Content;
-            return true;
+            return _overlaySnapshot.TryGetDocumentBytes(new DocumentKey(normalizedPath), out content);
         }
 
         if (_deletedPaths.Contains(normalizedPath))
@@ -453,7 +474,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             this);
     }
 
-    private byte[][] BuildHiddenPathList()
+    private void RefreshHiddenPathVisibility()
     {
         var hidden = new byte[_overlayDocuments.Count + _deletedPaths.Count][];
         var index = 0;
@@ -467,15 +488,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             hidden[index++] = Encoding.UTF8.GetBytes(path);
         }
 
-        return hidden;
+        Array.Sort(hidden, static (left, right) => left.AsSpan().SequenceCompareTo(right));
+        _hiddenPathVisibility = new HiddenPathVisibility(hidden);
     }
 
-    private List<StoredDocument> GetSortedOverlayDocuments()
+    private List<OverlayDocumentMetadata> GetSortedOverlayDocumentMetadata()
     {
-        var documents = new List<StoredDocument>(_overlayDocuments.Count);
-        foreach (var document in _overlayDocuments.Values)
+        var documents = new List<OverlayDocumentMetadata>(_overlayDocuments.Count);
+        foreach (var pair in _overlayDocuments)
         {
-            documents.Add(document);
+            documents.Add(new OverlayDocumentMetadata(pair.Key, pair.Value));
         }
 
         documents.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
@@ -652,6 +674,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     private sealed class HiddenPathVisibility : IPathVisibility
     {
+        public static HiddenPathVisibility Empty { get; } = new([]);
+
         private readonly byte[][] _hiddenPaths;
 
         public HiddenPathVisibility(byte[][] hiddenPaths)
@@ -661,11 +685,24 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         public bool IsVisible(ReadOnlySpan<byte> normalizedPathUtf8)
         {
-            for (var i = 0; i < _hiddenPaths.Length; i++)
+            var lower = 0;
+            var upper = _hiddenPaths.Length - 1;
+            while (lower <= upper)
             {
-                if (normalizedPathUtf8.SequenceEqual(_hiddenPaths[i]))
+                var middle = lower + ((upper - lower) / 2);
+                var comparison = normalizedPathUtf8.SequenceCompareTo(_hiddenPaths[middle]);
+                if (comparison == 0)
                 {
                     return false;
+                }
+
+                if (comparison < 0)
+                {
+                    upper = middle - 1;
+                }
+                else
+                {
+                    lower = middle + 1;
                 }
             }
 
@@ -689,6 +726,114 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             VisitedDocuments++;
             return inner.OnDocument(key);
         }
+    }
+
+    private readonly record struct OverlayDocumentMetadata(string Path, long MTimeUtcTicks);
+
+    private sealed class SnapshotDocumentSource(
+        IIndexSnapshot snapshot,
+        IReadOnlyList<OverlayDocumentMetadata> documents) : IDocumentSource
+    {
+        private int _index;
+
+        public bool TryReadNext(out SubmittedDocument document)
+        {
+            if (_index >= documents.Count)
+            {
+                document = default;
+                return false;
+            }
+
+            var next = documents[_index++];
+            if (!snapshot.TryGetDocumentBytes(new DocumentKey(next.Path), out var content))
+            {
+                throw new InvalidOperationException($"Overlay document '{next.Path}' disappeared while applying it.");
+            }
+
+            document = new SubmittedDocument(
+                next.Path,
+                content,
+                new DateTimeOffset(next.MTimeUtcTicks, TimeSpan.Zero),
+                DocumentContentLifetime.UntilOperationCompletes);
+            return true;
+        }
+    }
+
+    private async Task<UpdateStats> ApplyToCore(
+        ISift target,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
+        await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            var documents = GetSortedOverlayDocumentMetadata();
+            var deletions = CreateDeletionKeys(_deletedPaths);
+            return await target.Update(
+                new SnapshotDocumentSource(_overlaySnapshot, documents),
+                deletions,
+                options,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _applyLock.Release();
+        }
+    }
+
+    private async Task CompactOverlayIfNeeded(CancellationToken cancellationToken)
+    {
+        var maintenance = _overlayIndex.GetMaintenanceStats();
+        var minimumSegmentsForDocuments = maintenance.LiveDocuments == 0
+            ? 0
+            : (int)(((long)maintenance.LiveDocuments + _options.TargetSegmentDocumentCount - 1) /
+              _options.TargetSegmentDocumentCount);
+        var minimumSegmentsForContent = maintenance.EstimatedLiveContentBytes == 0
+            ? 0L
+            : (maintenance.EstimatedLiveContentBytes + _options.TargetSegmentContentBytes - 1) /
+              _options.TargetSegmentContentBytes;
+        var minimumSegments = Math.Max(
+            minimumSegmentsForDocuments,
+            (int)Math.Min(int.MaxValue, minimumSegmentsForContent));
+        if (maintenance.SegmentCount - minimumSegments < _options.OverlayCompactionSegmentThreshold)
+        {
+            return;
+        }
+
+        await _overlayIndex.Compact(
+            new CompactOptions
+            {
+                MaxMergedSegments = int.MaxValue,
+                DeadFractionThreshold = 0,
+                DeadContentFractionThreshold = 0,
+                SmallSegmentMergeThreshold = 1,
+                MetadataBloatDeadOrdinalsThreshold = 1,
+                MaxInputSegmentBytes = long.MaxValue,
+                MinimumFreeBytesAfterCompaction = 0
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        _stateLock.EnterWriteLock();
+        try
+        {
+            RefreshOverlaySnapshot();
+        }
+        finally
+        {
+            _stateLock.ExitWriteLock();
+        }
+    }
+
+    internal MaintenanceStats GetOverlayMaintenanceStats()
+    {
+        return _overlayIndex.GetMaintenanceStats();
+    }
+
+    internal int GetRetainedTombstoneCount()
+    {
+        using var state = BeginRead();
+        return _deletedPaths.Count;
     }
 
     private sealed class TrackingCollector : IHitCollector
