@@ -851,6 +851,41 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task ManifestSegmentCountMustFitTheEncodedTable()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var manifestPath = Path.Combine(fixture.CorpusPath, "manifest.bin");
+        RewriteChecksummedManifest(
+            manifestPath,
+            static bytes => BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(36), int.MaxValue));
+
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        Assert.Throws<InvalidDataException>(() => storage.ReadManifest());
+    }
+
+    [Fact]
+    public async Task ManifestDeadOrdinalCountMustFitItsPayload()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var manifestPath = Path.Combine(fixture.CorpusPath, "manifest.bin");
+        RewriteChecksummedManifest(
+            manifestPath,
+            static bytes =>
+            {
+                var entryOffset = SegmentFormat.ManifestHeaderSize;
+                BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(entryOffset + 8), int.MaxValue);
+                BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(entryOffset + 20), int.MaxValue);
+            });
+
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        Assert.Throws<InvalidDataException>(() => storage.ReadManifest());
+    }
+
+    [Fact]
     public async Task BuildPartitionsIntoMultipleSegmentsWhenThresholdExceeded()
     {
         var documents = Enumerable.Range(0, 50_001)
@@ -1211,6 +1246,17 @@ public sealed class StorageIntegrityTests
             bytes.AsSpan(checked((int)documentTableOffset) + 12, sizeof(ulong)),
             ulong.MaxValue);
         File.WriteAllBytes(segmentPath, bytes);
+    }
+
+    private static void RewriteChecksummedManifest(string manifestPath, Action<byte[]> rewrite)
+    {
+        var bytes = File.ReadAllBytes(manifestPath);
+        rewrite(bytes);
+        var checksumOffset = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(56));
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(checksumOffset),
+            Hashing.Fnv1A64(bytes.AsSpan(0, checksumOffset)));
+        File.WriteAllBytes(manifestPath, bytes);
     }
 
     private sealed class FailingCollector : IHitCollector

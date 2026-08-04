@@ -30,6 +30,14 @@ internal static class CorpusManifestCodec
             throw new InvalidDataException($"Unsupported Sift manifest version: {version}.");
         }
 
+        var expectedHeaderSize = version == SegmentFormat.ManifestFormatVersion
+            ? SegmentFormat.ManifestHeaderSize
+            : SegmentFormat.LegacyManifestHeaderSize;
+        if (bytes.Length < expectedHeaderSize + sizeof(ulong))
+        {
+            throw new InvalidDataException("Invalid Sift manifest length.");
+        }
+
         var corpusId = new Guid(span.Slice(12, 16));
         var generation = LittleEndianCodec.ReadUInt64(span[28..]);
         var count = LittleEndianCodec.ReadInt32(span[36..]);
@@ -37,7 +45,7 @@ internal static class CorpusManifestCodec
         var segmentTableLength = LittleEndianCodec.ReadInt32(span[44..]);
         var metadataOffset = version == SegmentFormat.ManifestFormatVersion
             ? LittleEndianCodec.ReadInt32(span[48..])
-            : segmentTableOffset + segmentTableLength;
+            : 0;
         var metadataLength = version == SegmentFormat.ManifestFormatVersion
             ? LittleEndianCodec.ReadInt32(span[52..])
             : 0;
@@ -52,6 +60,11 @@ internal static class CorpusManifestCodec
         }
 
         ValidateManifestBounds(segmentTableOffset, segmentTableLength, bytes.Length, "segment table");
+        if (version != SegmentFormat.ManifestFormatVersion)
+        {
+            metadataOffset = segmentTableOffset + segmentTableLength;
+        }
+
         ValidateManifestBounds(metadataOffset, metadataLength, bytes.Length, "commit metadata");
         ValidateManifestBounds(checksumOffset, checksumLength, bytes.Length, "checksum region");
         if (checksumLength != 8)
@@ -65,9 +78,6 @@ internal static class CorpusManifestCodec
             throw new InvalidDataException("Invalid Sift manifest checksum.");
         }
 
-        var expectedHeaderSize = version == SegmentFormat.ManifestFormatVersion
-            ? SegmentFormat.ManifestHeaderSize
-            : SegmentFormat.LegacyManifestHeaderSize;
         if (segmentTableOffset != expectedHeaderSize)
         {
             throw new InvalidDataException("Unexpected Sift manifest segment table offset.");
@@ -80,12 +90,17 @@ internal static class CorpusManifestCodec
             throw new InvalidDataException("Invalid Sift manifest commit metadata region.");
         }
 
-        var segments = new SegmentManifestEntry[count];
-        var offset = segmentTableOffset;
-        var limit = segmentTableOffset + segmentTableLength;
         var entryHeaderSize = version is SegmentFormat.ManifestFormatVersion or SegmentFormat.PreviousManifestFormatVersion
             ? SegmentFormat.ManifestEntryHeaderSize
             : SegmentFormat.LegacyManifestEntryHeaderSize;
+        if (count > segmentTableLength / entryHeaderSize)
+        {
+            throw new InvalidDataException("Invalid Sift manifest segment count.");
+        }
+
+        var segments = new SegmentManifestEntry[count];
+        var offset = segmentTableOffset;
+        var limit = segmentTableOffset + segmentTableLength;
         for (var i = 0; i < count; i++)
         {
             if (offset > limit - entryHeaderSize)
@@ -107,6 +122,7 @@ internal static class CorpusManifestCodec
                 deadCount < 0 ||
                 deadCount > documentCount ||
                 deadBytes < 0 ||
+                deadCount > deadBytes ||
                 deadContentBytes < (version is SegmentFormat.ManifestFormatVersion or SegmentFormat.PreviousManifestFormatVersion ? 0 : -1) ||
                 deadContentBytes > contentBytes ||
                 offset > limit - deadBytes)
@@ -164,18 +180,33 @@ internal static class CorpusManifestCodec
             throw new InvalidOperationException("Sift commit metadata exceeds the on-disk format limit.");
         }
 
-        var segmentTableLength = 0;
-        foreach (var segment in manifest.Segments)
+        int segmentTableLength;
+        int metadataOffset;
+        int checksumOffset;
+        int size;
+        try
         {
-            segmentTableLength += SegmentFormat.ManifestEntryHeaderSize + GetDeadOrdinalPayloadLength(segment.DeadOrdinals);
+            segmentTableLength = 0;
+            checked
+            {
+                foreach (var segment in manifest.Segments)
+                {
+                    segmentTableLength += SegmentFormat.ManifestEntryHeaderSize + GetDeadOrdinalPayloadLength(segment.DeadOrdinals);
+                }
+
+                metadataOffset = SegmentFormat.ManifestHeaderSize + segmentTableLength;
+                checksumOffset = metadataOffset + manifest.CommitMetadata.Length;
+                size = checksumOffset + sizeof(ulong);
+            }
+        }
+        catch (OverflowException exception)
+        {
+            throw new InvalidOperationException("Sift manifest exceeds the on-disk format limit.", exception);
         }
 
         var segmentTableOffset = SegmentFormat.ManifestHeaderSize;
-        var metadataOffset = segmentTableOffset + segmentTableLength;
         var metadataLength = manifest.CommitMetadata.Length;
-        var checksumOffset = metadataOffset + metadataLength;
         const int checksumLength = sizeof(ulong);
-        var size = checksumOffset + checksumLength;
         var bytes = GC.AllocateUninitializedArray<byte>(size);
         var span = bytes.AsSpan();
         LittleEndianCodec.WriteUInt64(span, SegmentFormat.ManifestMagic);
@@ -221,10 +252,13 @@ internal static class CorpusManifestCodec
     {
         var length = 0;
         uint previous = 0;
-        for (var i = 0; i < deadOrdinals.Length; i++)
+        checked
         {
-            length += VarInt.GetUInt32Length(deadOrdinals[i] - previous);
-            previous = deadOrdinals[i];
+            for (var i = 0; i < deadOrdinals.Length; i++)
+            {
+                length += VarInt.GetUInt32Length(deadOrdinals[i] - previous);
+                previous = deadOrdinals[i];
+            }
         }
 
         return length;
