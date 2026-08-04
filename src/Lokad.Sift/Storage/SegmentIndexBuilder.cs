@@ -156,12 +156,7 @@ internal static class SegmentIndexBuilder
             for (var i = 0; i < content.Length - 1; i++)
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeBigramSensitive(content, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.Count(gram);
+                builder.Count(EncodeBigramSensitive(content, i));
             }
         }
     }
@@ -185,12 +180,7 @@ internal static class SegmentIndexBuilder
             for (var i = 0; i < content.Length - 1; i++)
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeBigramSensitive(content, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.AddOrdinal(gram, ordinal);
+                builder.AddOrdinal(EncodeBigramSensitive(content, i), ordinal);
             }
         }
     }
@@ -272,12 +262,7 @@ internal static class SegmentIndexBuilder
             for (var i = 0; i < content.Length - 2; i++)
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeTrigramSensitive(content, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.Count(gram);
+                builder.Count(EncodeTrigramSensitive(content, i));
             }
         }
     }
@@ -301,12 +286,7 @@ internal static class SegmentIndexBuilder
             for (var i = 0; i < content.Length - 2; i++)
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeTrigramSensitive(content, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.AddOrdinal(gram, ordinal);
+                builder.AddOrdinal(EncodeTrigramSensitive(content, i), ordinal);
             }
         }
     }
@@ -422,12 +402,7 @@ internal static class SegmentIndexBuilder
             for (var i = 0; i < path.Length - 2; i++)
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeTrigramSensitive(path, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.Count(gram);
+                builder.Count(EncodeTrigramSensitive(path, i));
             }
         }
     }
@@ -451,12 +426,7 @@ internal static class SegmentIndexBuilder
             for (var i = 0; i < path.Length - 2; i++)
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeTrigramSensitive(path, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.AddOrdinal(gram, ordinal);
+                builder.AddOrdinal(EncodeTrigramSensitive(path, i), ordinal);
             }
         }
     }
@@ -557,19 +527,11 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static bool TryEncodeBigram(ReadOnlySpan<byte> value, int start, bool caseInsensitive, out int gram)
-    {
-        return caseInsensitive
-            ? TryEncodeBigramInsensitiveAscii(value, start, out gram)
-            : TryEncodeBigramSensitive(value, start, out gram);
-    }
-
-    private static bool TryEncodeBigramSensitive(ReadOnlySpan<byte> value, int start, out int gram)
+    private static int EncodeBigramSensitive(ReadOnlySpan<byte> value, int start)
     {
         var first = value[start];
         var second = value[start + 1];
-        gram = (first << 8) | second;
-        return true;
+        return (first << 8) | second;
     }
 
     private static bool TryEncodeBigramInsensitiveAscii(ReadOnlySpan<byte> value, int start, out int gram)
@@ -588,13 +550,12 @@ internal static class SegmentIndexBuilder
         return true;
     }
 
-    private static bool TryEncodeTrigramSensitive(ReadOnlySpan<byte> value, int start, out int gram)
+    private static int EncodeTrigramSensitive(ReadOnlySpan<byte> value, int start)
     {
         var first = value[start];
         var second = value[start + 1];
         var third = value[start + 2];
-        gram = (first << 16) | (second << 8) | third;
-        return true;
+        return (first << 16) | (second << 8) | third;
     }
 
     private static bool TryEncodeTrigramInsensitiveAscii(ReadOnlySpan<byte> value, int start, out int gram)
