@@ -403,7 +403,19 @@ public readonly record struct BuildStats(
     long ContentBytes,
     long RejectedBytes,
     long ElapsedMilliseconds,
-    long PeakManagedBytes);
+    long PeakManagedBytes)
+{
+    /// <summary>Documents omitted from the completed build, with their rejection reasons.</summary>
+    public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; init; } = [];
+
+    /// <summary>Identity of the index state committed by the completed build.</summary>
+    /// <remarks>
+    ///     The provisional statistics passed to
+    ///     <see cref="BuildOptions.CommitMetadataProvider"/> have the default identity
+    ///     because the manifest has not yet been committed.
+    /// </remarks>
+    public IndexIdentity CommittedIdentity { get; init; }
+}
 
 public readonly record struct UpdateStats(
     int SubmittedUpserts,

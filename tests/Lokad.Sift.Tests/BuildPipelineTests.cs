@@ -51,6 +51,10 @@ public sealed class BuildPipelineTests
         Assert.Equal(0, stats.IndexedDocuments);
         Assert.Equal(binaryLike.Length, stats.SubmittedBytes);
         Assert.Equal(binaryLike.Length, stats.RejectedBytes);
+        var rejected = Assert.Single(stats.RejectedDocumentDetails);
+        Assert.Equal("src/a.bin", rejected.Path);
+        Assert.Equal(DocumentRejectionReason.BinaryContent, rejected.Reason);
+        Assert.Equal(index.GetIndexIdentity(), stats.CommittedIdentity);
     }
 
     [Fact]

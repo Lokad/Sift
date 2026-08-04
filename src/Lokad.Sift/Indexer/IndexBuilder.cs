@@ -110,7 +110,10 @@ internal sealed class IndexBuilder
                 ContentBytes: load.AcceptedBytes,
                 RejectedBytes: load.RejectedBytes,
                 ElapsedMilliseconds: watch.ElapsedMilliseconds,
-                PeakManagedBytes: 0);
+                PeakManagedBytes: 0)
+            {
+                RejectedDocumentDetails = load.RejectedDocuments
+            };
             var commitMetadata = options.CommitMetadataProvider?.Invoke(pendingStats).ToArray() ?? [];
             if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
             {
@@ -142,7 +145,14 @@ internal sealed class IndexBuilder
             ContentBytes: load.AcceptedBytes,
             RejectedBytes: load.RejectedBytes,
             ElapsedMilliseconds: watch.ElapsedMilliseconds,
-            PeakManagedBytes: 0);
+            PeakManagedBytes: 0)
+        {
+            RejectedDocumentDetails = load.RejectedDocuments,
+            CommittedIdentity = new IndexIdentity(
+                corpusId,
+                ContentRevision: 1,
+                StorageGeneration: generation)
+        };
     }
 
     public static StreamedDocuments StreamDocuments(
