@@ -171,7 +171,7 @@ public sealed class Sift : ISift
         CancellationToken cancellationToken)
     {
         return RunMutation(
-            SiftActivity.Build,
+            SiftWriteActivity.Build,
             async operationCancellation =>
             {
                 if (!_options.MeasurePeakManagedMemory)
@@ -188,7 +188,7 @@ public sealed class Sift : ISift
     }
 
     private async Task<TResult> RunMutation<TResult>(
-        SiftActivity activity,
+        SiftWriteActivity activity,
         Func<CancellationToken, ValueTask<TResult>> mutation,
         CancellationToken cancellationToken)
     {
@@ -223,10 +223,10 @@ public sealed class Sift : ISift
         }
     }
 
-    public ActivityStats GetActivityStats()
+    public WriteActivityStats GetWriteActivityStats()
     {
         ThrowIfDisposed();
-        return _mutations.GetActivityStats();
+        return _mutations.GetWriteActivityStats();
     }
 
     public IndexValidationStats GetValidationStats()
@@ -633,7 +633,7 @@ public sealed class Sift : ISift
         ThrowIfRebuildRequired();
         ValidateUpdateOptions(options);
         return RunMutation(
-            SiftActivity.Update,
+            SiftWriteActivity.Update,
             async operationCancellation =>
             {
                 try
@@ -915,7 +915,7 @@ public sealed class Sift : ISift
         ThrowIfRebuildRequired();
         ValidateCompactOptions(options);
         return RunMutation(
-            SiftActivity.Compact,
+            SiftWriteActivity.Compact,
             async operationCancellation =>
             {
                 try

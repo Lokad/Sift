@@ -17,7 +17,7 @@ public enum SearchStopReason
 {
     None,
     MaxHits,
-    MaxDocuments,
+    MaxMatchedDocuments,
     MaxBytesScanned,
     MaxElapsedTime,
     RegexTimeout,
@@ -73,7 +73,7 @@ public sealed record SearchQuery
             multiline: false,
             dotAll: false,
             maxHits: 10_000,
-            maxDocuments: int.MaxValue,
+            maxMatchedDocuments: int.MaxValue,
             maxBytesScanned: long.MaxValue,
             timeoutPolicy: TimeoutPolicy.StopSearch,
             maxHitsPerDocument: int.MaxValue,
@@ -90,7 +90,7 @@ public sealed record SearchQuery
         bool multiline,
         bool dotAll,
         int maxHits,
-        int maxDocuments,
+        int maxMatchedDocuments,
         long maxBytesScanned,
         TimeoutPolicy timeoutPolicy,
         int maxHitsPerDocument,
@@ -104,7 +104,7 @@ public sealed record SearchQuery
         Multiline = multiline;
         DotAll = dotAll;
         MaxHits = maxHits;
-        MaxDocuments = maxDocuments;
+        MaxMatchedDocuments = maxMatchedDocuments;
         MaxBytesScanned = maxBytesScanned;
         TimeoutPolicy = timeoutPolicy;
         MaxHitsPerDocument = maxHitsPerDocument;
@@ -119,7 +119,7 @@ public sealed record SearchQuery
     public bool Multiline { get; init; }
     public bool DotAll { get; init; }
     public int MaxHits { get; init; }
-    public int MaxDocuments { get; init; }
+    public int MaxMatchedDocuments { get; init; }
     public long MaxBytesScanned { get; init; }
     public TimeoutPolicy TimeoutPolicy { get; init; }
     public int MaxHitsPerDocument { get; init; }
@@ -858,7 +858,7 @@ public sealed class CompactStats
         HasMoreWork);
 }
 
-public enum SiftActivity
+public enum SiftWriteActivity
 {
     Idle,
     Build,
@@ -866,9 +866,9 @@ public enum SiftActivity
     Compact
 }
 
-public readonly record struct ActivityStats(
+public readonly record struct WriteActivityStats(
     bool IsWriteBusy,
-    SiftActivity CurrentActivity);
+    SiftWriteActivity CurrentActivity);
 
 public readonly record struct IndexIdentity(
     // Changes whenever a full build replaces the logical corpus.
@@ -1167,7 +1167,7 @@ public interface ISift : IDisposable
     IndexState GetIndexState();
     IIndexSnapshot OpenSnapshot(SearchOptions options);
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
-    ActivityStats GetActivityStats();
+    WriteActivityStats GetWriteActivityStats();
     IndexValidationStats GetValidationStats();
     MaintenanceStats GetMaintenanceStats();
     StorageStats GetStorageStats();

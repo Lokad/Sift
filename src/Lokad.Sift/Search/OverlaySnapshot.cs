@@ -377,7 +377,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
 
         var remainingHits = query.MaxHits - overlayStats.HitsReturned;
-        var remainingDocuments = query.MaxDocuments - overlayCollector.HitDocuments;
+        var remainingDocuments = query.MaxMatchedDocuments - overlayCollector.HitDocuments;
         var remainingBytes = query.MaxBytesScanned - overlayStats.BytesScanned;
         if (remainingHits <= 0)
         {
@@ -386,7 +386,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         if (remainingDocuments <= 0)
         {
-            return overlayStats.WithStopReason(SearchStopReason.MaxDocuments);
+            return overlayStats.WithStopReason(SearchStopReason.MaxMatchedDocuments);
         }
 
         if (remainingBytes <= 0)
@@ -405,7 +405,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             query with
             {
                 MaxHits = remainingHits,
-                MaxDocuments = remainingDocuments,
+                MaxMatchedDocuments = remainingDocuments,
                 MaxBytesScanned = remainingBytes,
                 MaxElapsedMilliseconds = remainingElapsedMilliseconds
             },

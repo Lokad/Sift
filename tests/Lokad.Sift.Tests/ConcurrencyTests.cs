@@ -59,7 +59,7 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
-    public async Task ActivityStatsExposeRunningBuild()
+    public async Task WriteActivityStatsExposeRunningBuild()
     {
         using var fixture = new CorpusFixture();
         using var index = new SiftIndex(fixture.CorpusPath);
@@ -68,16 +68,16 @@ public sealed class ConcurrencyTests
         var buildTask = index.Build(source);
         await source.WaitUntilBlocked();
 
-        var busy = index.GetActivityStats();
+        var busy = index.GetWriteActivityStats();
         Assert.True(busy.IsWriteBusy);
-        Assert.Equal(SiftActivity.Build, busy.CurrentActivity);
+        Assert.Equal(SiftWriteActivity.Build, busy.CurrentActivity);
 
         source.Release();
         await buildTask;
 
-        var idle = index.GetActivityStats();
+        var idle = index.GetWriteActivityStats();
         Assert.False(idle.IsWriteBusy);
-        Assert.Equal(SiftActivity.Idle, idle.CurrentActivity);
+        Assert.Equal(SiftWriteActivity.Idle, idle.CurrentActivity);
     }
 
     [Fact]
@@ -111,9 +111,9 @@ public sealed class ConcurrencyTests
                 new InMemoryDocumentSource([("src/a.txt", "alpha\n")]),
                 cancellation.Token));
 
-        var activity = index.GetActivityStats();
+        var activity = index.GetWriteActivityStats();
         Assert.False(activity.IsWriteBusy);
-        Assert.Equal(SiftActivity.Idle, activity.CurrentActivity);
+        Assert.Equal(SiftWriteActivity.Idle, activity.CurrentActivity);
     }
 
     [Fact]
@@ -208,21 +208,21 @@ public sealed class ConcurrencyTests
         var update = index.Update(updateSource, []);
         await Task.Delay(100);
 
-        var duringBuild = index.GetActivityStats();
+        var duringBuild = index.GetWriteActivityStats();
         Assert.True(duringBuild.IsWriteBusy);
-        Assert.Equal(SiftActivity.Build, duringBuild.CurrentActivity);
+        Assert.Equal(SiftWriteActivity.Build, duringBuild.CurrentActivity);
         Assert.False(updateSource.WaitUntilBlocked().IsCompleted);
 
         buildSource.Release();
         await build;
         await updateSource.WaitUntilBlocked();
-        var duringUpdate = index.GetActivityStats();
+        var duringUpdate = index.GetWriteActivityStats();
         Assert.True(duringUpdate.IsWriteBusy);
-        Assert.Equal(SiftActivity.Update, duringUpdate.CurrentActivity);
+        Assert.Equal(SiftWriteActivity.Update, duringUpdate.CurrentActivity);
 
         updateSource.Release();
         await update;
-        Assert.False(index.GetActivityStats().IsWriteBusy);
+        Assert.False(index.GetWriteActivityStats().IsWriteBusy);
     }
 
     [Fact]

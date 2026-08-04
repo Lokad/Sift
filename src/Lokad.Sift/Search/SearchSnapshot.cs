@@ -535,9 +535,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         }
                     }
 
-                    if (hitDocuments >= query.MaxDocuments)
+                    if (hitDocuments >= query.MaxMatchedDocuments)
                     {
-                        stopReason = SearchStopReason.MaxDocuments;
+                        stopReason = SearchStopReason.MaxMatchedDocuments;
                         goto Done;
                     }
 
@@ -1158,9 +1158,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             throw new ArgumentOutOfRangeException(nameof(query), "MaxHits must be positive.");
         }
 
-        if (query.MaxDocuments <= 0)
+        if (query.MaxMatchedDocuments <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(query), "MaxDocuments must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(query), "MaxMatchedDocuments must be positive.");
         }
 
         if (query.MaxBytesScanned <= 0)
@@ -1359,9 +1359,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     break;
                 }
 
-                if (segmentHitDocuments >= query.MaxDocuments)
+                if (segmentHitDocuments >= query.MaxMatchedDocuments)
                 {
-                    segmentStopReason = SearchStopReason.MaxDocuments;
+                    segmentStopReason = SearchStopReason.MaxMatchedDocuments;
                     break;
                 }
 
@@ -1431,9 +1431,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 break;
             }
 
-            if (segmentHitDocuments >= query.MaxDocuments)
+            if (segmentHitDocuments >= query.MaxMatchedDocuments)
             {
-                segmentStopReason = SearchStopReason.MaxDocuments;
+                segmentStopReason = SearchStopReason.MaxMatchedDocuments;
                 break;
             }
         }
@@ -2405,7 +2405,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return _searchOptions.SegmentParallelism > 1 &&
                _segments.Count > 1 &&
                query.MaxHits == int.MaxValue &&
-               query.MaxDocuments == int.MaxValue &&
+               query.MaxMatchedDocuments == int.MaxValue &&
                query.MaxBytesScanned == long.MaxValue;
     }
 }

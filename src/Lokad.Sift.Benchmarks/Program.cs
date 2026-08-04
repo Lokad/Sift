@@ -157,7 +157,7 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
                     new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
                     {
                         MaxHits = int.MaxValue,
-                        MaxDocuments = int.MaxValue,
+                        MaxMatchedDocuments = int.MaxValue,
                         MaxBytesScanned = long.MaxValue
                     },
                     new PathFilter(),
@@ -3750,7 +3750,7 @@ internal sealed class RealQueryDefinition
             Multiline = Multiline,
             DotAll = DotAll,
             MaxHits = int.MaxValue,
-            MaxDocuments = int.MaxValue,
+            MaxMatchedDocuments = int.MaxValue,
             MaxBytesScanned = long.MaxValue
         };
     }

@@ -238,7 +238,7 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
             Multiline = multiline,
             DotAll = dotAll,
             MaxHits = maxHits,
-            MaxDocuments = maxDocuments,
+            MaxMatchedDocuments = maxDocuments,
             MaxBytesScanned = maxBytesScanned,
             TimeoutPolicy = timeoutPolicy
         },

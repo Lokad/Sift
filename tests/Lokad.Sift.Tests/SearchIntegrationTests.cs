@@ -2075,7 +2075,7 @@ public sealed class SearchIntegrationTests
         await sequentialIndex.Build(fixture.CreateSource());
 
         using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue };
+        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxMatchedDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue };
         var sequentialCollector = new HitBuffer();
         var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
         var expected = sequentialCollector.Hits
@@ -2124,7 +2124,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot(new SearchOptions(4));
         var collector = new HitBuffer();
         snapshot.Search(
-            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxMatchedDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
             new PathFilter(),
             collector);
 
@@ -2151,7 +2151,7 @@ public sealed class SearchIntegrationTests
             new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
             {
                 MaxHits = int.MaxValue,
-                MaxDocuments = int.MaxValue,
+                MaxMatchedDocuments = int.MaxValue,
                 MaxBytesScanned = long.MaxValue
             },
             new PathFilter(),
@@ -2183,7 +2183,7 @@ public sealed class SearchIntegrationTests
             new SearchQuery("needle", PatternMode.Literal, caseMode)
             {
                 MaxHits = int.MaxValue,
-                MaxDocuments = int.MaxValue,
+                MaxMatchedDocuments = int.MaxValue,
                 MaxBytesScanned = long.MaxValue
             },
             new PathFilter(),
@@ -2236,7 +2236,7 @@ public sealed class SearchIntegrationTests
         await sequentialIndex.Build(fixture.CreateSource());
 
         using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 10, MaxDocuments = 6, MaxBytesScanned = 80 };
+        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 10, MaxMatchedDocuments = 6, MaxBytesScanned = 80 };
         var sequentialCollector = new HitBuffer();
         var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
         var expected = sequentialCollector.Hits
@@ -2284,7 +2284,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
-            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 1, MaxDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 1, MaxMatchedDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
             new PathFilter(),
             collector);
 

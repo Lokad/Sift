@@ -11,15 +11,15 @@ internal sealed class MutationCoordinator : IDisposable
     private bool _stopped;
     private bool _disposed;
 
-    public ActivityStats GetActivityStats()
+    public WriteActivityStats GetWriteActivityStats()
     {
         var isBusy = Volatile.Read(ref _requests) > 0;
-        var currentActivity = (SiftActivity)Volatile.Read(ref _currentActivity);
-        return new ActivityStats(isBusy, isBusy ? currentActivity : SiftActivity.Idle);
+        var currentActivity = (SiftWriteActivity)Volatile.Read(ref _currentActivity);
+        return new WriteActivityStats(isBusy, isBusy ? currentActivity : SiftWriteActivity.Idle);
     }
 
     public async Task<TResult> Run<TResult>(
-        SiftActivity activity,
+        SiftWriteActivity activity,
         Func<CancellationToken, ValueTask<TResult>> mutation,
         CancellationToken cancellationToken)
     {
@@ -37,7 +37,7 @@ internal sealed class MutationCoordinator : IDisposable
         }
         finally
         {
-            Volatile.Write(ref _currentActivity, (int)SiftActivity.Idle);
+            Volatile.Write(ref _currentActivity, (int)SiftWriteActivity.Idle);
             _gate.Release();
         }
     }
