@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using Lokad.Sift;
 using Lokad.Sift.Search;
 
@@ -345,6 +346,20 @@ public sealed class SearchIntegrationTests
 
         Assert.True(found);
         Assert.Equal(Encoding.UTF8.GetBytes(expected), content.ToArray());
+    }
+
+    [Fact]
+    public async Task InMemoryDocumentBytesAreAViewOverTheSegmentPack()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var content));
+        Assert.True(MemoryMarshal.TryGetArray(content, out var segment));
+        Assert.NotNull(segment.Array);
+        Assert.True(segment.Array.Length > content.Length);
+        Assert.Equal("alpha\n"u8.ToArray(), content.ToArray());
     }
 
     [Fact]

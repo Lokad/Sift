@@ -886,9 +886,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
 
         var document = cache.Segment.GetDocument(ordinal);
-        // The segment mapping is operation-scoped, so the returned memory
-        // must own its bytes independently of the mapping.
-        content = cache.Segment.GetContentBytes(document).ToArray();
+        content = cache.Segment.GetContentMemory(document);
         return true;
     }
 
