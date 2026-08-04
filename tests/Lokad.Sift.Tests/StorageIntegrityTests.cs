@@ -27,6 +27,43 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public void PublishedManifestsOwnMutableInputs()
+    {
+        using var fixture = new CorpusFixture();
+
+        AssertOwnsMutableInputs(new CorpusStorage(fixture.CorpusPath));
+        AssertOwnsMutableInputs(new InMemorySiftStorage());
+
+        static void AssertOwnsMutableInputs(ISiftStorage storage)
+        {
+            var commitMetadata = new byte[] { 7 };
+            var deadOrdinals = new uint[] { 3 };
+            var segments = new[]
+            {
+                new SegmentManifestEntry(1, 4, 10, deadOrdinals, DeadContentBytes: 2)
+            };
+            using (var session = storage.AcquireWriteSession(CancellationToken.None))
+            {
+                session.PublishManifest(new CorpusManifest(
+                    Guid.NewGuid(),
+                    ContentRevision: 1,
+                    Generation: 1,
+                    CommitMetadata: commitMetadata,
+                    Segments: segments));
+            }
+
+            commitMetadata[0] = 9;
+            deadOrdinals[0] = 9;
+            segments[0] = segments[0] with { SegmentId = 2 };
+
+            var published = storage.ReadManifest();
+            Assert.Equal(7, published.CommitMetadata[0]);
+            Assert.Equal(1UL, published.Segments[0].SegmentId);
+            Assert.Equal(3U, published.Segments[0].DeadOrdinals[0]);
+        }
+    }
+
+    [Fact]
     public async Task InMemoryStorageStatsWaitForManifestPublication()
     {
         var storage = new BlockingPublicationStorage(new InMemorySiftStorage());
@@ -592,13 +629,13 @@ public sealed class StorageIntegrityTests
 
         using var reopened = new SiftIndex(fixture.CorpusPath);
         var storage = TestHelpers.GetStorage(reopened);
-        Assert.Equal(0, storage.ValidatedSegmentCount);
+        Assert.Equal(0, storage.ChecksumValidationCount);
 
         using (reopened.OpenSnapshot())
         {
         }
 
-        Assert.Equal(0, storage.ValidatedSegmentCount);
+        Assert.Equal(0, storage.ChecksumValidationCount);
         using (var snapshot = reopened.OpenSnapshot())
         {
             snapshot.Explain(
@@ -606,9 +643,9 @@ public sealed class StorageIntegrityTests
                 new PathFilter());
         }
 
-        Assert.Equal(0, storage.ValidatedSegmentCount);
+        Assert.Equal(0, storage.ChecksumValidationCount);
         await reopened.Validate();
-        Assert.Equal(1, storage.ValidatedSegmentCount);
+        Assert.Equal(1, storage.ChecksumValidationCount);
         using (var snapshot = reopened.OpenSnapshot())
         {
             snapshot.Explain(
@@ -616,11 +653,11 @@ public sealed class StorageIntegrityTests
                 new PathFilter());
         }
 
-        Assert.Equal(1, storage.ValidatedSegmentCount);
+        Assert.Equal(1, storage.ChecksumValidationCount);
     }
 
     [Fact]
-    public async Task ExplicitValidationWarmsEverySegmentAndReportsReadiness()
+    public async Task ExplicitValidationChecksEverySegmentAndReportsReadiness()
     {
         using var fixture = new CorpusFixture();
         var options = new SiftOptions { TargetSegmentContentBytes = 5 };
@@ -636,7 +673,7 @@ public sealed class StorageIntegrityTests
         using var reopened = new SiftIndex(fixture.CorpusPath, options);
         var storage = TestHelpers.GetStorage(reopened);
         Assert.Equal(IndexValidationState.NotStarted, reopened.GetValidationStats().State);
-        Assert.Equal(0, storage.ValidatedSegmentCount);
+        Assert.Equal(0, storage.ChecksumValidationCount);
 
         var validation = await reopened.Validate();
 
@@ -644,7 +681,7 @@ public sealed class StorageIntegrityTests
         Assert.Equal(3, validation.TotalSegments);
         Assert.Equal(validation.TotalSegments, validation.ValidatedSegments);
         Assert.Equal(validation.TotalBytes, validation.ValidatedBytes);
-        Assert.Equal(3, storage.ValidatedSegmentCount);
+        Assert.Equal(3, storage.ChecksumValidationCount);
         Assert.Equal(validation, reopened.GetValidationStats());
     }
 
@@ -807,28 +844,6 @@ public sealed class StorageIntegrityTests
         Assert.Equal(
             "alpha\n".Length,
             storage.ReadManifest().Segments.Single().DeadContentBytes);
-    }
-
-    [Fact]
-    public async Task ReclamationEvictsValidationMetadataForRetiredSegments()
-    {
-        using var fixture = new CorpusFixture();
-        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
-        {
-            TargetSegmentDocumentCount = 100,
-            TargetSegmentContentBytes = 100
-        });
-        await index.Build(new InMemoryDocumentSource([]));
-        await index.Update(new InMemoryDocumentSource([("src/a.txt", "alpha")]), []);
-        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
-        await index.Update(new InMemoryDocumentSource([("src/c.txt", "gamma")]), []);
-        var storage = TestHelpers.GetStorage(index);
-        Assert.Equal(3, storage.ValidatedSegmentCount);
-
-        await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
-
-        Assert.Single(storage.ReadManifest().Segments);
-        Assert.Equal(1, storage.ValidatedSegmentCount);
     }
 
     [Fact]

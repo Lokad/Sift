@@ -21,11 +21,11 @@ internal sealed class CorpusStorage : ISiftStorage
     private readonly object _layoutLock = new();
     private readonly object _capacityBudgetLock = new();
     private readonly CorpusManifestCache _manifestCache = new();
-    private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
     private bool _reclamationIntentKnownDurable;
     private long _segmentOpenCount;
+    private long _checksumValidationCount;
     private long _reclamationFailureCount;
     private long _corpusPhysicalScanCount;
     private string? _lastReclamationFailure;
@@ -47,7 +47,7 @@ internal sealed class CorpusStorage : ISiftStorage
     public string TempPath => Path.Combine(_rootPath, "temp");
     public string LockPath => Path.Combine(_rootPath, "lock");
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
-    internal int ValidatedSegmentCount => _validatedSegmentIds.Count;
+    internal long ChecksumValidationCount => Interlocked.Read(ref _checksumValidationCount);
     internal long SegmentOpenCount => Interlocked.Read(ref _segmentOpenCount);
     internal long CorpusPhysicalScanCount => Interlocked.Read(ref _corpusPhysicalScanCount);
     internal long ManifestParseCount => _manifestCache.ParseCount;
@@ -190,7 +190,6 @@ internal sealed class CorpusStorage : ISiftStorage
         File.Move(tempSegmentPath, finalSegmentPath);
         FlushDirectoryEntry(finalSegmentDirectory);
         FlushDirectoryEntry(SegmentsPath);
-        _validatedSegmentIds.TryAdd(segmentId, 0);
         Directory.Delete(tempSegmentDirectory, recursive: true);
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
     }
@@ -240,7 +239,7 @@ internal sealed class CorpusStorage : ISiftStorage
                 segmentId,
                 validateChecksums: true,
                 cancellationToken);
-            _validatedSegmentIds.TryAdd(segmentId, 0);
+            Interlocked.Increment(ref _checksumValidationCount);
         }
         finally
         {
@@ -628,7 +627,6 @@ internal sealed class CorpusStorage : ISiftStorage
             if (TryDeleteDirectory(Path.Combine(SegmentsPath, segmentId.ToString("X16"))))
             {
                 deletedFinalSegment = true;
-                _validatedSegmentIds.TryRemove(segmentId, out _);
                 _segmentValidationGates.TryRemove(segmentId, out _);
             }
         }
@@ -757,7 +755,6 @@ internal sealed class CorpusStorage : ISiftStorage
         FlushDirectoryEntry(SegmentsPath);
         FlushDirectoryEntry(TempPath);
         FlushDirectoryEntry(GenerationLeasesPath);
-        _validatedSegmentIds.Clear();
         _segmentValidationGates.Clear();
         _segmentDirectoriesRecovered = true;
         SetReclamationPending(isPending: false);
@@ -768,7 +765,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     private void WriteManifest(CorpusManifest manifest)
     {
-        manifest = ResolveLegacyDeadContentBytes(manifest);
+        manifest = ResolveLegacyDeadContentBytes(manifest).Freeze();
         // Set the retry marker and publish the reader lease before making the generation discoverable.
         SetReclamationPending(isPending: true);
         EnsureGenerationLease(manifest);
@@ -1284,14 +1281,14 @@ internal sealed class CorpusStorage : ISiftStorage
             try
             {
                 Directory.Delete(segment.DirectoryPath, recursive: true);
-                ForgetSegmentValidation(segment.SegmentId);
+                ForgetSegmentValidationGate(segment.SegmentId);
                 CreditCapacity(segment.Bytes);
                 reclaimedSegmentCount++;
                 reclaimedSegmentBytes += segment.Bytes;
             }
             catch (DirectoryNotFoundException)
             {
-                ForgetSegmentValidation(segment.SegmentId);
+                ForgetSegmentValidationGate(segment.SegmentId);
                 reclaimedSegmentCount++;
                 reclaimedSegmentBytes += segment.Bytes;
             }
@@ -1326,9 +1323,8 @@ internal sealed class CorpusStorage : ISiftStorage
             protection.OldestLeasedGeneration));
     }
 
-    private void ForgetSegmentValidation(ulong segmentId)
+    private void ForgetSegmentValidationGate(ulong segmentId)
     {
-        _validatedSegmentIds.TryRemove(segmentId, out _);
         _segmentValidationGates.TryRemove(segmentId, out _);
     }
 

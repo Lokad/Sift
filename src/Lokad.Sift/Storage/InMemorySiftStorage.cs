@@ -67,7 +67,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         {
             // Freeze caller-owned arrays once at publication. Published manifests
             // are immutable storage state and can then be shared by every reader.
-            _manifest = FreezeManifest(manifest);
+            _manifest = manifest.Freeze();
             _ = ReclaimUnreferencedSegmentsUnderWriterLock();
         }
     }
@@ -372,23 +372,6 @@ internal sealed class InMemorySiftStorage : ISiftStorage
                 $"Cannot replace Sift segments while {reclamation.DeferredSegmentCount} retired segment(s) " +
                 $"({reclamation.DeferredSegmentBytes} bytes) remain leased by older snapshots.");
         }
-    }
-
-    private static CorpusManifest FreezeManifest(CorpusManifest manifest)
-    {
-        var segments = new SegmentManifestEntry[manifest.Segments.Count];
-        for (var i = 0; i < manifest.Segments.Count; i++)
-        {
-            var segment = manifest.Segments[i];
-            segments[i] = segment with { DeadOrdinals = [.. segment.DeadOrdinals] };
-        }
-
-        return new CorpusManifest(
-            manifest.CorpusId,
-            manifest.ContentRevision,
-            manifest.Generation,
-            [.. manifest.CommitMetadata],
-            segments);
     }
 
     private sealed class WriteSession(

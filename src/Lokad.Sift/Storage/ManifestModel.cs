@@ -24,4 +24,21 @@ internal sealed record CorpusManifest(
         : this(corpusId, generation, generation, [], segments)
     {
     }
+
+    public CorpusManifest Freeze()
+    {
+        var segments = new SegmentManifestEntry[Segments.Count];
+        for (var i = 0; i < Segments.Count; i++)
+        {
+            var segment = Segments[i];
+            segments[i] = segment with { DeadOrdinals = [.. segment.DeadOrdinals] };
+        }
+
+        return new CorpusManifest(
+            CorpusId,
+            ContentRevision,
+            Generation,
+            [.. CommitMetadata],
+            segments);
+    }
 }
