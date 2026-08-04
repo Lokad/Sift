@@ -167,12 +167,33 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var guardedCollector = new GuardedHitCollector(collector);
         try
         {
-            return SearchCore(
-                query,
-                pathFilter,
-                guardedCollector,
-                pathVisibility,
+            using var operation = BeginOperation();
+            var watch = Stopwatch.StartNew();
+            var preparedQuery = PrepareSearchQuery(query);
+            var matcher = PathFilterMatcher.Prepare(pathFilter);
+            using var deadlineCancellation = CreateDeadlineCancellation(
+                query.MaxElapsedMilliseconds,
                 cancellationToken);
+            var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
+            return CanUseSegmentParallelSearch(query)
+                ? SearchParallel(
+                    query,
+                    matcher,
+                    preparedQuery,
+                    guardedCollector,
+                    pathVisibility,
+                    effectiveCancellationToken,
+                    cancellationToken,
+                    watch)
+                : SearchSequential(
+                    query,
+                    matcher,
+                    preparedQuery,
+                    guardedCollector,
+                    pathVisibility,
+                    effectiveCancellationToken,
+                    cancellationToken,
+                    watch);
         }
         catch (CollectorFailureException exception)
         {
@@ -184,42 +205,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             ReportIndexFailure(exception);
             throw;
         }
-    }
-
-    private SearchStats SearchCore(
-        SearchQuery query,
-        PathFilter pathFilter,
-        IHitCollector collector,
-        IPathVisibility? pathVisibility,
-        CancellationToken cancellationToken)
-    {
-        using var operation = BeginOperation();
-        var watch = Stopwatch.StartNew();
-        var preparedQuery = PrepareSearchQuery(query);
-        var matcher = PathFilterMatcher.Prepare(pathFilter);
-        using var deadlineCancellation = CreateDeadlineCancellation(
-            query.MaxElapsedMilliseconds,
-            cancellationToken);
-        var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
-        return CanUseSegmentParallelSearch(query)
-            ? SearchParallel(
-                query,
-                matcher,
-                preparedQuery,
-                collector,
-                pathVisibility,
-                effectiveCancellationToken,
-                cancellationToken,
-                watch)
-            : SearchSequential(
-                query,
-                matcher,
-                preparedQuery,
-                collector,
-                pathVisibility,
-                effectiveCancellationToken,
-                cancellationToken,
-                watch);
     }
 
     private SearchStats SearchSequential(
@@ -688,28 +673,23 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         try
         {
-            return TryGetDocumentBytesCore(key, out content);
+            using var operation = BeginOperation();
+            var normalizedPath = key.Path;
+            if (!TryFindLiveDocument(normalizedPath, out var cache, out var ordinal))
+            {
+                content = default;
+                return false;
+            }
+
+            var document = cache.Segment.GetDocument(ordinal);
+            content = cache.Segment.GetContentMemory(document);
+            return true;
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
             ReportIndexFailure(exception);
             throw;
         }
-    }
-
-    private bool TryGetDocumentBytesCore(DocumentKey key, out ReadOnlyMemory<byte> content)
-    {
-        using var operation = BeginOperation();
-        var normalizedPath = key.Path;
-        if (!TryFindLiveDocument(normalizedPath, out var cache, out var ordinal))
-        {
-            content = default;
-            return false;
-        }
-
-        var document = cache.Segment.GetDocument(ordinal);
-        content = cache.Segment.GetContentMemory(document);
-        return true;
     }
 
     internal bool ContainsDocument(DocumentKey key)
@@ -751,21 +731,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         try
         {
-            return GetPathCore(hit);
+            using var operation = BeginOperation();
+            var cache = OpenSegment(hit.SegmentId);
+            var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
+            return cache.Segment.GetPath(document);
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
             ReportIndexFailure(exception);
             throw;
         }
-    }
-
-    private string GetPathCore(in RawHit hit)
-    {
-        using var operation = BeginOperation();
-        var cache = OpenSegment(hit.SegmentId);
-        var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
-        return cache.Segment.GetPath(document);
     }
 
     internal ulong[] GetSegmentIds()

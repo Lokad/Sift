@@ -23,7 +23,16 @@ internal sealed class MutationCoordinator : IDisposable
         Func<CancellationToken, ValueTask<TResult>> mutation,
         CancellationToken cancellationToken)
     {
-        using var request = BeginRequest();
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_stopped, typeof(SiftIndex));
+            if (++_requests == 1)
+            {
+                _idle.Reset();
+            }
+        }
+
+        using var request = new RequestScope(this);
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _cancellation.Token);
@@ -78,20 +87,6 @@ internal sealed class MutationCoordinator : IDisposable
         _cancellation.Dispose();
         _idle.Dispose();
         _gate.Dispose();
-    }
-
-    private IDisposable BeginRequest()
-    {
-        lock (_sync)
-        {
-            ObjectDisposedException.ThrowIf(_stopped, typeof(SiftIndex));
-            if (++_requests == 1)
-            {
-                _idle.Reset();
-            }
-        }
-
-        return new RequestScope(this);
     }
 
     private sealed class RequestScope(MutationCoordinator owner) : IDisposable

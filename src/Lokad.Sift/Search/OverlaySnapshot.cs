@@ -79,113 +79,105 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
         }
 
-        return UpdateCore(upserts, deletions, options, cancellationToken);
-    }
+        return UpdateAsync();
 
-    private async Task<UpdateStats> UpdateCore(
-        IDocumentSource upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        OverlayUpdateOptions options,
-        CancellationToken cancellationToken)
-    {
-        await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        async Task<UpdateStats> UpdateAsync()
         {
-            ThrowIfDisposed();
-            return await UpdateCoreUnderLock(upserts, deletions, options, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _updateLock.Release();
-        }
-    }
-
-    private async Task<UpdateStats> UpdateCoreUnderLock(
-        IDocumentSource upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        OverlayUpdateOptions options,
-        CancellationToken cancellationToken)
-    {
-        var watch = Stopwatch.StartNew();
-        var load = IndexBuilder.LoadDocuments(
-            upserts,
-            cancellationToken,
-            _options,
-            options.RejectedUpsertPolicy,
-            retainContentBeyondOperation: false);
-        var deletionSet = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var deletion in deletions)
-        {
-            var normalized = deletion.Path;
-            if (!deletionSet.Add(normalized))
+            await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                throw new InvalidOperationException($"Duplicate deletion path in overlay batch: '{normalized}'.");
+                ThrowIfDisposed();
+                return await ApplyUpdateUnderLock().ConfigureAwait(false);
+            }
+            finally
+            {
+                _updateLock.Release();
             }
         }
 
-        if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
+        async Task<UpdateStats> ApplyUpdateUnderLock()
         {
-            deletionSet.UnionWith(load.RejectedDocuments.Select(static document => document.Path));
-        }
-
-        var overlayUpdate = await _overlayIndex.UpdatePrevalidated(
-            load,
-            CreateDeletionKeys(deletionSet),
-            new UpdateOptions(options.RejectedUpsertPolicy),
-            cancellationToken);
-
-        var deletedDocuments = 0;
-        _stateLock.EnterWriteLock();
-        try
-        {
-            for (var i = 0; i < load.Documents.Count; i++)
+            var watch = Stopwatch.StartNew();
+            var load = IndexBuilder.LoadDocuments(
+                upserts,
+                cancellationToken,
+                _options,
+                options.RejectedUpsertPolicy,
+                retainContentBeyondOperation: false);
+            var deletionSet = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var deletion in deletions)
             {
-                var document = load.Documents[i];
-                _overlayDocuments[document.Path] = document.MTimeUtcTicks;
-                _deletedPaths.Remove(document.Path);
-            }
-
-            foreach (var path in deletionSet)
-            {
-                var removedOverlayDocument = _overlayDocuments.Remove(path);
-                var baseDocumentExists = _baseSnapshot.ContainsDocument(new DocumentKey(path));
-                var newlyHiddenBaseDocument = baseDocumentExists && _deletedPaths.Add(path);
-                if (removedOverlayDocument || newlyHiddenBaseDocument)
+                var normalized = deletion.Path;
+                if (!deletionSet.Add(normalized))
                 {
-                    deletedDocuments++;
-                }
-
-                if (!baseDocumentExists)
-                {
-                    _deletedPaths.Remove(path);
+                    throw new InvalidOperationException($"Duplicate deletion path in overlay batch: '{normalized}'.");
                 }
             }
 
-            RefreshOverlaySnapshot();
-            RefreshHiddenPathVisibility();
-        }
-        finally
-        {
-            _stateLock.ExitWriteLock();
-        }
+            if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
+            {
+                deletionSet.UnionWith(load.RejectedDocuments.Select(static document => document.Path));
+            }
 
-        await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
-        watch.Stop();
+            var overlayUpdate = await _overlayIndex.UpdatePrevalidated(
+                load,
+                CreateDeletionKeys(deletionSet),
+                new UpdateOptions(options.RejectedUpsertPolicy),
+                cancellationToken);
 
-        return new UpdateStats(
-            load.Submitted,
-            overlayUpdate.UpsertedDocuments,
-            overlayUpdate.SkippedUpserts,
-            load.Rejected,
-            deletedDocuments,
-            overlayUpdate.PublishedSegments,
-            load.SubmittedBytes,
-            overlayUpdate.ContentBytes,
-            overlayUpdate.SkippedBytes,
-            load.RejectedBytes,
-            load.RejectedDocuments,
-            watch.ElapsedMilliseconds,
-            overlayUpdate.CommittedIdentity);
+            var deletedDocuments = 0;
+            _stateLock.EnterWriteLock();
+            try
+            {
+                for (var i = 0; i < load.Documents.Count; i++)
+                {
+                    var document = load.Documents[i];
+                    _overlayDocuments[document.Path] = document.MTimeUtcTicks;
+                    _deletedPaths.Remove(document.Path);
+                }
+
+                foreach (var path in deletionSet)
+                {
+                    var removedOverlayDocument = _overlayDocuments.Remove(path);
+                    var baseDocumentExists = _baseSnapshot.ContainsDocument(new DocumentKey(path));
+                    var newlyHiddenBaseDocument = baseDocumentExists && _deletedPaths.Add(path);
+                    if (removedOverlayDocument || newlyHiddenBaseDocument)
+                    {
+                        deletedDocuments++;
+                    }
+
+                    if (!baseDocumentExists)
+                    {
+                        _deletedPaths.Remove(path);
+                    }
+                }
+
+                RefreshOverlaySnapshot();
+                RefreshHiddenPathVisibility();
+            }
+            finally
+            {
+                _stateLock.ExitWriteLock();
+            }
+
+            await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
+            watch.Stop();
+
+            return new UpdateStats(
+                load.Submitted,
+                overlayUpdate.UpsertedDocuments,
+                overlayUpdate.SkippedUpserts,
+                load.Rejected,
+                deletedDocuments,
+                overlayUpdate.PublishedSegments,
+                load.SubmittedBytes,
+                overlayUpdate.ContentBytes,
+                overlayUpdate.SkippedBytes,
+                load.RejectedBytes,
+                load.RejectedDocuments,
+                watch.ElapsedMilliseconds,
+                overlayUpdate.CommittedIdentity);
+        }
     }
 
     public Task<UpdateStats> CommitToBase(

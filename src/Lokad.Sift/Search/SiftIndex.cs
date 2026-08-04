@@ -418,76 +418,76 @@ public sealed class SiftIndex : ISiftIndex
         ThrowIfRebuildRequired();
         try
         {
-            return GetMaintenanceStatsCore();
+            return CollectMaintenanceStats();
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
             MarkRequiresRebuild(exception);
             throw;
         }
-    }
 
-    private MaintenanceStats GetMaintenanceStatsCore()
-    {
-        using var snapshot = _storage.OpenReadSnapshot();
-        var manifest = snapshot.Manifest;
-        var segmentCount = manifest.Segments.Count;
-        var totalDocuments = 0;
-        var deadDocuments = 0;
-        long contentBytes = 0;
-        long reclaimableContentBytes = 0;
-        var segmentsWithDeletions = 0;
-        var smallSegmentCount = 0;
-        var currentLegacyKeys = new HashSet<LegacyMaintenanceKey>();
-
-        foreach (var segment in manifest.Segments)
+        MaintenanceStats CollectMaintenanceStats()
         {
-            totalDocuments += segment.DocumentCount;
-            deadDocuments += segment.DeadOrdinals.Length;
-            contentBytes += segment.ContentBytes;
-            if (segment.DeadOrdinals.Length > 0)
+            using var snapshot = _storage.OpenReadSnapshot();
+            var manifest = snapshot.Manifest;
+            var segmentCount = manifest.Segments.Count;
+            var totalDocuments = 0;
+            var deadDocuments = 0;
+            long contentBytes = 0;
+            long reclaimableContentBytes = 0;
+            var segmentsWithDeletions = 0;
+            var smallSegmentCount = 0;
+            var currentLegacyKeys = new HashSet<LegacyMaintenanceKey>();
+
+            foreach (var segment in manifest.Segments)
             {
-                segmentsWithDeletions++;
-                reclaimableContentBytes = checked(
-                    reclaimableContentBytes +
-                    GetDeadContentBytes(segment, currentLegacyKeys, CancellationToken.None));
+                totalDocuments += segment.DocumentCount;
+                deadDocuments += segment.DeadOrdinals.Length;
+                contentBytes += segment.ContentBytes;
+                if (segment.DeadOrdinals.Length > 0)
+                {
+                    segmentsWithDeletions++;
+                    reclaimableContentBytes = checked(
+                        reclaimableContentBytes +
+                        GetDeadContentBytes(segment, currentLegacyKeys, CancellationToken.None));
+                }
+
+                if (segment.LiveDocumentCount > 0 &&
+                    segment.LiveDocumentCount < _options.TargetSegmentDocumentCount &&
+                    segment.ContentBytes < _options.TargetSegmentContentBytes)
+                {
+                    smallSegmentCount++;
+                }
             }
 
-            if (segment.LiveDocumentCount > 0 &&
-                segment.LiveDocumentCount < _options.TargetSegmentDocumentCount &&
-                segment.ContentBytes < _options.TargetSegmentContentBytes)
+            foreach (var key in _legacyDeadContentBytes.Keys)
             {
-                smallSegmentCount++;
+                if (!currentLegacyKeys.Contains(key))
+                {
+                    _legacyDeadContentBytes.TryRemove(key, out _);
+                }
             }
+
+            var liveDocuments = totalDocuments - deadDocuments;
+            var deadDocumentFraction = totalDocuments == 0 ? 0d : (double)deadDocuments / totalDocuments;
+            var deadContentFraction = contentBytes == 0 ? 0d : (double)reclaimableContentBytes / contentBytes;
+            var estimatedLiveContentBytes = contentBytes - reclaimableContentBytes;
+
+            return new MaintenanceStats(
+                generation: manifest.Generation,
+                segmentCount: segmentCount,
+                totalDocuments: totalDocuments,
+                liveDocuments: liveDocuments,
+                deadDocuments: deadDocuments,
+                deadDocumentFraction: deadDocumentFraction,
+                deadContentFraction: deadContentFraction,
+                contentBytes: contentBytes,
+                estimatedLiveContentBytes: estimatedLiveContentBytes,
+                estimatedReclaimableContentBytes: reclaimableContentBytes,
+                deadOrdinalEntries: deadDocuments,
+                segmentsWithDeletions: segmentsWithDeletions,
+                smallSegmentCount: smallSegmentCount);
         }
-
-        foreach (var key in _legacyDeadContentBytes.Keys)
-        {
-            if (!currentLegacyKeys.Contains(key))
-            {
-                _legacyDeadContentBytes.TryRemove(key, out _);
-            }
-        }
-
-        var liveDocuments = totalDocuments - deadDocuments;
-        var deadDocumentFraction = totalDocuments == 0 ? 0d : (double)deadDocuments / totalDocuments;
-        var deadContentFraction = contentBytes == 0 ? 0d : (double)reclaimableContentBytes / contentBytes;
-        var estimatedLiveContentBytes = contentBytes - reclaimableContentBytes;
-
-        return new MaintenanceStats(
-            generation: manifest.Generation,
-            segmentCount: segmentCount,
-            totalDocuments: totalDocuments,
-            liveDocuments: liveDocuments,
-            deadDocuments: deadDocuments,
-            deadDocumentFraction: deadDocumentFraction,
-            deadContentFraction: deadContentFraction,
-            contentBytes: contentBytes,
-            estimatedLiveContentBytes: estimatedLiveContentBytes,
-            estimatedReclaimableContentBytes: reclaimableContentBytes,
-            deadOrdinalEntries: deadDocuments,
-            segmentsWithDeletions: segmentsWithDeletions,
-            smallSegmentCount: smallSegmentCount);
     }
 
     public StorageStats GetStorageStats()
