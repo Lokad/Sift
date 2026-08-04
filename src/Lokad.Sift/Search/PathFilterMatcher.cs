@@ -12,7 +12,7 @@ internal sealed class PathFilterMatcher
         CacheCapacity,
         CacheCharacterCapacity,
         static key => key.CharacterCount);
-    private static readonly PathFilterMatcher Empty = new(new PathFilter());
+    private static readonly PathFilterMatcher Empty = new(new PathFilterCacheKey(new PathFilter()));
     private readonly string? _pathPrefix;
     private readonly byte[] _pathPrefixUtf8;
     private readonly GlobMatcher[] _includes;
@@ -36,11 +36,11 @@ internal sealed class PathFilterMatcher
         var key = new PathFilterCacheKey(filter);
         return Cache.GetOrAdd(
             key,
-            static cacheKey => new PathFilterMatcher(cacheKey.ToPathFilter()),
+            static cacheKey => new PathFilterMatcher(cacheKey),
             out _);
     }
 
-    public PathFilterMatcher(PathFilter filter)
+    private PathFilterMatcher(PathFilterCacheKey filter)
     {
         _pathPrefix = filter.PathPrefix is { } pathPrefix && !string.IsNullOrWhiteSpace(pathPrefix)
             ? pathPrefix.Replace('\\', '/')
@@ -233,12 +233,12 @@ internal sealed class PathFilterMatcher
         return builder.ToString();
     }
 
-    private static string[] BuildAccelerationFragments(PathFilter filter)
+    private static string[] BuildAccelerationFragments(PathFilterCacheKey filter)
     {
         var fragments = new List<string>(4);
         if (!string.IsNullOrWhiteSpace(filter.PathRegex))
         {
-            foreach (var fragment in PruneRedundantFragments(RegexFragmentAnalyzer.ExtractMandatoryFragments(filter.PathRegex)))
+            foreach (var fragment in LiteralFragmentSet.PruneContained(RegexFragmentAnalyzer.ExtractMandatoryFragments(filter.PathRegex)))
             {
                 if (fragment.Length >= 3)
                 {
@@ -277,41 +277,6 @@ internal sealed class PathFilterMatcher
         }
 
         return [.. fragments.Distinct(StringComparer.Ordinal)];
-    }
-
-    private static string[] PruneRedundantFragments(string[] fragments)
-    {
-        if (fragments.Length <= 1)
-        {
-            return fragments;
-        }
-
-        var ordered = fragments
-            .Where(static fragment => fragment.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .OrderByDescending(static fragment => fragment.Length)
-            .ThenBy(static fragment => fragment, StringComparer.Ordinal)
-            .ToArray();
-        var selected = new List<string>(ordered.Length);
-        foreach (var fragment in ordered)
-        {
-            var redundant = false;
-            for (var i = 0; i < selected.Count; i++)
-            {
-                if (selected[i].Contains(fragment, StringComparison.Ordinal))
-                {
-                    redundant = true;
-                    break;
-                }
-            }
-
-            if (!redundant)
-            {
-                selected.Add(fragment);
-            }
-        }
-
-        return [.. selected];
     }
 
     private static string ExtractGlobLiteral(string glob)
@@ -515,16 +480,16 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
 {
     private readonly string? _pathPrefix;
     private readonly string? _pathRegex;
-    private readonly string[]? _includeGlobs;
-    private readonly string[]? _excludeGlobs;
+    private readonly IReadOnlyList<string> _includeGlobs;
+    private readonly IReadOnlyList<string> _excludeGlobs;
     private readonly int _hashCode;
 
     public PathFilterCacheKey(PathFilter filter)
     {
         _pathPrefix = filter.PathPrefix;
         _pathRegex = filter.PathRegex;
-        _includeGlobs = filter.IncludeGlobs.ToArray();
-        _excludeGlobs = filter.ExcludeGlobs.ToArray();
+        _includeGlobs = filter.IncludeGlobs;
+        _excludeGlobs = filter.ExcludeGlobs;
 
         var hash = new HashCode();
         hash.Add(_pathPrefix, StringComparer.Ordinal);
@@ -539,6 +504,10 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
     }
 
     public int CharacterCount { get; }
+    public string? PathPrefix => _pathPrefix;
+    public string? PathRegex => _pathRegex;
+    public IReadOnlyList<string> IncludeGlobs => _includeGlobs;
+    public IReadOnlyList<string> ExcludeGlobs => _excludeGlobs;
 
     public bool Equals(PathFilterCacheKey? other)
     {
@@ -559,35 +528,19 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
         return _hashCode;
     }
 
-    public PathFilter ToPathFilter()
+    private static void AddPatterns(ref HashCode hash, IReadOnlyList<string> patterns)
     {
-        return new PathFilter(_pathPrefix, _includeGlobs, _excludeGlobs, _pathRegex);
-    }
-
-    private static void AddPatterns(ref HashCode hash, string[]? patterns)
-    {
-        if (patterns is null)
-        {
-            hash.Add(-1);
-            return;
-        }
-
-        hash.Add(patterns.Length);
-        for (var i = 0; i < patterns.Length; i++)
+        hash.Add(patterns.Count);
+        for (var i = 0; i < patterns.Count; i++)
         {
             hash.Add(patterns[i], StringComparer.Ordinal);
         }
     }
 
-    private static int GetCharacterCount(string[]? patterns)
+    private static int GetCharacterCount(IReadOnlyList<string> patterns)
     {
-        if (patterns is null)
-        {
-            return 0;
-        }
-
         var count = 0;
-        for (var i = 0; i < patterns.Length; i++)
+        for (var i = 0; i < patterns.Count; i++)
         {
             count = checked(count + (patterns[i]?.Length ?? 0));
         }
@@ -595,19 +548,19 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
         return count;
     }
 
-    private static bool SequenceEqual(string[]? left, string[]? right)
+    private static bool SequenceEqual(IReadOnlyList<string> left, IReadOnlyList<string> right)
     {
         if (ReferenceEquals(left, right))
         {
             return true;
         }
 
-        if (left is null || right is null || left.Length != right.Length)
+        if (left.Count != right.Count)
         {
             return false;
         }
 
-        for (var i = 0; i < left.Length; i++)
+        for (var i = 0; i < left.Count; i++)
         {
             if (!string.Equals(left[i], right[i], StringComparison.Ordinal))
             {

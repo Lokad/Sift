@@ -44,7 +44,7 @@ public sealed class PathMatcherTests
     [Fact]
     public async Task PathRegexAccelerationPrunesContainedMandatoryFragments()
     {
-        var matcher = new PathFilterMatcher(new Lokad.Sift.PathFilter { PathRegex = "special-file" });
+        var matcher = PathFilterMatcher.Prepare(new Lokad.Sift.PathFilter { PathRegex = "special-file" });
 
         Assert.NotEmpty(matcher.GetPathTrigrams());
     }
