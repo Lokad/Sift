@@ -412,26 +412,29 @@ public sealed class SearchStats
     public int HitsReturned { get; }
     public SearchStopReason StopReason { get; }
 
-    internal SearchStats WithStopReason(SearchStopReason stopReason) => new(
-        ElapsedMilliseconds,
-        ScopeDocuments,
-        ScopeBytes,
-        PostingsBytesRead,
-        CandidateDocumentsAfterIndex,
-        CandidateDocumentsAfterPrecheck,
-        VerifiedDocuments,
-        BytesScanned,
-        DecodedChars,
-        RegexInvocations,
-        Utf8RegexInvocations,
-        FallbackRegexInvocations,
-        NonBacktrackingRegexInvocations,
-        Utf8RegexMatchedDocuments,
-        Utf8RegexMatchesEnumerated,
-        Utf8RegexCacheHits,
-        Utf8RegexCacheMisses,
-        HitsReturned,
-        stopReason);
+    internal SearchStats WithStopReason(SearchStopReason stopReason)
+    {
+        return new SearchStats(
+            ElapsedMilliseconds,
+            ScopeDocuments,
+            ScopeBytes,
+            PostingsBytesRead,
+            CandidateDocumentsAfterIndex,
+            CandidateDocumentsAfterPrecheck,
+            VerifiedDocuments,
+            BytesScanned,
+            DecodedChars,
+            RegexInvocations,
+            Utf8RegexInvocations,
+            FallbackRegexInvocations,
+            NonBacktrackingRegexInvocations,
+            Utf8RegexMatchedDocuments,
+            Utf8RegexMatchesEnumerated,
+            Utf8RegexCacheHits,
+            Utf8RegexCacheMisses,
+            HitsReturned,
+            stopReason);
+    }
 }
 
 public sealed class MaterializedHit

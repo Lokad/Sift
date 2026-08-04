@@ -567,24 +567,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     private static SearchStats CombineStats(SearchStats overlay, SearchStats @base)
     {
-        return new SearchStats(
+        var metrics = SearchMetrics.FromSearchStats(overlay);
+        metrics.Add(SearchMetrics.FromSearchStats(@base));
+        return metrics.ToSearchStats(
             overlay.ElapsedMilliseconds + @base.ElapsedMilliseconds,
-            overlay.ScopeDocuments + @base.ScopeDocuments,
-            overlay.ScopeBytes + @base.ScopeBytes,
-            overlay.PostingsBytesRead + @base.PostingsBytesRead,
-            overlay.CandidateDocumentsAfterIndex + @base.CandidateDocumentsAfterIndex,
-            overlay.CandidateDocumentsAfterPrecheck + @base.CandidateDocumentsAfterPrecheck,
-            overlay.VerifiedDocuments + @base.VerifiedDocuments,
-            overlay.BytesScanned + @base.BytesScanned,
-            overlay.DecodedChars + @base.DecodedChars,
-            overlay.RegexInvocations + @base.RegexInvocations,
-            overlay.Utf8RegexInvocations + @base.Utf8RegexInvocations,
-            overlay.FallbackRegexInvocations + @base.FallbackRegexInvocations,
-            overlay.NonBacktrackingRegexInvocations + @base.NonBacktrackingRegexInvocations,
-            overlay.Utf8RegexMatchedDocuments + @base.Utf8RegexMatchedDocuments,
-            overlay.Utf8RegexMatchesEnumerated + @base.Utf8RegexMatchesEnumerated,
-            overlay.Utf8RegexCacheHits + @base.Utf8RegexCacheHits,
-            overlay.Utf8RegexCacheMisses + @base.Utf8RegexCacheMisses,
             overlay.HitsReturned + @base.HitsReturned,
             @base.StopReason);
     }
