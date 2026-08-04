@@ -22,7 +22,7 @@ internal static class Utf8RegexEngine
     internal static int CachePatternCharacters => Cache.Weight;
 
     public static bool TryCompile(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         [NotNullWhen(true)] out Utf8RegexProgram? program)
     {
@@ -37,7 +37,7 @@ internal static class Utf8RegexEngine
     }
 
     public static bool TryParseSyntax(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         [NotNullWhen(true)] out Utf8RegexSyntax? syntax)
     {
@@ -61,7 +61,7 @@ internal static class Utf8RegexEngine
     }
 
     public static bool TryCompile(
-        in SearchQuery query,
+        SearchQuery query,
         bool isExactLiteral,
         Utf8RegexSyntax syntax,
         [NotNullWhen(true)] out Utf8RegexProgram? program)

@@ -942,7 +942,8 @@ public sealed class SearchIntegrationTests
 
         Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
 
-        var group = Assert.Single(program.OrderedAnchorGroups!);
+        var groups = Assert.IsType<Utf8RegexOrderedAnchorGroup[]>(program.OrderedAnchorGroups);
+        var group = Assert.Single(groups);
         Assert.Null(group.Anchors[1].MaxGapBytesFromPrevious);
     }
 

@@ -4,19 +4,16 @@ public static class SiftContractExtensions
 {
     public static IIndexSnapshot OpenSnapshot(this ISift sift)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.OpenSnapshot(new SearchOptions());
     }
 
     public static IOverlaySnapshot OpenOverlaySnapshot(this ISift sift)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.OpenOverlaySnapshot(new SearchOptions());
     }
 
     public static Task<IndexValidationStats> Validate(this ISift sift)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Validate(CancellationToken.None);
     }
 
@@ -41,7 +38,6 @@ public static class SiftContractExtensions
         BuildOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Build(documents, options, cancellationToken);
     }
 
@@ -66,7 +62,6 @@ public static class SiftContractExtensions
         BuildOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Build(documents, options, cancellationToken);
     }
 
@@ -75,7 +70,6 @@ public static class SiftContractExtensions
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Update(upserts, deletions, CancellationToken.None);
     }
 
@@ -85,7 +79,6 @@ public static class SiftContractExtensions
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Update(upserts, deletions, options, CancellationToken.None);
     }
 
@@ -94,7 +87,6 @@ public static class SiftContractExtensions
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Update(upserts, deletions, CancellationToken.None);
     }
 
@@ -104,13 +96,11 @@ public static class SiftContractExtensions
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Update(upserts, deletions, options, CancellationToken.None);
     }
 
     public static Task<CompactStats> Compact(this ISift sift, CompactOptions options)
     {
-        ArgumentNullException.ThrowIfNull(sift);
         return sift.Compact(options, CancellationToken.None);
     }
 
@@ -118,17 +108,15 @@ public static class SiftContractExtensions
         this IIndexSnapshot snapshot,
         IDocumentKeyCollector collector)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
         return snapshot.VisitDocuments(collector, CancellationToken.None);
     }
 
     public static SearchStats Search(
         this IIndexSnapshot snapshot,
-        in SearchQuery query,
+        SearchQuery query,
         in PathFilter pathFilter,
         IHitCollector collector)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
         return snapshot.Search(query, pathFilter, collector, CancellationToken.None);
     }
 
@@ -137,7 +125,6 @@ public static class SiftContractExtensions
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
         return snapshot.Apply(upserts, deletions, CancellationToken.None);
     }
 
@@ -147,7 +134,6 @@ public static class SiftContractExtensions
         IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
         return snapshot.Apply(upserts, deletions, options, CancellationToken.None);
     }
 
@@ -172,7 +158,6 @@ public static class SiftContractExtensions
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
         return snapshot.ApplyTo(target, options, cancellationToken);
     }
 }

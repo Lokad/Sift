@@ -6,7 +6,7 @@ namespace Lokad.Sift.Search;
 internal static class RegexExecutionPlanner
 {
     public static RegexExecutionPlan Resolve(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         in RegexFragmentAnalyzer.PatternAnalysis analysis,
         Utf8RegexSyntax? utf8Syntax)
@@ -34,7 +34,7 @@ internal static class RegexExecutionPlanner
         return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, resolvedCaseMode));
     }
 
-    public static bool NeedsUnicodeDecode(in SearchQuery query, string[] mandatoryFragments, CaseMode resolvedCaseMode, in RegexExecutionPlan regexPlan)
+    public static bool NeedsUnicodeDecode(SearchQuery query, string[] mandatoryFragments, CaseMode resolvedCaseMode, in RegexExecutionPlan regexPlan)
     {
         if (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral && !regexPlan.UsesUtf8Regex)
         {

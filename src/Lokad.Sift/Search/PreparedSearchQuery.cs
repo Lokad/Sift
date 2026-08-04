@@ -111,13 +111,13 @@ internal sealed class PreparedMandatoryFragment(
 internal sealed class PreparedOrderedAnchor(
     byte[] utf8Bytes,
     byte[]? loweredAsciiBytes,
-    int[]? asciiPrefixTable,
+    int[] asciiPrefixTable,
     int? maxGapBytesFromPrevious,
     bool sameLineFromPrevious)
 {
     public byte[] Utf8Bytes { get; } = utf8Bytes;
     public byte[]? LoweredAsciiBytes { get; } = loweredAsciiBytes;
-    public int[]? AsciiPrefixTable { get; } = asciiPrefixTable;
+    public int[] AsciiPrefixTable { get; } = asciiPrefixTable;
     public int? MaxGapBytesFromPrevious { get; } = maxGapBytesFromPrevious;
     public bool SameLineFromPrevious { get; } = sameLineFromPrevious;
 }

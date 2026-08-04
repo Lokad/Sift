@@ -147,8 +147,6 @@ public sealed class Sift : ISift
         BuildOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(documents);
-        ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
@@ -161,8 +159,6 @@ public sealed class Sift : ISift
         BuildOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(documents);
-        ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
@@ -554,7 +550,6 @@ public sealed class Sift : ISift
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(upserts);
         return RunUpdate(
             (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
                 new ValueTask<StreamedDocuments>(IndexBuilder.StreamDocuments(
@@ -590,7 +585,6 @@ public sealed class Sift : ISift
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(upserts);
         return RunUpdate(
             (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
                 IndexBuilder.StreamDocumentsAsync(
@@ -880,7 +874,6 @@ public sealed class Sift : ISift
 
     private static void ValidateUpdateOptions(UpdateOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
         if (!Enum.IsDefined(options.RejectedUpsertPolicy))
         {
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
@@ -1152,7 +1145,6 @@ public sealed class Sift : ISift
 
     private static void ValidateCompactOptions(CompactOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
         if (options.MaxMergedSegments <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "MaxMergedSegments must be positive.");

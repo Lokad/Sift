@@ -8,7 +8,7 @@ internal static class SearchPlanner
     public static SegmentSearchPlan CreateSegmentPlan(
         SegmentCache cache,
         PathFilterMatcher matcher,
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         in SearchQueryAnchors anchors,
         in RegexExecutionPlan regexPlan,
@@ -33,14 +33,14 @@ internal static class SearchPlanner
             EstimatePathFilterCost(prefixDocuments, pathIndexCandidates, scope.Count, matcher.UsesPathIndex, pathVerificationKind));
     }
 
-    public static SearchPlannerDecision CreatePlan(MappedSegment segment, SegmentScope scope, in SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan, SiftOptions options)
+    public static SearchPlannerDecision CreatePlan(MappedSegment segment, SegmentScope scope, SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan, SiftOptions options)
     {
         var features = BuildFeatures(query, resolvedCaseMode, anchors, regexPlan);
         var candidates = SearchPlanCandidateBuilder.Enumerate(segment, scope, in features, options);
         return FinalizePlan(candidates);
     }
 
-    private static SearchQueryFeatures BuildFeatures(in SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan)
+    private static SearchQueryFeatures BuildFeatures(SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan)
     {
         return new SearchQueryFeatures(
             query,

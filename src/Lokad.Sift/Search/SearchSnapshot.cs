@@ -79,7 +79,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IDocumentKeyCollector collector,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(collector);
         var guardedCollector = new GuardedDocumentKeyCollector(collector);
         try
         {
@@ -120,7 +119,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
+    public SearchPlan Explain(SearchQuery query, in PathFilter pathFilter)
     {
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
@@ -135,7 +134,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private SearchPlan ExplainCore(in SearchQuery query, in PathFilter pathFilter)
+    private SearchPlan ExplainCore(SearchQuery query, in PathFilter pathFilter)
     {
         using var operation = BeginOperation();
         var preparedQuery = PrepareSearchQuery(query);
@@ -256,13 +255,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             plannerAlternatives);
     }
 
-    public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
+    public SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
     {
         return Search(query, pathFilter, collector, CancellationToken.None);
     }
 
     public SearchStats Search(
-        in SearchQuery query,
+        SearchQuery query,
         in PathFilter pathFilter,
         IHitCollector collector,
         CancellationToken cancellationToken)
@@ -271,7 +270,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     internal SearchStats Search(
-        in SearchQuery query,
+        SearchQuery query,
         in PathFilter pathFilter,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
@@ -279,7 +278,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
-        ArgumentNullException.ThrowIfNull(collector);
         var guardedCollector = new GuardedHitCollector(collector);
         try
         {
@@ -303,7 +301,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private SearchStats SearchCore(
-        in SearchQuery query,
+        SearchQuery query,
         in PathFilter pathFilter,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
@@ -339,7 +337,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private SearchStats SearchSequential(
-        in SearchQuery query,
+        SearchQuery query,
         PathFilterMatcher matcher,
         PreparedSearchQuery preparedQuery,
         IHitCollector collector,
@@ -348,8 +346,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken callerCancellationToken,
         Stopwatch watch)
     {
-        ArgumentNullException.ThrowIfNull(collector);
-
         var resolvedCaseMode = preparedQuery.ResolvedCaseMode;
         var regexPlan = preparedQuery.RegexPlan;
         var preparedRegex = preparedQuery.GetRegexExecution();
@@ -562,7 +558,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private SearchStats SearchParallel(
-        in SearchQuery query,
+        SearchQuery query,
         PathFilterMatcher matcher,
         PreparedSearchQuery preparedQuery,
         IHitCollector collector,
@@ -571,8 +567,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken callerCancellationToken,
         Stopwatch watch)
     {
-        ArgumentNullException.ThrowIfNull(collector);
-
         var resolvedCaseMode = preparedQuery.ResolvedCaseMode;
         var regexPlan = preparedQuery.RegexPlan;
         var preparedRegex = preparedQuery.GetRegexExecution();
@@ -1102,9 +1096,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             EndOfStreamException;
     }
 
-    private void ValidateQuery(in SearchQuery query)
+    private void ValidateQuery(SearchQuery query)
     {
-        ArgumentNullException.ThrowIfNull(query);
         if (!Enum.IsDefined(query.PatternMode))
         {
             throw new ArgumentOutOfRangeException(nameof(query), "PatternMode is invalid.");
@@ -1223,14 +1216,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static int GetDocumentHitLimit(int hitsReturned, in SearchQuery query)
+    private static int GetDocumentHitLimit(int hitsReturned, SearchQuery query)
     {
         return (int)Math.Min(
             query.MaxHits,
             Math.Min(int.MaxValue, (long)hitsReturned + query.MaxHitsPerDocument));
     }
 
-    private static bool HasElapsed(in SearchQuery query, Stopwatch watch)
+    private static bool HasElapsed(SearchQuery query, Stopwatch watch)
     {
         return watch.ElapsedMilliseconds >= query.MaxElapsedMilliseconds;
     }
@@ -1256,7 +1249,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SegmentSearchResult SearchSegmentFully(
         SegmentCache cache,
-        in SearchQuery query,
+        SearchQuery query,
         PathFilterMatcher matcher,
         CaseMode resolvedCaseMode,
         in SearchQueryAnchors anchors,
@@ -1447,7 +1440,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private static void SearchLiteralDocument(
         MappedSegment segment,
         SegmentDocument document,
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         PreparedLiteralQuery? preparedLiteral,
         int hitLimit,
@@ -1482,7 +1475,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             asciiNeedle &&
             (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
         {
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, prefixTable: null, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1554,7 +1547,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[]? prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ref int hitsReturned, ref SearchStopReason stopReason)
+    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ref int hitsReturned, ref SearchStopReason stopReason)
     {
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)
@@ -1566,7 +1559,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
             var relativeIndex = caseSensitive
                 ? contentBytes[offset..].IndexOf(needle)
-                : IndexOfAsciiInsensitive(contentBytes[offset..], needle, prefixTable!, cancellationToken);
+                : IndexOfAsciiInsensitive(contentBytes[offset..], needle, prefixTable, cancellationToken);
             if (relativeIndex < 0)
             {
                 return;
@@ -1770,7 +1763,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         var relative = anchor.LoweredAsciiBytes is null
             ? contentBytes[searchStart..].IndexOf(anchor.Utf8Bytes)
-            : IndexOfAsciiInsensitive(contentBytes[searchStart..], anchor.LoweredAsciiBytes, anchor.AsciiPrefixTable!, cancellationToken);
+            : IndexOfAsciiInsensitive(contentBytes[searchStart..], anchor.LoweredAsciiBytes, anchor.AsciiPrefixTable, cancellationToken);
         return relative < 0 ? -1 : searchStart + relative;
     }
 
@@ -1905,7 +1898,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return loweredNeedle;
     }
 
-    private static PreparedSearchQuery PrepareSearchQuery(in SearchQuery query)
+    private static PreparedSearchQuery PrepareSearchQuery(SearchQuery query)
     {
         var key = new PreparedQueryKey(
             query.Pattern,
@@ -1956,7 +1949,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private static PreparedLiteralQuery? PrepareLiteralQuery(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         string? literalOverride)
     {
@@ -2026,7 +2019,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 prepared[groupIndex][anchorIndex] = new PreparedOrderedAnchor(
                     anchor.Utf8Bytes,
                     lowered,
-                    lowered is null ? null : BuildPrefixTable(lowered),
+                    lowered is null ? [] : BuildPrefixTable(lowered),
                     anchor.MaxGapBytesFromPrevious,
                     anchor.SameLineFromPrevious);
             }
@@ -2036,7 +2029,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private static PreparedRegexExecution PrepareRegexExecution(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         in RegexExecutionPlan regexPlan)
     {
@@ -2058,7 +2051,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private static SearchQueryAnchors BuildQueryAnchors(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         in RegexExecutionPlan regexPlan,
         in RegexFragmentAnalyzer.PatternAnalysis analysis)
@@ -2112,7 +2105,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private static string[] GetMandatoryFragments(
-        in SearchQuery query,
+        SearchQuery query,
         string? exactRegexLiteral,
         in RegexFragmentAnalyzer.PatternAnalysis analysis)
     {
@@ -2127,7 +2120,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private static string[] GetAdvisorySeeds(
-        in SearchQuery query,
+        SearchQuery query,
         string? exactRegexLiteral,
         string[] mandatoryFragments,
         in RegexFragmentAnalyzer.PatternAnalysis analysis,
@@ -2215,7 +2208,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return [.. selected];
     }
 
-    private static CaseMode ResolveCaseMode(in SearchQuery query)
+    private static CaseMode ResolveCaseMode(SearchQuery query)
     {
         return query.CaseMode switch
         {
@@ -2290,7 +2283,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     }
 
     private static bool ShouldIncludeNonAsciiRegexCandidates(
-        in SearchQuery query,
+        SearchQuery query,
         CaseMode resolvedCaseMode,
         in RegexExecutionPlan regexPlan,
         in SearchPlanCandidate plan)
@@ -2386,7 +2379,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             : Encoding.UTF8.GetString(bytes);
     }
 
-    private bool CanUseSegmentParallelSearch(in SearchQuery query)
+    private bool CanUseSegmentParallelSearch(SearchQuery query)
     {
         return _searchOptions.SegmentParallelism > 1 &&
                _segments.Count > 1 &&

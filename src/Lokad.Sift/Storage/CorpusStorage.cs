@@ -40,7 +40,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     internal CorpusStorage(string rootPath, long maximumPhysicalBytes)
     {
-        _rootPath = rootPath ?? throw new ArgumentNullException(nameof(rootPath));
+        _rootPath = rootPath;
         _maximumPhysicalBytes = maximumPhysicalBytes;
     }
 

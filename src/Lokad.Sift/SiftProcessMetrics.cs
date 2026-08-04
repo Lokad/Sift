@@ -1,7 +1,14 @@
-namespace Lokad.Sift.Search;
+using Lokad.Sift.Search;
+using Lokad.Sift.Storage;
 
-public static class SearchProcessMetrics
+namespace Lokad.Sift;
+
+/// <summary>Process-wide resource and cache counters maintained by Sift.</summary>
+public static class SiftProcessMetrics
 {
+    public static long MappedSegmentBytes => MappedSegment.CurrentMappedBytes;
+    public static int OpenSegments => MappedSegment.CurrentOpenSegments;
+    public static long NativeIndexWorkspaceBytes => DirectIndexedGramBuilder.CurrentNativeWorkspaceBytes;
     public static long RegexCacheHits => RegexVerifier.CacheHits;
     public static long RegexCacheMisses => RegexVerifier.CacheMisses;
     public static int RegexCacheEntries => RegexVerifier.CacheCount;

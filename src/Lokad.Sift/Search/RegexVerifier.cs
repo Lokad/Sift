@@ -116,17 +116,17 @@ internal static class RegexVerifier
         return matched;
     }
 
-    public static string BuildPattern(in SearchQuery query)
+    public static string BuildPattern(SearchQuery query)
     {
         return BuildPattern(query, includeWholeWord: false);
     }
 
-    public static string BuildUtf8Pattern(in SearchQuery query)
+    public static string BuildUtf8Pattern(SearchQuery query)
     {
         return BuildPattern(query, includeWholeWord: true);
     }
 
-    private static string BuildPattern(in SearchQuery query, bool includeWholeWord)
+    private static string BuildPattern(SearchQuery query, bool includeWholeWord)
     {
         var pattern = query.Pattern;
         if (includeWholeWord && query.WholeWord)
@@ -142,7 +142,7 @@ internal static class RegexVerifier
         return pattern;
     }
 
-    public static PreparedRegexVerifier Prepare(in SearchQuery query, CaseMode resolvedCaseMode)
+    public static PreparedRegexVerifier Prepare(SearchQuery query, CaseMode resolvedCaseMode)
     {
         var entry = GetRegexEntry(query, resolvedCaseMode);
         return new PreparedRegexVerifier(
@@ -152,12 +152,12 @@ internal static class RegexVerifier
             query.TimeoutPolicy);
     }
 
-    public static Regex GetRegex(in SearchQuery query, CaseMode resolvedCaseMode)
+    public static Regex GetRegex(SearchQuery query, CaseMode resolvedCaseMode)
     {
         return Prepare(query, resolvedCaseMode).Regex;
     }
 
-    private static RegexEntry GetRegexEntry(in SearchQuery query, CaseMode resolvedCaseMode)
+    private static RegexEntry GetRegexEntry(SearchQuery query, CaseMode resolvedCaseMode)
     {
         var pattern = BuildPattern(query);
         var options = RegexOptions.CultureInvariant;

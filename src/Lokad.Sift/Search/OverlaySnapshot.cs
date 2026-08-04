@@ -71,7 +71,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(options);
         if (!Enum.IsDefined(options.RejectedUpsertPolicy))
         {
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
@@ -86,7 +85,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(upserts);
         await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -225,8 +223,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(options);
         return ApplyToCore(target, options, cancellationToken);
     }
 
@@ -239,7 +235,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         IDocumentKeyCollector collector,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(collector);
         using var state = BeginRead();
         var hiddenPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
         hiddenPaths.UnionWith(_overlayDocuments.Keys);
@@ -256,7 +251,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayStats.Completed);
     }
 
-    public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
+    public SearchPlan Explain(SearchQuery query, in PathFilter pathFilter)
     {
         using var state = BeginRead();
         var basePlan = _baseSnapshot.Explain(query, pathFilter);
@@ -300,18 +295,17 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             dominantPlan.PlannerAlternatives);
     }
 
-    public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
+    public SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
     {
         return Search(query, pathFilter, collector, CancellationToken.None);
     }
 
     public SearchStats Search(
-        in SearchQuery query,
+        SearchQuery query,
         in PathFilter pathFilter,
         IHitCollector collector,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(collector);
         using var state = BeginRead();
         var watch = Stopwatch.StartNew();
 
@@ -512,7 +506,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return documents;
     }
 
-    private static SearchStats CombineStats(in SearchStats overlay, in SearchStats @base)
+    private static SearchStats CombineStats(SearchStats overlay, SearchStats @base)
     {
         return new SearchStats(
             overlay.ElapsedMilliseconds + @base.ElapsedMilliseconds,
@@ -726,7 +720,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         public int VisitedDocuments { get; private set; }
 
-        public bool OnDocument(in DocumentKey key)
+        public bool OnDocument(DocumentKey key)
         {
             if (hiddenPaths.Contains(key.Path))
             {

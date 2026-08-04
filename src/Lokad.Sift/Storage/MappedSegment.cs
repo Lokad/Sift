@@ -134,8 +134,6 @@ internal sealed unsafe class MappedSegment : IDisposable
 
     public (uint StartInclusive, uint EndExclusive) FindPathPrefixRange(string prefix)
     {
-        ArgumentNullException.ThrowIfNull(prefix);
-
         if (DocumentCount == 0)
         {
             return (0, 0);
@@ -178,8 +176,6 @@ internal sealed unsafe class MappedSegment : IDisposable
 
     public bool TryFindDocumentOrdinal(string normalizedPath, out uint ordinal)
     {
-        ArgumentNullException.ThrowIfNull(normalizedPath);
-
         ordinal = LowerBound(normalizedPath);
         if (ordinal >= (uint)DocumentCount)
         {
@@ -394,8 +390,6 @@ internal sealed unsafe class MappedSegment : IDisposable
 
     public void VisitPostings(IndexRegionPair pair, PostingsVisitor visitor)
     {
-        ArgumentNullException.ThrowIfNull(visitor);
-
         var lexiconRegion = GetRegion(pair.Lexicon);
         var postingsRegion = GetRegion(pair.Postings);
         var lexicon = new ReadOnlySpan<byte>(BasePointer + lexiconRegion.Offset, (int)lexiconRegion.Length);

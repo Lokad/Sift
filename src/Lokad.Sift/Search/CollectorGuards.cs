@@ -38,7 +38,7 @@ internal sealed class GuardedHitCollector(IHitCollector inner) : IHitCollector
 
 internal sealed class GuardedDocumentKeyCollector(IDocumentKeyCollector inner) : IDocumentKeyCollector
 {
-    public bool OnDocument(in DocumentKey key)
+    public bool OnDocument(DocumentKey key)
     {
         try
         {

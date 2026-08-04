@@ -1417,12 +1417,12 @@ static RealCorpusBenchmarkResult RunRealCorpus(DiscoveredCorpus corpus, RealQuer
     {
         var buildMetrics = BuildRealCorpusIndex(benchmarkRoot, corpus, options);
 
-        var mappedBytesBefore = MappedSegment.CurrentMappedBytes;
+        var mappedBytesBefore = SiftProcessMetrics.MappedSegmentBytes;
         var openStart = Stopwatch.GetTimestamp();
         using var index = new Sift(benchmarkRoot, new SiftOptions());
         using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
         var openElapsed = Stopwatch.GetElapsedTime(openStart);
-        var mappedBytesDelta = MappedSegment.CurrentMappedBytes - mappedBytesBefore;
+        var mappedBytesDelta = SiftProcessMetrics.MappedSegmentBytes - mappedBytesBefore;
 
         var queryResults = options.PrepareIndexOnly
             ? []
@@ -1451,12 +1451,12 @@ static RealCorpusBenchmarkResult RunRealCorpusWithCachedIndex(DiscoveredCorpus c
     var cachePath = cachedIndex.CachePath;
     var metadata = cachedIndex.Metadata;
 
-    var mappedBytesBefore = MappedSegment.CurrentMappedBytes;
+    var mappedBytesBefore = SiftProcessMetrics.MappedSegmentBytes;
     var openStart = Stopwatch.GetTimestamp();
     using var index = new Sift(cachePath, new SiftOptions());
     using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
     var openElapsed = Stopwatch.GetElapsedTime(openStart);
-    var mappedBytesDelta = MappedSegment.CurrentMappedBytes - mappedBytesBefore;
+    var mappedBytesDelta = SiftProcessMetrics.MappedSegmentBytes - mappedBytesBefore;
 
     var queryResults = options.PrepareIndexOnly
         ? []
@@ -2246,7 +2246,7 @@ static RealQueryResult RunRealQuery(IIndexSnapshot snapshot, RealQueryDefinition
 
 static bool TryRunSearch(
     IIndexSnapshot snapshot,
-    in SearchQuery query,
+    SearchQuery query,
     in PathFilter pathFilter,
     int? timeoutMilliseconds,
     [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SearchStats? stats)

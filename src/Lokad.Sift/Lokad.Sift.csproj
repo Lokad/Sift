@@ -26,7 +26,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Lokad.Sift.Tests" />
     <InternalsVisibleTo Include="Lokad.Sift.Benchmarks" />
-    <InternalsVisibleTo Include="Lokad.Sift.Cli" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\LICENSE.txt" Pack="true" PackagePath="\" Visible="false" />

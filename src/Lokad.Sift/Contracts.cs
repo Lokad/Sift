@@ -1067,7 +1067,7 @@ public interface IHitCollector
 
 public interface IDocumentKeyCollector
 {
-    bool OnDocument(in DocumentKey key);
+    bool OnDocument(DocumentKey key);
 }
 
 public readonly record struct DocumentVisitStats(
@@ -1082,8 +1082,8 @@ public interface IDocumentSource
 public interface IIndexSnapshot : IDisposable
 {
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
-    SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter);
-    SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
+    SearchPlan Explain(SearchQuery query, in PathFilter pathFilter);
+    SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
 }

@@ -8,27 +8,27 @@ public sealed class IndexingWorkspaceTests
     [Fact]
     public async Task MutationReleasesNativeIndexingWorkspaceByDefault()
     {
-        Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
+        Assert.Equal(0, SiftProcessMetrics.NativeIndexWorkspaceBytes);
         using var index = SiftIndex.CreateInMemory();
 
         var build = await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
 
         Assert.Equal(0, build.PeakManagedBytes);
-        Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
+        Assert.Equal(0, SiftProcessMetrics.NativeIndexWorkspaceBytes);
     }
 
     [Fact]
     public async Task RetainedWorkspaceIsReleasedWhenOptedInIndexIsDisposed()
     {
-        Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
+        Assert.Equal(0, SiftProcessMetrics.NativeIndexWorkspaceBytes);
         var index = SiftIndex.CreateInMemory(new SiftOptions { RetainIndexingWorkspace = true });
         try
         {
             await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
-            Assert.True(IndexingProcessMetrics.NativeWorkspaceBytes >= 128L * 1024 * 1024);
+            Assert.True(SiftProcessMetrics.NativeIndexWorkspaceBytes >= 128L * 1024 * 1024);
 
             index.Dispose();
-            Assert.Equal(0, IndexingProcessMetrics.NativeWorkspaceBytes);
+            Assert.Equal(0, SiftProcessMetrics.NativeIndexWorkspaceBytes);
         }
         finally
         {

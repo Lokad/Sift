@@ -125,7 +125,7 @@ internal sealed class DocumentKeyBuffer : IDocumentKeyCollector
 
     public List<DocumentKey> Keys { get; } = [];
 
-    public bool OnDocument(in DocumentKey key)
+    public bool OnDocument(DocumentKey key)
     {
         Keys.Add(key);
         return Keys.Count < _maximumDocuments;

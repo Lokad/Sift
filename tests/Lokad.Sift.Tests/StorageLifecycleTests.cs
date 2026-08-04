@@ -624,10 +624,11 @@ public sealed class StorageLifecycleTests
         await index.Build(fixture.CreateSource());
 
         var storage = index.GetStorageStats();
+        var availableBytes = Assert.IsType<long>(storage.AvailableBytes);
         var options = new CompactOptions
         {
             DeadFractionThreshold = 0,
-            MinimumFreeBytesAfterCompaction = storage.AvailableBytes!.Value
+            MinimumFreeBytesAfterCompaction = availableBytes
         };
 
         Assert.False(index.ShouldCompact(options));

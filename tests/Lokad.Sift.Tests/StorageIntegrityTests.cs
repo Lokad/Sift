@@ -513,24 +513,24 @@ public sealed class StorageIntegrityTests
 
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = storage.ReadManifest();
-        var baselineBytes = MappedSegment.CurrentMappedBytes;
-        var baselineOpen = MappedSegment.CurrentOpenSegments;
+        var baselineBytes = SiftProcessMetrics.MappedSegmentBytes;
+        var baselineOpen = SiftProcessMetrics.OpenSegments;
 
         using (var segment = storage.OpenSegment(manifest.Segments[0].SegmentId))
         {
-            Assert.True(MappedSegment.CurrentMappedBytes > baselineBytes);
-            Assert.True(MappedSegment.CurrentOpenSegments >= baselineOpen + 1);
+            Assert.True(SiftProcessMetrics.MappedSegmentBytes > baselineBytes);
+            Assert.True(SiftProcessMetrics.OpenSegments >= baselineOpen + 1);
         }
 
         var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 5;
-        while ((MappedSegment.CurrentMappedBytes > baselineBytes || MappedSegment.CurrentOpenSegments > baselineOpen) &&
+        while ((SiftProcessMetrics.MappedSegmentBytes > baselineBytes || SiftProcessMetrics.OpenSegments > baselineOpen) &&
                Stopwatch.GetTimestamp() < deadline)
         {
             Thread.Sleep(20);
         }
 
-        Assert.True(MappedSegment.CurrentMappedBytes <= baselineBytes);
-        Assert.True(MappedSegment.CurrentOpenSegments <= baselineOpen);
+        Assert.True(SiftProcessMetrics.MappedSegmentBytes <= baselineBytes);
+        Assert.True(SiftProcessMetrics.OpenSegments <= baselineOpen);
     }
 
     [Fact]
@@ -541,13 +541,13 @@ public sealed class StorageIntegrityTests
         await index.Build(fixture.CreateSource());
         var storage = new CorpusStorage(fixture.CorpusPath);
         var segmentId = storage.ReadManifest().Segments.Single().SegmentId;
-        var baselineOpen = MappedSegment.CurrentOpenSegments;
+        var baselineOpen = SiftProcessMetrics.OpenSegments;
         var segment = storage.OpenSegment(segmentId);
 
         segment.Dispose();
         segment.Dispose();
 
-        Assert.Equal(baselineOpen, MappedSegment.CurrentOpenSegments);
+        Assert.Equal(baselineOpen, SiftProcessMetrics.OpenSegments);
     }
 
     [Fact]

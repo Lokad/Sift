@@ -5,7 +5,7 @@ namespace Lokad.Sift.Search;
 internal static class SearchPlanKinds
 {
     public static SearchPatternKind GetPatternKind(
-        in SearchQuery query,
+        SearchQuery query,
         in RegexExecutionPlan regexPlan)
     {
         if (query.PatternMode == PatternMode.Literal)
@@ -58,7 +58,7 @@ internal static class SearchPlanKinds
     }
 
     public static SearchVerifierKind GetVerifierKind(
-        in SearchQuery query,
+        SearchQuery query,
         in RegexExecutionPlan regexPlan)
     {
         if (query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral)

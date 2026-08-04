@@ -79,6 +79,21 @@ public sealed class PublicContractTests
         }
     }
 
+    [Fact]
+    public void PublicApiHasNoOptionalParameters()
+    {
+        var optionalParameters = typeof(Sift).Assembly.GetExportedTypes()
+            .SelectMany(static type => type
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+                .Cast<MethodBase>()
+                .Concat(type.GetConstructors(BindingFlags.Public | BindingFlags.Instance)))
+            .SelectMany(static method => method.GetParameters())
+            .Where(static parameter => parameter.IsOptional || parameter.HasDefaultValue)
+            .ToArray();
+
+        Assert.Empty(optionalParameters);
+    }
+
     private static int CountMethods<T>(string name)
     {
         return typeof(T).GetMethods(BindingFlags.Public | BindingFlags.Instance)
