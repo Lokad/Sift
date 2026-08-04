@@ -234,7 +234,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayStats.Completed);
     }
 
-    public SearchPlan Explain(SearchQuery query, in PathFilter pathFilter)
+    public SearchPlan Explain(SearchQuery query, PathFilter pathFilter)
     {
         using var state = BeginRead();
         var basePlan = _baseSnapshot.Explain(query, pathFilter);
@@ -355,14 +355,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
     }
 
-    public SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
+    public SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector)
     {
         return Search(query, pathFilter, collector, CancellationToken.None);
     }
 
     public SearchStats Search(
         SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilter pathFilter,
         IHitCollector collector,
         CancellationToken cancellationToken)
     {

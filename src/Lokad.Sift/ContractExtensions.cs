@@ -114,7 +114,7 @@ public static class SiftContractExtensions
     public static SearchStats Search(
         this IIndexSnapshot snapshot,
         SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilter pathFilter,
         IHitCollector collector)
     {
         return snapshot.Search(query, pathFilter, collector, CancellationToken.None);

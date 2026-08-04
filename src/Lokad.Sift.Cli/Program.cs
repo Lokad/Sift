@@ -245,8 +245,8 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
         new PathFilter
         {
             PathPrefix = pathPrefix,
-            IncludeGlobs = includeGlobs.Count == 0 ? null : [.. includeGlobs],
-            ExcludeGlobs = excludeGlobs.Count == 0 ? null : [.. excludeGlobs],
+            IncludeGlobs = [.. includeGlobs],
+            ExcludeGlobs = [.. excludeGlobs],
             PathRegex = pathRegex
         },
         contextBefore,

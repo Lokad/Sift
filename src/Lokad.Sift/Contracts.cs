@@ -141,8 +141,11 @@ public readonly record struct SearchOptions
     public int SegmentParallelism { get; init; }
 }
 
-public readonly record struct PathFilter
+public sealed class PathFilter
 {
+    private IReadOnlyList<string> _includeGlobs = Array.Empty<string>();
+    private IReadOnlyList<string> _excludeGlobs = Array.Empty<string>();
+
     public PathFilter()
         : this(
             pathPrefix: null,
@@ -154,19 +157,33 @@ public readonly record struct PathFilter
 
     public PathFilter(
         string? pathPrefix,
-        string[]? includeGlobs,
-        string[]? excludeGlobs,
+        IReadOnlyList<string>? includeGlobs,
+        IReadOnlyList<string>? excludeGlobs,
         string? pathRegex)
     {
         PathPrefix = pathPrefix;
-        IncludeGlobs = includeGlobs;
-        ExcludeGlobs = excludeGlobs;
+        _includeGlobs = includeGlobs is null
+            ? Array.Empty<string>()
+            : PublicResultCollection.Freeze(includeGlobs);
+        _excludeGlobs = excludeGlobs is null
+            ? Array.Empty<string>()
+            : PublicResultCollection.Freeze(excludeGlobs);
         PathRegex = pathRegex;
     }
 
     public string? PathPrefix { get; init; }
-    public string[]? IncludeGlobs { get; init; }
-    public string[]? ExcludeGlobs { get; init; }
+    public IReadOnlyList<string> IncludeGlobs
+    {
+        get => _includeGlobs;
+        init => _includeGlobs = PublicResultCollection.Freeze(value);
+    }
+
+    public IReadOnlyList<string> ExcludeGlobs
+    {
+        get => _excludeGlobs;
+        init => _excludeGlobs = PublicResultCollection.Freeze(value);
+    }
+
     public string? PathRegex { get; init; }
 }
 
@@ -1120,8 +1137,8 @@ public interface IDocumentSource
 public interface IIndexSnapshot : IDisposable
 {
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
-    SearchPlan Explain(SearchQuery query, in PathFilter pathFilter);
-    SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
+    SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
+    SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
 
     /// <summary>Gets a document body owned by this snapshot.</summary>

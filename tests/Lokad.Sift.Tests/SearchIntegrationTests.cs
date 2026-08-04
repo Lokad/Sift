@@ -1498,17 +1498,17 @@ public sealed class SearchIntegrationTests
     }
 
 
-    private static bool MatchesPathFilter(string path, in PathFilter filter)
+    private static bool MatchesPathFilter(string path, PathFilter filter)
     {
         if (!string.IsNullOrWhiteSpace(filter.PathPrefix) && !path.StartsWith(filter.PathPrefix, StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (filter.IncludeGlobs is { Length: > 0 })
+        if (filter.IncludeGlobs.Count > 0)
         {
             var included = false;
-            for (var i = 0; i < filter.IncludeGlobs.Length; i++)
+            for (var i = 0; i < filter.IncludeGlobs.Count; i++)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(path, GlobToRegex(filter.IncludeGlobs[i])))
                 {
@@ -1523,9 +1523,9 @@ public sealed class SearchIntegrationTests
             }
         }
 
-        if (filter.ExcludeGlobs is { Length: > 0 })
+        if (filter.ExcludeGlobs.Count > 0)
         {
-            for (var i = 0; i < filter.ExcludeGlobs.Length; i++)
+            for (var i = 0; i < filter.ExcludeGlobs.Count; i++)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(path, GlobToRegex(filter.ExcludeGlobs[i])))
                 {

@@ -45,6 +45,20 @@ public sealed class PublicContractTests
     }
 
     [Fact]
+    public void PathFilterOwnsImmutablePatternCollections()
+    {
+        var includes = new[] { "src/**" };
+        var filter = new PathFilter { IncludeGlobs = includes };
+        includes[0] = "test/**";
+
+        Assert.False(typeof(PathFilter).IsValueType);
+        Assert.Equal("src/**", filter.IncludeGlobs[0]);
+        var mutableView = Assert.IsAssignableFrom<IList<string>>(filter.IncludeGlobs);
+        Assert.Throws<NotSupportedException>(() => mutableView[0] = "other/**");
+        Assert.Empty(new PathFilter().ExcludeGlobs);
+    }
+
+    [Fact]
     public void LargeOperationResultsAreReferenceTypes()
     {
         Assert.False(typeof(SearchPlan).IsValueType);

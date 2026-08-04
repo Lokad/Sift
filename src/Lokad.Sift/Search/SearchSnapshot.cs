@@ -119,7 +119,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    public SearchPlan Explain(SearchQuery query, in PathFilter pathFilter)
+    public SearchPlan Explain(SearchQuery query, PathFilter pathFilter)
     {
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
@@ -134,7 +134,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private SearchPlan ExplainCore(SearchQuery query, in PathFilter pathFilter)
+    private SearchPlan ExplainCore(SearchQuery query, PathFilter pathFilter)
     {
         using var operation = BeginOperation();
         var preparedQuery = PrepareSearchQuery(query);
@@ -252,8 +252,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             selectedNgrams,
             matcher.PathPrefix is not null,
             !string.IsNullOrWhiteSpace(pathFilter.PathRegex),
-            pathFilter.IncludeGlobs is { Length: > 0 },
-            pathFilter.ExcludeGlobs is { Length: > 0 },
+            pathFilter.IncludeGlobs.Count > 0,
+            pathFilter.ExcludeGlobs.Count > 0,
             matcher.UsesPathIndex,
             usesIndex,
             canUseLiteralVerifier,
@@ -282,14 +282,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    public SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
+    public SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector)
     {
         return Search(query, pathFilter, collector, CancellationToken.None);
     }
 
     public SearchStats Search(
         SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilter pathFilter,
         IHitCollector collector,
         CancellationToken cancellationToken)
     {
@@ -298,7 +298,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     internal SearchStats Search(
         SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilter pathFilter,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken)
@@ -329,7 +329,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SearchStats SearchCore(
         SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilter pathFilter,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken)
@@ -1179,7 +1179,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private void ValidatePathFilter(in PathFilter pathFilter)
+    private void ValidatePathFilter(PathFilter pathFilter)
     {
         long totalCharacters = 0;
         ValidatePathPattern(pathFilter.PathPrefix);
@@ -1192,8 +1192,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 nameof(pathFilter));
         }
 
-        var includeCount = pathFilter.IncludeGlobs?.Length ?? 0;
-        var excludeCount = pathFilter.ExcludeGlobs?.Length ?? 0;
+        var includeCount = pathFilter.IncludeGlobs.Count;
+        var excludeCount = pathFilter.ExcludeGlobs.Count;
         if ((long)includeCount + excludeCount > _options.MaxPathFilterPatterns)
         {
             throw new ArgumentException(
@@ -1201,20 +1201,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 nameof(pathFilter));
         }
 
-        if (pathFilter.IncludeGlobs is { } includes)
+        var includes = pathFilter.IncludeGlobs;
+        for (var i = 0; i < includes.Count; i++)
         {
-            for (var i = 0; i < includes.Length; i++)
-            {
-                ValidatePathPattern(includes[i]);
-            }
+            ValidatePathPattern(includes[i]);
         }
 
-        if (pathFilter.ExcludeGlobs is { } excludes)
+        var excludes = pathFilter.ExcludeGlobs;
+        for (var i = 0; i < excludes.Count; i++)
         {
-            for (var i = 0; i < excludes.Length; i++)
-            {
-                ValidatePathPattern(excludes[i]);
-            }
+            ValidatePathPattern(excludes[i]);
         }
 
         if (totalCharacters > _options.MaxPathFilterCharacters)

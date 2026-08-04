@@ -23,12 +23,12 @@ internal sealed class PathFilterMatcher
     internal static int CacheCount => Cache.Count;
     internal static int CacheCharacters => Cache.Weight;
 
-    public static PathFilterMatcher Prepare(in PathFilter filter)
+    public static PathFilterMatcher Prepare(PathFilter filter)
     {
         if (filter.PathPrefix is null &&
             filter.PathRegex is null &&
-            filter.IncludeGlobs is null or { Length: 0 } &&
-            filter.ExcludeGlobs is null or { Length: 0 })
+            filter.IncludeGlobs.Count == 0 &&
+            filter.ExcludeGlobs.Count == 0)
         {
             return Empty;
         }
@@ -40,7 +40,7 @@ internal sealed class PathFilterMatcher
             out _);
     }
 
-    public PathFilterMatcher(in PathFilter filter)
+    public PathFilterMatcher(PathFilter filter)
     {
         _pathPrefix = filter.PathPrefix is { } pathPrefix && !string.IsNullOrWhiteSpace(pathPrefix)
             ? pathPrefix.Replace('\\', '/')
@@ -160,14 +160,14 @@ internal sealed class PathFilterMatcher
 
     public int[] GetPathTrigrams() => _pathTrigrams;
 
-    private static GlobMatcher[] CompileGlobs(string[]? globs)
+    private static GlobMatcher[] CompileGlobs(IReadOnlyList<string> globs)
     {
-        if (globs is null || globs.Length == 0)
+        if (globs.Count == 0)
         {
             return Array.Empty<GlobMatcher>();
         }
 
-        var compiled = new List<GlobMatcher>(globs.Length);
+        var compiled = new List<GlobMatcher>(globs.Count);
         foreach (var glob in globs)
         {
             if (string.IsNullOrWhiteSpace(glob))
@@ -233,7 +233,7 @@ internal sealed class PathFilterMatcher
         return builder.ToString();
     }
 
-    private static string[] BuildAccelerationFragments(in PathFilter filter)
+    private static string[] BuildAccelerationFragments(PathFilter filter)
     {
         var fragments = new List<string>(4);
         if (!string.IsNullOrWhiteSpace(filter.PathRegex))
@@ -247,10 +247,10 @@ internal sealed class PathFilterMatcher
             }
         }
 
-        if (filter.IncludeGlobs is { Length: > 0 })
+        if (filter.IncludeGlobs.Count > 0)
         {
             string? onlyIncludeGlob = null;
-            for (var i = 0; i < filter.IncludeGlobs.Length; i++)
+            for (var i = 0; i < filter.IncludeGlobs.Count; i++)
             {
                 if (string.IsNullOrWhiteSpace(filter.IncludeGlobs[i]))
                 {
@@ -519,12 +519,12 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
     private readonly string[]? _excludeGlobs;
     private readonly int _hashCode;
 
-    public PathFilterCacheKey(in PathFilter filter)
+    public PathFilterCacheKey(PathFilter filter)
     {
         _pathPrefix = filter.PathPrefix;
         _pathRegex = filter.PathRegex;
-        _includeGlobs = filter.IncludeGlobs?.ToArray();
-        _excludeGlobs = filter.ExcludeGlobs?.ToArray();
+        _includeGlobs = filter.IncludeGlobs.ToArray();
+        _excludeGlobs = filter.ExcludeGlobs.ToArray();
 
         var hash = new HashCode();
         hash.Add(_pathPrefix, StringComparer.Ordinal);

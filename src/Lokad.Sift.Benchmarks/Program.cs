@@ -2247,7 +2247,7 @@ static RealQueryResult RunRealQuery(IIndexSnapshot snapshot, RealQueryDefinition
 static bool TryRunSearch(
     IIndexSnapshot snapshot,
     SearchQuery query,
-    in PathFilter pathFilter,
+    PathFilter pathFilter,
     int? timeoutMilliseconds,
     [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SearchStats? stats)
 {
@@ -3760,8 +3760,8 @@ internal sealed class RealQueryDefinition
         return new PathFilter
         {
             PathPrefix = PathPrefix,
-            IncludeGlobs = IncludeGlobs,
-            ExcludeGlobs = ExcludeGlobs,
+            IncludeGlobs = IncludeGlobs ?? [],
+            ExcludeGlobs = ExcludeGlobs ?? [],
             PathRegex = PathRegex
         };
     }
