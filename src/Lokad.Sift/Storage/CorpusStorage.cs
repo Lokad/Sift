@@ -20,7 +20,7 @@ internal sealed class CorpusStorage : ISiftStorage
     private readonly long _maximumPhysicalBytes;
     private readonly object _layoutLock = new();
     private readonly object _capacityBudgetLock = new();
-    private readonly object _manifestCacheLock = new();
+    private readonly CorpusManifestCache _manifestCache = new();
     private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
@@ -28,10 +28,8 @@ internal sealed class CorpusStorage : ISiftStorage
     private long _segmentOpenCount;
     private long _reclamationFailureCount;
     private long _corpusPhysicalScanCount;
-    private long _manifestParseCount;
     private string? _lastReclamationFailure;
     private CapacityBudget? _capacityBudget;
-    private ManifestCacheEntry? _manifestCache;
 
     public CorpusStorage(string rootPath)
         : this(rootPath, long.MaxValue)
@@ -52,7 +50,7 @@ internal sealed class CorpusStorage : ISiftStorage
     internal int ValidatedSegmentCount => _validatedSegmentIds.Count;
     internal long SegmentOpenCount => Interlocked.Read(ref _segmentOpenCount);
     internal long CorpusPhysicalScanCount => Interlocked.Read(ref _corpusPhysicalScanCount);
-    internal long ManifestParseCount => Interlocked.Read(ref _manifestParseCount);
+    internal long ManifestParseCount => _manifestCache.ParseCount;
     private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
     private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
     internal PublicationFaultInjector? FaultInjector { get; set; }
@@ -205,52 +203,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     public CorpusManifest ReadManifest()
     {
-        var stamp = ReadManifestStamp();
-        lock (_manifestCacheLock)
-        {
-            if (_manifestCache is { } cached && cached.Stamp == stamp)
-            {
-                return cached.Manifest;
-            }
-        }
-
-        var manifest = CorpusManifestCodec.Read(ManifestPath);
-        Interlocked.Increment(ref _manifestParseCount);
-        var currentStamp = ReadManifestStamp();
-        if (currentStamp == stamp && manifest.Generation == stamp.Generation)
-        {
-            lock (_manifestCacheLock)
-            {
-                _manifestCache = new ManifestCacheEntry(stamp, manifest);
-            }
-        }
-
-        return manifest;
-    }
-
-    private ManifestStamp ReadManifestStamp()
-    {
-        using var stream = new FileStream(
-            ManifestPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
-        if (stream.Length < SegmentFormat.LegacyManifestHeaderSize + sizeof(ulong))
-        {
-            throw new InvalidDataException("Invalid Sift manifest length.");
-        }
-
-        Span<byte> header = stackalloc byte[36];
-        stream.ReadExactly(header);
-        if (LittleEndianCodec.ReadUInt64(header) != SegmentFormat.ManifestMagic)
-        {
-            throw new InvalidDataException("Invalid Sift manifest magic.");
-        }
-
-        return new ManifestStamp(
-            LittleEndianCodec.ReadUInt64(header[28..]),
-            stream.Length,
-            File.GetLastWriteTimeUtc(ManifestPath).Ticks);
+        return _manifestCache.Read(ManifestPath);
     }
 
 
@@ -799,10 +752,7 @@ internal sealed class CorpusStorage : ISiftStorage
         _segmentDirectoriesRecovered = true;
         SetReclamationPending(isPending: false);
         FlushDirectoryEntry(_rootPath);
-        lock (_manifestCacheLock)
-        {
-            _manifestCache = null;
-        }
+        _manifestCache.Clear();
         RefreshCapacityBudget();
     }
 
@@ -841,10 +791,7 @@ internal sealed class CorpusStorage : ISiftStorage
         CreditCapacity(previousManifestBytes);
 
         FlushDirectoryEntry(_rootPath);
-        lock (_manifestCacheLock)
-        {
-            _manifestCache = new ManifestCacheEntry(ReadManifestStamp(), manifest);
-        }
+        _manifestCache.Store(ManifestPath, manifest);
         if (File.Exists(RebuildRequiredPath))
         {
             File.Delete(RebuildRequiredPath);
@@ -1750,15 +1697,6 @@ internal sealed class CorpusStorage : ISiftStorage
         ulong SegmentId,
         string DirectoryPath,
         long Bytes);
-
-    private readonly record struct ManifestStamp(
-        ulong Generation,
-        long Length,
-        long LastWriteUtcTicks);
-
-    private sealed record ManifestCacheEntry(
-        ManifestStamp Stamp,
-        CorpusManifest Manifest);
 
     private readonly record struct GenerationLeaseData(
         Guid CorpusId,
