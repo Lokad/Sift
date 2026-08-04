@@ -37,7 +37,11 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
     {
-        return Apply(upserts, deletions, CancellationToken.None);
+        return Apply(
+            upserts,
+            deletions,
+            new UpdateOptions(_options.RejectedUpsertPolicy),
+            CancellationToken.None);
     }
 
     public Task<UpdateStats> Apply(
@@ -45,18 +49,49 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ReadOnlySpan<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
-        var deletionArray = deletions.ToArray();
-        return ApplyCore(upserts, deletionArray, cancellationToken);
+        return Apply(
+            upserts,
+            deletions,
+            new UpdateOptions(_options.RejectedUpsertPolicy),
+            cancellationToken);
     }
 
-    private async Task<UpdateStats> ApplyCore(IDocumentSource upserts, IReadOnlyCollection<DocumentKey> deletions, CancellationToken cancellationToken)
+    public Task<UpdateStats> Apply(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options)
+    {
+        return Apply(upserts, deletions, options, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> Apply(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (!Enum.IsDefined(options.RejectedUpsertPolicy))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
+        }
+
+        var deletionArray = deletions.ToArray();
+        return ApplyCore(upserts, deletionArray, options, cancellationToken);
+    }
+
+    private async Task<UpdateStats> ApplyCore(
+        IDocumentSource upserts,
+        IReadOnlyCollection<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(upserts);
         await _applyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
-            return await ApplyCoreUnderLock(upserts, deletions, cancellationToken).ConfigureAwait(false);
+            return await ApplyCoreUnderLock(upserts, deletions, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -67,13 +102,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private async Task<UpdateStats> ApplyCoreUnderLock(
         IDocumentSource upserts,
         IReadOnlyCollection<DocumentKey> deletions,
+        UpdateOptions options,
         CancellationToken cancellationToken)
     {
         var load = IndexBuilder.LoadDocuments(
             upserts,
             cancellationToken,
             _options,
-            _options.RejectedUpsertPolicy,
+            options.RejectedUpsertPolicy,
             retainContentBeyondOperation: true);
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
@@ -92,6 +128,20 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             {
                 throw new InvalidOperationException($"Path '{path}' cannot appear in both upserts and deletions.");
             }
+        }
+
+        for (var i = 0; i < load.RejectedDocuments.Count; i++)
+        {
+            var path = load.RejectedDocuments[i].Path;
+            if (deletionSet.Contains(path))
+            {
+                throw new InvalidOperationException($"Path '{path}' cannot appear in both upserts and deletions.");
+            }
+        }
+
+        if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
+        {
+            deletionSet.UnionWith(load.RejectedDocuments.Select(static document => document.Path));
         }
 
         var overlayUpdate = await _overlayIndex.Update(
@@ -141,6 +191,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayUpdate.ContentBytes,
             overlayUpdate.SkippedBytes,
             load.RejectedBytes,
+            load.RejectedDocuments,
             overlayUpdate.ElapsedMilliseconds);
     }
 

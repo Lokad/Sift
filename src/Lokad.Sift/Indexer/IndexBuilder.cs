@@ -100,6 +100,7 @@ internal sealed class IndexBuilder
         long skippedBytes = 0;
         var rejected = 0;
         long rejectedBytes = 0;
+        var rejectedDocuments = new List<RejectedDocument>();
         var submittedPaths = new HashSet<string>(StringComparer.Ordinal);
         var acceptedPaths = collectAcceptedPaths
             ? new HashSet<string>(StringComparer.Ordinal)
@@ -171,12 +172,12 @@ internal sealed class IndexBuilder
 
             if (document is null)
             {
+                var rejection = new RejectedDocument(
+                    normalizedPath,
+                    rejectionReason,
+                    submittedDocument.Content.Length);
                 if (rejectedUpsertPolicy == RejectedUpsertPolicy.FailUpdate)
                 {
-                    var rejection = new RejectedDocument(
-                        normalizedPath,
-                        rejectionReason,
-                        submittedDocument.Content.Length);
                     throw new RejectedUpsertException(
                         rejectedUpserts: 1,
                         rejectedBytes: submittedDocument.Content.Length,
@@ -185,6 +186,7 @@ internal sealed class IndexBuilder
 
                 rejected++;
                 rejectedBytes = checked(rejectedBytes + submittedDocument.Content.Length);
+                rejectedDocuments.Add(rejection);
                 continue;
             }
 
@@ -210,7 +212,8 @@ internal sealed class IndexBuilder
             acceptedBytes,
             skippedBytes,
             rejectedBytes,
-            acceptedPaths ?? []);
+            acceptedPaths ?? [],
+            rejectedDocuments);
     }
 
     public static LoadedDocuments LoadDocuments(
@@ -225,6 +228,7 @@ internal sealed class IndexBuilder
         var rejected = 0;
         long rejectedBytes = 0;
         long acceptedBytes = 0;
+        var rejectedDocuments = new List<RejectedDocument>();
         var documents = new List<StoredDocument>();
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
 
@@ -247,12 +251,12 @@ internal sealed class IndexBuilder
 
             if (storedDocument is null)
             {
+                var rejection = new RejectedDocument(
+                    normalizedPath,
+                    rejectionReason,
+                    submittedDocument.Content.Length);
                 if (rejectedUpsertPolicy == RejectedUpsertPolicy.FailUpdate)
                 {
-                    var rejection = new RejectedDocument(
-                        normalizedPath,
-                        rejectionReason,
-                        submittedDocument.Content.Length);
                     throw new RejectedUpsertException(
                         rejectedUpserts: 1,
                         rejectedBytes: submittedDocument.Content.Length,
@@ -261,6 +265,7 @@ internal sealed class IndexBuilder
 
                 rejected++;
                 rejectedBytes += submittedDocument.Content.Length;
+                rejectedDocuments.Add(rejection);
                 continue;
             }
 
@@ -275,7 +280,8 @@ internal sealed class IndexBuilder
             rejected,
             rejectedBytes,
             acceptedBytes,
-            documents);
+            documents,
+            rejectedDocuments);
     }
 
     public static List<List<StoredDocument>> PartitionDocuments(IReadOnlyList<StoredDocument> documents)
@@ -464,7 +470,8 @@ internal readonly record struct LoadedDocuments(
     int Rejected,
     long RejectedBytes,
     long AcceptedBytes,
-    List<StoredDocument> Documents);
+    List<StoredDocument> Documents,
+    IReadOnlyList<RejectedDocument> RejectedDocuments);
 
 internal readonly record struct StreamedDocuments(
     int Submitted,
@@ -475,5 +482,6 @@ internal readonly record struct StreamedDocuments(
     long AcceptedBytes,
     long SkippedBytes,
     long RejectedBytes,
-    HashSet<string> AcceptedPaths);
+    HashSet<string> AcceptedPaths,
+    IReadOnlyList<RejectedDocument> RejectedDocuments);
 

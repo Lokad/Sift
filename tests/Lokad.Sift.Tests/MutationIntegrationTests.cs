@@ -240,6 +240,9 @@ public sealed class MutationIntegrationTests
         Assert.Equal(1, stats.SubmittedUpserts);
         Assert.Equal(0, stats.UpsertedDocuments);
         Assert.Equal(1, stats.RejectedUpserts);
+        var rejected = Assert.Single(stats.RejectedDocuments);
+        Assert.Equal("src/a.txt", rejected.Path);
+        Assert.Equal(DocumentRejectionReason.MaximumDocumentBytesExceeded, rejected.Reason);
         Assert.Equal(before.Generation, after.Generation);
 
         using var snapshot = index.OpenSnapshot();
@@ -256,6 +259,37 @@ public sealed class MutationIntegrationTests
             new PathFilter(),
             replacement);
         Assert.Empty(replacement.Hits);
+    }
+
+    [Fact]
+    public async Task DeleteExistingPolicyCommitsHealthyUpsertsAndRemovesRejectedReplacements()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { MaxDocumentBytes = 8 });
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        var before = index.Storage.ReadManifest();
+
+        var stats = await index.Update(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "replacement is too large"),
+                ("src/b.txt", "bravo"),
+                ("src/c.txt", "also too large")
+            ]),
+            [],
+            new UpdateOptions(RejectedUpsertPolicy.DeleteExisting));
+        var after = index.Storage.ReadManifest();
+
+        Assert.Equal(3, stats.SubmittedUpserts);
+        Assert.Equal(1, stats.UpsertedDocuments);
+        Assert.Equal(2, stats.RejectedUpserts);
+        Assert.Equal(1, stats.DeletedDocuments);
+        Assert.Equal(["src/a.txt", "src/c.txt"], stats.RejectedDocuments.Select(static document => document.Path));
+        Assert.Equal(before.Generation + 1, after.Generation);
+
+        using var snapshot = index.OpenSnapshot();
+        Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out var healthy));
+        Assert.Equal("bravo"u8.ToArray(), healthy.ToArray());
+        Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/c.txt"), out _));
     }
 
     [Fact]

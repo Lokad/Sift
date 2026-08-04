@@ -520,7 +520,11 @@ public sealed class Sift : ISift
 
     public Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
     {
-        return Update(upserts, deletions, CancellationToken.None);
+        return Update(
+            upserts,
+            deletions,
+            new UpdateOptions(_options.RejectedUpsertPolicy),
+            CancellationToken.None);
     }
 
     public Task<UpdateStats> Update(
@@ -528,8 +532,30 @@ public sealed class Sift : ISift
         ReadOnlySpan<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
+        return Update(
+            upserts,
+            deletions,
+            new UpdateOptions(_options.RejectedUpsertPolicy),
+            cancellationToken);
+    }
+
+    public Task<UpdateStats> Update(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options)
+    {
+        return Update(upserts, deletions, options, CancellationToken.None);
+    }
+
+    public Task<UpdateStats> Update(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
+    {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
+        ValidateUpdateOptions(options);
         var deletionArray = deletions.ToArray();
         var activity = BeginActivity(SiftActivity.Update);
         return Task.Run(() =>
@@ -539,7 +565,7 @@ public sealed class Sift : ISift
                 _writerCancellation.Token);
             try
             {
-                return UpdateCore(upserts, deletionArray, operationCancellation.Token);
+                return UpdateCore(upserts, deletionArray, options, operationCancellation.Token);
             }
             catch (Exception exception) when (IsIndexCorruption(exception))
             {
@@ -553,7 +579,11 @@ public sealed class Sift : ISift
         });
     }
 
-    private UpdateStats UpdateCore(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken)
+    private UpdateStats UpdateCore(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(upserts);
 
@@ -618,7 +648,7 @@ public sealed class Sift : ISift
                 _options,
                 operationName: "update",
                 forbiddenPaths: deletionSet,
-                rejectedUpsertPolicy: _options.RejectedUpsertPolicy,
+                rejectedUpsertPolicy: options.RejectedUpsertPolicy,
                 collectAcceptedPaths: true,
                 preparePartition: partition => RemoveUnchangedDocuments(
                     existingManifest,
@@ -635,8 +665,14 @@ public sealed class Sift : ISift
                         _options.MinimumFreeBytesAfterMutation,
                         cancellationToken));
                 });
+            var removalPaths = new HashSet<string>(deletionSet, StringComparer.Ordinal);
+            if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
+            {
+                removalPaths.UnionWith(upsertLoad.RejectedDocuments.Select(static document => document.Path));
+            }
+
             var affectedPaths = new HashSet<string>(upsertLoad.AcceptedPaths, StringComparer.Ordinal);
-            affectedPaths.UnionWith(deletionSet);
+            affectedPaths.UnionWith(removalPaths);
             var liveDocumentKeys = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
             foreach (var path in upsertLoad.AcceptedPaths)
             {
@@ -648,12 +684,12 @@ public sealed class Sift : ISift
 
             foreach (var pair in FindLiveDocumentKeys(
                 existingManifest,
-                deletionSet,
+                removalPaths,
                 cancellationToken))
             {
                 liveDocumentKeys.Add(pair.Key, pair.Value);
             }
-            foreach (var path in deletionSet)
+            foreach (var path in removalPaths)
             {
                 if (liveDocumentKeys.ContainsKey(path))
                 {
@@ -742,7 +778,17 @@ public sealed class Sift : ISift
             ContentBytes: upsertLoad.AcceptedBytes,
             SkippedBytes: upsertLoad.SkippedBytes,
             RejectedBytes: upsertLoad.RejectedBytes,
+            RejectedDocuments: upsertLoad.RejectedDocuments,
             ElapsedMilliseconds: watch.ElapsedMilliseconds);
+    }
+
+    private static void ValidateUpdateOptions(UpdateOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (!Enum.IsDefined(options.RejectedUpsertPolicy))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
+        }
     }
 
     public Task<CompactStats> Compact(CompactOptions options)

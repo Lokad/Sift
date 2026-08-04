@@ -34,7 +34,8 @@ public enum TimeoutPolicy
 public enum RejectedUpsertPolicy
 {
     FailUpdate,
-    PreserveExisting
+    PreserveExisting,
+    DeleteExisting
 }
 
 public enum DocumentRejectionReason
@@ -246,6 +247,21 @@ public sealed class SiftOptions
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; } = RejectedUpsertPolicy.FailUpdate;
 }
 
+public sealed record UpdateOptions
+{
+    public UpdateOptions()
+        : this(RejectedUpsertPolicy.FailUpdate)
+    {
+    }
+
+    public UpdateOptions(RejectedUpsertPolicy rejectedUpsertPolicy)
+    {
+        RejectedUpsertPolicy = rejectedUpsertPolicy;
+    }
+
+    public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
+}
+
 public sealed class RejectedUpsertException : Exception
 {
     public RejectedUpsertException(
@@ -375,6 +391,7 @@ public readonly record struct UpdateStats(
     // Normalized body bytes proven identical to their current indexed versions.
     long SkippedBytes,
     long RejectedBytes,
+    IReadOnlyList<RejectedDocument> RejectedDocuments,
     long ElapsedMilliseconds);
 
 public sealed record CompactOptions
@@ -587,6 +604,12 @@ public interface IOverlaySnapshot : IIndexSnapshot
 {
     Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, UpdateOptions options);
+    Task<UpdateStats> Apply(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken);
     Task<UpdateStats> ApplyTo(ISift target);
     Task<UpdateStats> ApplyTo(ISift target, CancellationToken cancellationToken);
 }
@@ -611,6 +634,12 @@ public interface ISift : IDisposable
     Task<BuildStats> Build(IDocumentSource documents, CancellationToken cancellationToken);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions);
     Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, UpdateOptions options);
+    Task<UpdateStats> Update(
+        IDocumentSource upserts,
+        ReadOnlySpan<DocumentKey> deletions,
+        UpdateOptions options,
+        CancellationToken cancellationToken);
     Task<CompactStats> Compact(CompactOptions options);
     Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken);
 }
