@@ -94,6 +94,25 @@ public sealed class PublicContractTests
         Assert.Empty(optionalParameters);
     }
 
+    [Fact]
+    public void RejectedUpsertDetailsAreFrozen()
+    {
+        var source = new[]
+        {
+            new RejectedDocument("src/a.txt", DocumentRejectionReason.BinaryContent, 10)
+        };
+        var exception = new RejectedUpsertException(1, 10, source);
+        source[0] = new RejectedDocument("src/b.txt", DocumentRejectionReason.InvalidUtf8, 20);
+
+        Assert.Equal("src/a.txt", exception.RejectedDocuments[0].Path);
+        var mutableView = Assert.IsAssignableFrom<IList<RejectedDocument>>(exception.RejectedDocuments);
+        Assert.Throws<NotSupportedException>(() =>
+            mutableView[0] = new RejectedDocument(
+                "src/c.txt",
+                DocumentRejectionReason.MaximumDocumentBytesExceeded,
+                30));
+    }
+
     private static int CountMethods<T>(string name)
     {
         return typeof(T).GetMethods(BindingFlags.Public | BindingFlags.Instance)

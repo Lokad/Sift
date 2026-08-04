@@ -288,7 +288,7 @@ For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a fi
   identifies the first rejected path, reason, and submitted size. Set
   `RejectedUpsertPolicy.PreserveExisting` to retain old searchable versions, or
   `DeleteExisting` to remove them. Those non-failing policies report every
-  rejected path and reason through `UpdateStats.RejectedDocuments`; full builds
+  rejected path and reason through `UpdateStats.RejectedDocumentDetails`; full builds
   report the same details through `BuildStats.RejectedDocumentDetails`.
 - `BuildOptions.CommitMetadataProvider` and
   `UpdateOptions.CommitMetadataProvider` copy bounded opaque consumer metadata

@@ -78,7 +78,7 @@ switch (command)
             var plan = snapshot.Explain(options.Query, options.Filter);
             Console.WriteLine($"pattern={plan.PatternKind} case={plan.ResolvedCaseMode} scopeDocs={plan.ScopeDocumentCount} scopeBytes={plan.ScopeByteCount} usesIndex={plan.UsesIndex} candidate={plan.CandidateKind} combination={plan.CandidateCombination} verifier={plan.VerifierKind} timeout={plan.TimeoutPolicy} pathPrefix={plan.UsesPathPrefixFilter} pathRegex={plan.UsesPathRegexFilter} includeGlobs={plan.UsesIncludeGlobs} excludeGlobs={plan.UsesExcludeGlobs} literalVerifier={plan.CanUseLiteralVerifier} nonBacktracking={plan.CanUseNonBacktracking} decode={plan.NeedsUnicodeDecode} wholeDocument={plan.MayRequireWholeDocumentVerification}");
             Console.WriteLine($"fragments={string.Join(", ", plan.MandatoryFragments)}");
-            Console.WriteLine($"ngrams={string.Join(", ", plan.SelectedNgrams.Select(static gram => $"{gram.Text}/{gram.DocFreq}"))}");
+            Console.WriteLine($"ngrams={string.Join(", ", plan.SelectedNgrams.Select(static gram => $"{gram.Text}/{gram.DocumentFrequency}"))}");
             return 0;
         }
     default:

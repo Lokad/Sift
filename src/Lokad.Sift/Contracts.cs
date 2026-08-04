@@ -335,7 +335,7 @@ public sealed class RejectedUpsertException : Exception
     {
         RejectedUpserts = rejectedUpserts;
         RejectedBytes = rejectedBytes;
-        RejectedDocuments = rejectedDocuments.ToArray();
+        RejectedDocuments = PublicResultCollection.Freeze(rejectedDocuments);
     }
 
     public int RejectedUpserts { get; }
@@ -362,7 +362,7 @@ public readonly record struct RejectedDocument(
     DocumentRejectionReason Reason,
     int SubmittedBytes);
 
-public readonly record struct SelectedNGram(string Text, int Length, int DocFreq);
+public readonly record struct SelectedNgram(string Text, int ByteLength, int DocumentFrequency);
 
 public enum SearchPatternKind
 {
@@ -440,7 +440,7 @@ public sealed class SearchPlan
         long scopeByteCount,
         IReadOnlyList<string> mandatoryFragments,
         IReadOnlyList<string> advisorySeeds,
-        IReadOnlyList<SelectedNGram> selectedNgrams,
+        IReadOnlyList<SelectedNgram> selectedNgrams,
         bool usesPathPrefixFilter,
         bool usesPathRegexFilter,
         bool usesIncludeGlobs,
@@ -468,9 +468,9 @@ public sealed class SearchPlan
         ResolvedCaseMode = resolvedCaseMode;
         ScopeDocumentCount = scopeDocumentCount;
         ScopeByteCount = scopeByteCount;
-        MandatoryFragments = Freeze(mandatoryFragments);
-        AdvisorySeeds = Freeze(advisorySeeds);
-        SelectedNgrams = Freeze(selectedNgrams);
+        MandatoryFragments = PublicResultCollection.Freeze(mandatoryFragments);
+        AdvisorySeeds = PublicResultCollection.Freeze(advisorySeeds);
+        SelectedNgrams = PublicResultCollection.Freeze(selectedNgrams);
         UsesPathPrefixFilter = usesPathPrefixFilter;
         UsesPathRegexFilter = usesPathRegexFilter;
         UsesIncludeGlobs = usesIncludeGlobs;
@@ -492,18 +492,7 @@ public sealed class SearchPlan
         RunnerUp = runnerUp;
         RunnerUpEstimatedCostDelta = runnerUpEstimatedCostDelta;
         TimeoutPolicy = timeoutPolicy;
-        PlannerAlternatives = Freeze(plannerAlternatives);
-
-        static IReadOnlyList<T> Freeze<T>(IReadOnlyList<T> values)
-        {
-            var copy = new T[values.Count];
-            for (var i = 0; i < values.Count; i++)
-            {
-                copy[i] = values[i];
-            }
-
-            return Array.AsReadOnly(copy);
-        }
+        PlannerAlternatives = PublicResultCollection.Freeze(plannerAlternatives);
     }
 
     public SearchPatternKind PatternKind { get; }
@@ -512,7 +501,7 @@ public sealed class SearchPlan
     public long ScopeByteCount { get; }
     public IReadOnlyList<string> MandatoryFragments { get; }
     public IReadOnlyList<string> AdvisorySeeds { get; }
-    public IReadOnlyList<SelectedNGram> SelectedNgrams { get; }
+    public IReadOnlyList<SelectedNgram> SelectedNgrams { get; }
     public bool UsesPathPrefixFilter { get; }
     public bool UsesPathRegexFilter { get; }
     public bool UsesIncludeGlobs { get; }
@@ -647,7 +636,7 @@ public sealed record BuildStats
         RejectedBytes = rejectedBytes;
         ElapsedMilliseconds = elapsedMilliseconds;
         PeakManagedBytes = peakManagedBytes;
-        RejectedDocumentDetails = Freeze(rejectedDocumentDetails);
+        RejectedDocumentDetails = PublicResultCollection.Freeze(rejectedDocumentDetails);
         CommittedIdentity = committedIdentity;
     }
 
@@ -686,16 +675,6 @@ public sealed record BuildStats
         RejectedDocumentDetails,
         CommittedIdentity);
 
-    internal static IReadOnlyList<RejectedDocument> Freeze(IReadOnlyList<RejectedDocument> documents)
-    {
-        var copy = new RejectedDocument[documents.Count];
-        for (var i = 0; i < documents.Count; i++)
-        {
-            copy[i] = documents[i];
-        }
-
-        return Array.AsReadOnly(copy);
-    }
 }
 
 public sealed record UpdateStats
@@ -725,7 +704,7 @@ public sealed record UpdateStats
         ContentBytes = contentBytes;
         SkippedBytes = skippedBytes;
         RejectedBytes = rejectedBytes;
-        RejectedDocuments = BuildStats.Freeze(rejectedDocuments);
+        RejectedDocumentDetails = PublicResultCollection.Freeze(rejectedDocuments);
         ElapsedMilliseconds = elapsedMilliseconds;
         CommittedIdentity = committedIdentity;
     }
@@ -743,7 +722,7 @@ public sealed record UpdateStats
     // Normalized body bytes proven identical to their current indexed versions.
     public long SkippedBytes { get; }
     public long RejectedBytes { get; }
-    public IReadOnlyList<RejectedDocument> RejectedDocuments { get; }
+    public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; }
     public long ElapsedMilliseconds { get; }
 
     /// <summary>Identity of the index state returned by the completed update.</summary>

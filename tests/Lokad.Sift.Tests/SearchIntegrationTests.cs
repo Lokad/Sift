@@ -1765,11 +1765,11 @@ public sealed class SearchIntegrationTests
         Assert.True(bigramPlan.UsesIndex);
         Assert.Equal(SearchCandidateKind.BigramIndex, bigramPlan.CandidateKind);
         Assert.Equal(SearchCandidateKind.BigramIndex, bigramPlan.CandidateKind);
-        Assert.All(bigramPlan.SelectedNgrams, static gram => Assert.Equal(2, gram.Length));
+        Assert.All(bigramPlan.SelectedNgrams, static gram => Assert.Equal(2, gram.ByteLength));
         Assert.True(trigramPlan.UsesIndex);
         Assert.Equal(SearchCandidateKind.TrigramIndex, trigramPlan.CandidateKind);
         Assert.Equal(SearchCandidateKind.TrigramIndex, trigramPlan.CandidateKind);
-        Assert.All(trigramPlan.SelectedNgrams, static gram => Assert.Equal(3, gram.Length));
+        Assert.All(trigramPlan.SelectedNgrams, static gram => Assert.Equal(3, gram.ByteLength));
     }
 
     [Fact]

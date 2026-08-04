@@ -435,7 +435,7 @@ public sealed class MutationIntegrationTests
         Assert.Equal(1, stats.SubmittedUpserts);
         Assert.Equal(0, stats.UpsertedDocuments);
         Assert.Equal(1, stats.RejectedUpserts);
-        var rejected = Assert.Single(stats.RejectedDocuments);
+        var rejected = Assert.Single(stats.RejectedDocumentDetails);
         Assert.Equal("src/a.txt", rejected.Path);
         Assert.Equal(DocumentRejectionReason.MaximumDocumentBytesExceeded, rejected.Reason);
         Assert.Equal(before.Generation, after.Generation);
@@ -477,7 +477,7 @@ public sealed class MutationIntegrationTests
         Assert.Equal(1, stats.UpsertedDocuments);
         Assert.Equal(2, stats.RejectedUpserts);
         Assert.Equal(1, stats.DeletedDocuments);
-        Assert.Equal(["src/a.txt", "src/c.txt"], stats.RejectedDocuments.Select(static document => document.Path));
+        Assert.Equal(["src/a.txt", "src/c.txt"], stats.RejectedDocumentDetails.Select(static document => document.Path));
         Assert.Equal(before.Generation + 1, after.Generation);
 
         using var snapshot = index.OpenSnapshot();

@@ -146,7 +146,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var advisorySeeds = preparedQuery.AdvisorySeeds;
         var scopeDocuments = 0;
         long scopeBytes = 0;
-        var selected = new List<SelectedNGram>(4);
+        var selected = new List<SelectedNgram>(4);
         var usesIndex = false;
         var usesUnicodeFallback = false;
         SearchPlanCandidate? explainedPlan = null;

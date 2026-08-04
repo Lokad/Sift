@@ -58,32 +58,32 @@ internal static class SearchPlanner
         return new SearchPlannerDecision(chosen, [.. candidates]);
     }
 
-    internal static SelectedNGram[] ToSelectedNgrams(ReadOnlySpan<SelectedGram> grams)
+    internal static SelectedNgram[] ToSelectedNgrams(ReadOnlySpan<SelectedGram> grams)
     {
         if (grams.Length == 0)
         {
             return [];
         }
 
-        var selected = new SelectedNGram[grams.Length];
+        var selected = new SelectedNgram[grams.Length];
         for (var i = 0; i < grams.Length; i++)
         {
-            selected[i] = new SelectedNGram(grams[i].Text, grams[i].GramLength, grams[i].DocFreq);
+            selected[i] = new SelectedNgram(grams[i].Text, grams[i].GramLength, grams[i].DocFreq);
         }
 
         return selected;
     }
 
     internal static SearchCandidateKind GetCandidateKind(
-        ReadOnlySpan<SelectedNGram> selected,
+        ReadOnlySpan<SelectedNgram> selected,
         bool usesIndex)
     {
-        var selectedLength = selected.Length == 0 ? 0 : selected[0].Length;
+        var selectedLength = selected.Length == 0 ? 0 : selected[0].ByteLength;
         return SearchPlanKinds.GetCandidateKind(selectedLength, usesIndex);
     }
 
     internal static SearchCandidateCombination GetCandidateCombination(
-        ReadOnlySpan<SelectedNGram> selected,
+        ReadOnlySpan<SelectedNgram> selected,
         bool usesIndex,
         bool unionCandidates,
         bool branchUnion)
@@ -432,7 +432,7 @@ internal readonly record struct SearchPlanCandidate(
     double EstimatedDirectScanCost,
     double? EstimatedIndexedCost,
     double EstimatedCandidateDocuments,
-    SelectedNGram[] SelectedNgrams,
+    SelectedNgram[] SelectedNgrams,
     double EstimatedCost);
 
 internal readonly record struct SearchPlannerDecision(

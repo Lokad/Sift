@@ -156,7 +156,7 @@ internal static class SearchPlanCandidateBuilder
         var minimumPatternBytes = literalPlan.MandatoryFragment.Length;
         if (minimumPatternBytes == 0 && selected.Length > 0)
         {
-            minimumPatternBytes = selected[0].Length;
+            minimumPatternBytes = selected[0].ByteLength;
         }
 
         var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) * features.RegexPlan.DirectScanCostMultiplier;

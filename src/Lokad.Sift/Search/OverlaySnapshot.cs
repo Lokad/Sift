@@ -563,9 +563,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return [.. merged];
     }
 
-    private static SelectedNGram[] MergeSelectedNgrams(
-        IReadOnlyList<SelectedNGram> left,
-        IReadOnlyList<SelectedNGram> right)
+    private static SelectedNgram[] MergeSelectedNgrams(
+        IReadOnlyList<SelectedNgram> left,
+        IReadOnlyList<SelectedNgram> right)
     {
         if (left.Count == 0)
         {
@@ -577,11 +577,11 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return [.. left];
         }
 
-        var merged = new List<SelectedNGram>(left.Count + right.Count);
-        var seen = new HashSet<(string Text, int Length)>();
+        var merged = new List<SelectedNgram>(left.Count + right.Count);
+        var seen = new HashSet<(string Text, int ByteLength)>();
         for (var i = 0; i < left.Count; i++)
         {
-            var key = (left[i].Text, left[i].Length);
+            var key = (left[i].Text, left[i].ByteLength);
             if (seen.Add(key))
             {
                 merged.Add(left[i]);
@@ -590,7 +590,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         for (var i = 0; i < right.Count; i++)
         {
-            var key = (right[i].Text, right[i].Length);
+            var key = (right[i].Text, right[i].ByteLength);
             if (seen.Add(key))
             {
                 merged.Add(right[i]);
