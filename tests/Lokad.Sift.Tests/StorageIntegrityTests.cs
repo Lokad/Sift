@@ -27,6 +27,35 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task InMemoryStorageStatsWaitForManifestPublication()
+    {
+        var storage = new BlockingPublicationStorage(new InMemorySiftStorage());
+        using var index = new SiftIndex(storage, new SiftOptions());
+        var buildTask = index.Build(
+            new InMemoryDocumentSource([("src/a.txt", "alpha\n")]),
+            new BuildOptions(),
+            CancellationToken.None);
+
+        Assert.True(storage.SegmentPublished.Wait(TimeSpan.FromSeconds(10)));
+        var statsTask = Task.Run(index.GetStorageStats);
+
+        try
+        {
+            var firstCompleted = await Task.WhenAny(statsTask, Task.Delay(TimeSpan.FromMilliseconds(100)));
+            Assert.NotSame(statsTask, firstCompleted);
+        }
+        finally
+        {
+            storage.AllowManifestPublication.Set();
+        }
+
+        await buildTask;
+        var stats = await statsTask;
+        Assert.Equal(1, stats.ManifestSegmentCount);
+        Assert.Equal(1, stats.PhysicalSegmentCount);
+    }
+
+    [Fact]
     public async Task SnapshotOpenReusesParsedManifestAndObservesExternalPublication()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha"));
@@ -1308,6 +1337,68 @@ public sealed class StorageIntegrityTests
             {
                 writerLockAllowed.Set();
             }
+        }
+    }
+
+    private sealed class BlockingPublicationStorage(ISiftStorage inner) : ISiftStorage
+    {
+        public ManualResetEventSlim SegmentPublished { get; } = new();
+        public ManualResetEventSlim AllowManifestPublication { get; } = new();
+        public bool HasManifest => inner.HasManifest;
+        public bool IsReclamationPending => inner.IsReclamationPending;
+
+        public IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken)
+        {
+            return new BlockingWriteSession(
+                inner.AcquireWriteSession(cancellationToken),
+                SegmentPublished,
+                AllowManifestPublication);
+        }
+
+        public CorpusManifest ReadManifest() => inner.ReadManifest();
+        public MappedSegment OpenSegment(ulong segmentId) => inner.OpenSegment(segmentId);
+        public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken) =>
+            inner.OpenSegment(segmentId, cancellationToken);
+        public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken) =>
+            inner.ValidateSegment(segmentId, cancellationToken);
+        public long GetSegmentBytes(ulong segmentId) => inner.GetSegmentBytes(segmentId);
+        public long? GetAvailableBytes() => inner.GetAvailableBytes();
+        public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();
+        public StorageReadSnapshot OpenReadSnapshot() => inner.OpenReadSnapshot();
+        public StorageStats GetStorageStats() => inner.GetStorageStats();
+        public void ReclaimUnreferencedSegments(CancellationToken cancellationToken) =>
+            inner.ReclaimUnreferencedSegments(cancellationToken);
+
+        private sealed class BlockingWriteSession(
+            IStorageWriteSession innerSession,
+            ManualResetEventSlim segmentPublished,
+            ManualResetEventSlim allowManifestPublication) : IStorageWriteSession
+        {
+            public SegmentManifestEntry PublishSegment<TDocument>(
+                IReadOnlyList<TDocument> documents,
+                ulong segmentId,
+                long minimumFreeBytesAfterPublication,
+                CancellationToken cancellationToken)
+                where TDocument : ISegmentBuildDocument
+            {
+                var entry = innerSession.PublishSegment(
+                    documents,
+                    segmentId,
+                    minimumFreeBytesAfterPublication,
+                    cancellationToken);
+                segmentPublished.Set();
+                allowManifestPublication.Wait(cancellationToken);
+                return entry;
+            }
+
+            public void PublishManifest(CorpusManifest manifest) => innerSession.PublishManifest(manifest);
+            public bool CanReplaceSegments() => innerSession.CanReplaceSegments();
+            public void EnsureReplacementAllowed() => innerSession.EnsureReplacementAllowed();
+            public void PrepareFullBuild(bool discardCorruptState) =>
+                innerSession.PrepareFullBuild(discardCorruptState);
+            public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+                innerSession.CleanupFailedMutation(attemptedSegmentIds);
+            public void Dispose() => innerSession.Dispose();
         }
     }
 }

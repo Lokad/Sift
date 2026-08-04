@@ -23,11 +23,6 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    private IDisposable AcquireWriterLock()
-    {
-        return AcquireWriterLock(CancellationToken.None);
-    }
-
     private IDisposable AcquireWriterLock(CancellationToken cancellationToken)
     {
         _writerGate.Wait(cancellationToken);
@@ -201,6 +196,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 
     StorageStats ISiftStorage.GetStorageStats()
     {
+        using var writerLock = AcquireWriterLock(CancellationToken.None);
         lock (_stateLock)
         {
             var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
