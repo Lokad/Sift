@@ -21,21 +21,6 @@ internal static class Utf8RegexEngine
     internal static int CacheCount => Cache.Count;
     internal static int CachePatternCharacters => Cache.Weight;
 
-    public static bool TryCompile(
-        SearchQuery query,
-        CaseMode resolvedCaseMode,
-        [NotNullWhen(true)] out Utf8RegexProgram? program)
-    {
-        program = null;
-        var analysis = RegexFragmentAnalyzer.AnalyzePattern(query.Pattern);
-        if (!TryParseSyntax(query, resolvedCaseMode, out var syntax))
-        {
-            return false;
-        }
-
-        return TryCompile(query, analysis.IsExactLiteral, syntax, out program);
-    }
-
     public static bool TryParseSyntax(
         SearchQuery query,
         CaseMode resolvedCaseMode,

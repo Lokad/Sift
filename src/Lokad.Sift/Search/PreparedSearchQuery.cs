@@ -64,17 +64,13 @@ internal sealed class PreparedSearchQuery
     {
         var wasPrepared = _regexExecution.IsValueCreated;
         var execution = _regexExecution.Value;
-        if (wasPrepared && execution.FallbackRegex is not null)
-        {
-            RegexVerifier.RecordPreparedCacheHit();
-        }
-
         if (!wasPrepared || execution.Utf8Regex is not { CacheHit: false } utf8Regex)
         {
             return execution;
         }
 
-        return execution with { Utf8Regex = utf8Regex with { CacheHit = true } };
+        execution.MarkUtf8CacheHit(utf8Regex);
+        return execution;
     }
 }
 
@@ -90,9 +86,53 @@ internal sealed class PreparedLiteralQuery(
     public bool IsAscii { get; } = isAscii;
 }
 
-internal readonly record struct PreparedRegexExecution(
-    PreparedUtf8Regex? Utf8Regex,
-    PreparedRegexVerifier? FallbackRegex);
+internal sealed class PreparedRegexExecution
+{
+    public static PreparedRegexExecution None { get; } = new(null, prepareFallbackRegex: null);
+
+    private readonly Lazy<PreparedRegexVerifier>? _fallbackRegex;
+    private int _fallbackReturned;
+
+    public PreparedRegexExecution(
+        PreparedUtf8Regex? utf8Regex,
+        Func<PreparedRegexVerifier>? prepareFallbackRegex)
+    {
+        Utf8Regex = utf8Regex;
+        _fallbackRegex = prepareFallbackRegex is null
+            ? null
+            : new Lazy<PreparedRegexVerifier>(
+                prepareFallbackRegex,
+                LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    public PreparedRegexExecution(PreparedRegexVerifier fallbackRegex)
+        : this(null, () => fallbackRegex)
+    {
+    }
+
+    public PreparedUtf8Regex? Utf8Regex { get; private set; }
+
+    public PreparedRegexVerifier? GetFallbackRegex()
+    {
+        if (_fallbackRegex is null)
+        {
+            return null;
+        }
+
+        var fallback = _fallbackRegex.Value;
+        if (Interlocked.Exchange(ref _fallbackReturned, 1) != 0)
+        {
+            RegexVerifier.RecordPreparedCacheHit();
+        }
+
+        return fallback;
+    }
+
+    public void MarkUtf8CacheHit(PreparedUtf8Regex utf8Regex)
+    {
+        Utf8Regex = utf8Regex with { CacheHit = true };
+    }
+}
 
 internal sealed class PreparedMandatoryFragment(
     string text,

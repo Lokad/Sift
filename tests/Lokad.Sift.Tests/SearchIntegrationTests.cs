@@ -895,7 +895,7 @@ public sealed class SearchIntegrationTests
     public async Task SharedPrefixAlternationRegexBuildsLeadingLiteralSet()
     {
         var query = new SearchQuery("\\[(?:Fact|Theory|InlineData)\\b", PatternMode.Regex, CaseMode.Sensitive);
-        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
         var literals = program.LeadingLiteralSet!
             .Select(static bytes => System.Text.Encoding.UTF8.GetString(bytes))
@@ -909,7 +909,7 @@ public sealed class SearchIntegrationTests
     public async Task SharedAffixAlternationRegexBuildsLeadingLiteralSet()
     {
         var query = new SearchQuery("services\\.(?:Add|TryAdd|AddKeyed)(?:Singleton|Scoped|Transient)\\b", PatternMode.Regex, CaseMode.Sensitive);
-        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
         var literals = program.LeadingLiteralSet!
             .Select(static bytes => System.Text.Encoding.UTF8.GetString(bytes))
@@ -934,7 +934,7 @@ public sealed class SearchIntegrationTests
     public async Task AsyncCallRegexBuildsOrderedAnchorGroups()
     {
         var query = new SearchQuery("\\b(?:Get|TryGet|Create|Load)[A-Z][A-Za-z0-9]+Async\\s*\\(", PatternMode.Regex, CaseMode.Sensitive);
-        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
         var groups = program.OrderedAnchorGroups!
             .Select(static group => string.Join(">", group.Anchors.Select(static anchor => System.Text.Encoding.UTF8.GetString(anchor.Utf8Bytes))))
@@ -955,7 +955,7 @@ public sealed class SearchIntegrationTests
             PatternMode.Regex,
             CaseMode.Sensitive);
 
-        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
 
         var groups = Assert.IsType<Utf8RegexOrderedAnchorGroup[]>(program.OrderedAnchorGroups);
         var group = Assert.Single(groups);
@@ -967,7 +967,7 @@ public sealed class SearchIntegrationTests
     {
         var query = new SearchQuery("foo|^$", PatternMode.Regex, CaseMode.Sensitive);
 
-        Assert.True(Utf8RegexEngine.TryCompile(query, CaseMode.Sensitive, out var program));
+        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
         Assert.Null(program.LeadingLiteralSet);
         Assert.Null(program.OrderedAnchorGroups);
     }
@@ -2975,6 +2975,15 @@ public sealed class SearchIntegrationTests
     private sealed class StopAfterFirstHitCollector : IHitCollector
     {
         public bool OnHit(in RawHit hit) => false;
+    }
+
+    private static Utf8RegexProgram CompileUtf8Regex(SearchQuery query, CaseMode resolvedCaseMode)
+    {
+        Assert.True(Utf8RegexEngine.TryParseSyntax(query, resolvedCaseMode, out var syntax));
+        var parsedSyntax = Assert.IsType<Utf8RegexSyntax>(syntax);
+        var analysis = RegexFragmentAnalyzer.AnalyzePattern(parsedSyntax);
+        Assert.True(Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, parsedSyntax, out var program));
+        return Assert.IsType<Utf8RegexProgram>(program);
     }
 
     private sealed class SlowHitCollector : IHitCollector

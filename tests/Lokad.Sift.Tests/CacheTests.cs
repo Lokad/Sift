@@ -2,8 +2,30 @@ using Lokad.Sift.Search;
 
 namespace Lokad.Sift.Tests;
 
+[Collection("ProcessMetrics")]
 public sealed class CacheTests
 {
+    [Fact]
+    public async Task Utf8RegexSearchDoesNotPrepareUnusedUnicodeFallback()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", $"alpha123{suffix}")]));
+        using var snapshot = index.OpenSnapshot();
+        var baselineHits = RegexVerifier.CacheHits;
+        var baselineMisses = RegexVerifier.CacheMisses;
+
+        var stats = snapshot.Search(
+            new SearchQuery($"alpha[0-9]*{suffix}", PatternMode.Regex, CaseMode.Sensitive),
+            new PathFilter(),
+            new HitBuffer());
+
+        Assert.Equal(1, stats.Utf8RegexInvocations);
+        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(baselineHits, RegexVerifier.CacheHits);
+        Assert.Equal(baselineMisses, RegexVerifier.CacheMisses);
+    }
+
     [Fact]
     public void BoundedLruCacheEvictsLeastRecentlyUsedEntry()
     {

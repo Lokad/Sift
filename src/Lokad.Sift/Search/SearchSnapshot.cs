@@ -396,6 +396,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var regexInvocations = 0;
         var byteRegexInvocations = 0;
         var fallbackRegexInvocations = 0;
+        PreparedRegexVerifier? fallbackRegex = null;
         var nonBacktrackingRegexInvocations = 0;
         var byteRegexMatchedDocuments = 0;
         long byteRegexStartPositionsTried = 0;
@@ -517,9 +518,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         {
                             Utf8RegexEngine.TrySearchDocument(cache.Segment, document, utf8Regex, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref stopReason);
                         }
-                        else if (preparedRegex.FallbackRegex is { } fallbackRegex)
+                        else if ((fallbackRegex ??= preparedRegex.GetFallbackRegex()) is { } preparedFallbackRegex)
                         {
-                            RegexVerifier.TrySearchDocument(cache.Segment, document, fallbackRegex, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
+                            RegexVerifier.TrySearchDocument(cache.Segment, document, preparedFallbackRegex, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref stopReason, predecodedText);
                         }
                         else
                         {
@@ -1320,6 +1321,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var verifiedDocuments = 0;
         var byteRegexInvocations = 0;
         var fallbackRegexInvocations = 0;
+        PreparedRegexVerifier? fallbackRegex = null;
         var nonBacktrackingRegexInvocations = 0;
         var byteRegexMatchedDocuments = 0;
         long byteRegexStartPositionsTried = 0;
@@ -1411,9 +1413,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             {
                 Utf8RegexEngine.TrySearchDocument(cache.Segment, document, utf8Regex, byteRegexStartPrecheckGroups, documentHitLimit, collector, ref hitsReturned, ref byteRegexInvocations, ref byteRegexMatchedDocuments, ref byteRegexStartPositionsTried, ref documentStopReason);
             }
-            else if (preparedRegex.FallbackRegex is { } fallbackRegex)
+            else if ((fallbackRegex ??= preparedRegex.GetFallbackRegex()) is { } preparedFallbackRegex)
             {
-                RegexVerifier.TrySearchDocument(cache.Segment, document, fallbackRegex, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref documentStopReason, predecodedText);
+                RegexVerifier.TrySearchDocument(cache.Segment, document, preparedFallbackRegex, documentHitLimit, collector, ref decodedChars, ref hitsReturned, ref fallbackRegexInvocations, ref nonBacktrackingRegexInvocations, ref documentStopReason, predecodedText);
             }
             else
             {
@@ -2060,18 +2062,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         if (query.PatternMode != PatternMode.Regex || regexPlan.IsExactLiteral)
         {
-            return default;
+            return PreparedRegexExecution.None;
         }
 
         if (regexPlan.Utf8RegexProgram is { } utf8RegexProgram)
         {
             return new PreparedRegexExecution(
                 Utf8RegexEngine.Prepare(utf8RegexProgram, query.TimeoutPolicy),
-                RegexVerifier.Prepare(query, resolvedCaseMode));
+                () => RegexVerifier.Prepare(query, resolvedCaseMode));
         }
 
         return regexPlan.PreparedFallbackRegex is { } fallbackRegex
-            ? new PreparedRegexExecution(null, fallbackRegex)
+            ? new PreparedRegexExecution(fallbackRegex)
             : throw new InvalidOperationException("The regex execution plan has no fallback verifier.");
     }
 
