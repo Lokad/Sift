@@ -17,7 +17,7 @@ internal static class LiteralQueryPlanner
         SiftOptions options)
     {
         var direct = LiteralPlan.Direct(resolvedCaseMode, scopeDocuments, scopeBytes);
-        if (scopeDocuments == 0 || string.IsNullOrEmpty(pattern))
+        if (scopeDocuments == 0 || pattern.Length == 0)
         {
             return [direct];
         }

@@ -35,24 +35,14 @@ internal static class SearchPlanner
 
     public static SearchPlannerDecision CreatePlan(MappedSegment segment, SegmentScope scope, SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan, SiftOptions options)
     {
-        var features = BuildFeatures(query, resolvedCaseMode, anchors, regexPlan);
-        var candidates = SearchPlanCandidateBuilder.Enumerate(segment, scope, in features, options);
-        return FinalizePlan(candidates);
-    }
-
-    private static SearchQueryFeatures BuildFeatures(SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan)
-    {
-        return new SearchQueryFeatures(
+        var features = new SearchQueryFeatures(
             query,
             resolvedCaseMode,
             anchors,
             regexPlan,
             query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral,
             anchors.HasMandatoryTexts);
-    }
-
-    private static SearchPlannerDecision FinalizePlan(List<SearchPlanCandidate> candidates)
-    {
+        var candidates = SearchPlanCandidateBuilder.Enumerate(segment, scope, in features, options);
         var scored = SearchPlanScorer.Score(candidates);
         var chosen = SearchPlanScorer.ChooseBest(scored);
         return new SearchPlannerDecision(chosen, [.. candidates]);

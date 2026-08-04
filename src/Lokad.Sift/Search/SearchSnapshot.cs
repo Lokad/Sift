@@ -904,7 +904,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     continue;
                 }
 
-                if (string.IsNullOrEmpty(query.Pattern))
+                if (query.Pattern.Length == 0)
                 {
                     var shouldContinue = collector.OnHit(
                         new RawHit(
@@ -1091,7 +1091,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         var pattern = literalOverride ?? query.Pattern;
-        if (string.IsNullOrEmpty(pattern))
+        if (pattern.Length == 0)
         {
             var shouldContinue = collector.OnHit(new RawHit(
                 new SegmentId(segment.SegmentId),

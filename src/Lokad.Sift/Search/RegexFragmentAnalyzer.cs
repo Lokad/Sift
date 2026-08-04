@@ -18,7 +18,7 @@ internal static class RegexFragmentAnalyzer
 
     private static PatternAnalysis AnalyzePattern(string pattern, int limit)
     {
-        if (string.IsNullOrEmpty(pattern))
+        if (pattern.Length == 0)
         {
             return new PatternAnalysis(true, string.Empty, [], new AdvisorySeedPlan([], false));
         }
@@ -167,7 +167,7 @@ internal static class RegexFragmentAnalyzer
     public static bool TryExtractExactLiteral(string pattern, out string literal)
     {
         literal = string.Empty;
-        if (string.IsNullOrEmpty(pattern))
+        if (pattern.Length == 0)
         {
             return true;
         }
@@ -201,7 +201,7 @@ internal static class RegexFragmentAnalyzer
 
     public static string[] ExtractMandatoryFragments(string pattern, int limit)
     {
-        if (string.IsNullOrEmpty(pattern))
+        if (pattern.Length == 0)
         {
             return [];
         }
@@ -238,7 +238,7 @@ internal static class RegexFragmentAnalyzer
 
     public static AdvisorySeedPlan AnalyzeAdvisorySeeds(string pattern, int limit)
     {
-        if (string.IsNullOrEmpty(pattern))
+        if (pattern.Length == 0)
         {
             return new AdvisorySeedPlan([], false);
         }
@@ -283,7 +283,7 @@ internal static class RegexFragmentAnalyzer
         for (var i = 0; i < fragments.Length; i++)
         {
             var fragment = fragments[i];
-            if (string.IsNullOrEmpty(fragment) || ContainsOrdinal(buffer, fragment))
+            if (fragment.Length == 0 || ContainsOrdinal(buffer, fragment))
             {
                 continue;
             }
@@ -1180,7 +1180,7 @@ internal static class RegexFragmentAnalyzer
         {
             for (var i = 0; i < values.Length; i++)
             {
-                if (!string.IsNullOrEmpty(values[i]) && !ContainsOrdinal(target, values[i]))
+                if (values[i].Length > 0 && !ContainsOrdinal(target, values[i]))
                 {
                     target.Add(values[i]);
                 }
@@ -1234,7 +1234,7 @@ internal static class RegexFragmentAnalyzer
             for (var i = 0; i < left.Length; i++)
             {
                 var candidate = left[i];
-                if (string.IsNullOrEmpty(candidate) || ContainsOrdinal(intersection, candidate))
+                if (candidate.Length == 0 || ContainsOrdinal(intersection, candidate))
                 {
                     continue;
                 }

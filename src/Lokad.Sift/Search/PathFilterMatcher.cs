@@ -170,7 +170,7 @@ internal sealed class PathFilterMatcher
         var compiled = new List<GlobMatcher>(globs.Count);
         foreach (var glob in globs)
         {
-            if (string.IsNullOrWhiteSpace(glob))
+            if (glob.AsSpan().Trim().IsEmpty)
             {
                 continue;
             }
@@ -252,7 +252,7 @@ internal sealed class PathFilterMatcher
             string? onlyIncludeGlob = null;
             for (var i = 0; i < filter.IncludeGlobs.Count; i++)
             {
-                if (string.IsNullOrWhiteSpace(filter.IncludeGlobs[i]))
+                if (filter.IncludeGlobs[i].AsSpan().Trim().IsEmpty)
                 {
                     continue;
                 }
@@ -281,7 +281,7 @@ internal sealed class PathFilterMatcher
 
     private static string ExtractGlobLiteral(string glob)
     {
-        if (string.IsNullOrWhiteSpace(glob))
+        if (glob.AsSpan().Trim().IsEmpty)
         {
             return string.Empty;
         }
@@ -542,7 +542,7 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
         var count = 0;
         for (var i = 0; i < patterns.Count; i++)
         {
-            count = checked(count + (patterns[i]?.Length ?? 0));
+            count = checked(count + patterns[i].Length);
         }
 
         return count;

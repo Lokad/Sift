@@ -386,7 +386,7 @@ internal static class SearchPlanCandidateBuilder
         var foundAny = false;
         for (var i = 0; i < literals.Length && selected.Count < options.MaxSelectedNgrams; i++)
         {
-            if (string.IsNullOrEmpty(literals[i]) || literals[i].Length < 3 || IsPoisonousSeedText(literals[i]))
+            if (literals[i].Length < 3 || IsPoisonousSeedText(literals[i]))
             {
                 continue;
             }
@@ -531,7 +531,7 @@ internal static class SearchPlanCandidateBuilder
 
     private static void AddMandatoryFragmentGrams(MappedSegment segment, LiteralPlan plan, List<SelectedGram> selected, int maxSelectedNgrams)
     {
-        if (string.IsNullOrEmpty(plan.MandatoryFragment) || plan.GramLength <= 0)
+        if (plan.MandatoryFragment.Length == 0 || plan.GramLength <= 0)
         {
             return;
         }
