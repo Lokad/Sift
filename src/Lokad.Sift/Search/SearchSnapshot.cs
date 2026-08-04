@@ -143,10 +143,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matcher = PathFilterMatcher.Prepare(pathFilter);
         var regexPlan = preparedQuery.RegexPlan;
         var anchors = preparedQuery.Anchors;
-        // Explanation results are caller-owned. Do not expose arrays retained by the
-        // process-wide prepared-query cache.
-        var mandatoryFragments = preparedQuery.MandatoryFragments.ToArray();
-        var advisorySeeds = preparedQuery.AdvisorySeeds.ToArray();
+        var mandatoryFragments = preparedQuery.MandatoryFragments;
+        var advisorySeeds = preparedQuery.AdvisorySeeds;
         var scopeDocuments = 0;
         long scopeBytes = 0;
         var selected = new List<SelectedNGram>(4);
@@ -155,7 +153,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         SearchPlanCandidate? explainedPlan = null;
         long explainedScopeBytes = -1;
         var explainedPathCost = 0d;
-        var alternativeSums = new Dictionary<(SearchPlanFamily PlanFamily, SearchCandidateKind CandidateKind, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
+        var alternativeSums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
 
         foreach (var entry in _segments)
         {
@@ -195,35 +193,36 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
             foreach (var alternative in segmentPlan.ContentPlan.Alternatives)
             {
-                var key = (alternative.PlanFamily, alternative.CandidateKind, alternative.VerifierKind, alternative.CandidatePlan.UsesIndex);
+                var key = (alternative.CandidateKind, alternative.CandidateCombination, alternative.VerifierKind, alternative.CandidatePlan.UsesIndex);
                 ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(alternativeSums, key, out _);
                 accumulator.Add(alternative);
             }
         }
 
-        var patternKind = query.PatternMode == PatternMode.Regex ? regexPlan.PatternKind : "Literal";
+        var patternKind = SearchPlanKinds.GetPatternKind(query, regexPlan);
         var canUseLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
         var canUseNonBacktracking = query.PatternMode == PatternMode.Regex && regexPlan.CanUseNonBacktracking;
         var needsUnicodeDecode =
             RegexExecutionPlanner.NeedsUnicodeDecode(query, mandatoryFragments, resolvedCaseMode, regexPlan) ||
             usesUnicodeFallback;
         var mayRequireWholeDocumentVerification = query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral || query.WholeLine || query.Multiline;
-        var candidateKind = explainedPlan?.CandidateKind ?? RegexExecutionPlanner.GetCandidateKind(query, usesIndex, selected, regexPlan);
-        var planFamily = explainedPlan?.PlanFamily ?? RegexExecutionPlanner.GetPlanFamily(query, usesIndex, selected, mandatoryFragments.Length > 0, regexPlan);
+        var selectedSpan = CollectionsMarshal.AsSpan(selected);
+        var candidateKind = explainedPlan?.CandidateKind ?? SearchPlanner.GetCandidateKind(selectedSpan, usesIndex);
+        var candidateCombination = explainedPlan?.CandidateCombination ??
+            SearchPlanner.GetCandidateCombination(selectedSpan, usesIndex, unionCandidates: false, branchUnion: false);
         var verifierKind = usesUnicodeFallback
             ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
-            : explainedPlan?.VerifierKind ?? SearchPlanKinds.GetVerifierKind(query, regexPlan, usesIndex);
+            : explainedPlan?.VerifierKind ?? SearchPlanKinds.GetVerifierKind(query, regexPlan);
         var plannerAlternatives = alternativeSums
-            .Select(static pair => pair.Value.ToPlannerAlternative(pair.Key.PlanFamily, pair.Key.CandidateKind, pair.Key.VerifierKind, pair.Key.UsesIndex))
+            .Select(static pair => pair.Value.ToPlannerAlternative(pair.Key.CandidateKind, pair.Key.CandidateCombination, pair.Key.VerifierKind, pair.Key.UsesIndex))
             .OrderBy(static alternative => alternative.EstimatedCost)
             .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
             .ToArray();
         var runnerUp = plannerAlternatives
             .FirstOrDefault(alternative =>
-                alternative.PlanFamily != planFamily.ToLabel() ||
-                alternative.CandidateKind != candidateKind.ToLabel() ||
-                alternative.VerifierKind != verifierKind.ToLabel());
-        var hasRunnerUp = !string.IsNullOrEmpty(runnerUp.PlanFamily);
+                alternative.CandidateKind != candidateKind ||
+                alternative.CandidateCombination != candidateCombination ||
+                alternative.VerifierKind != verifierKind);
 
         return new SearchPlan(
             patternKind,
@@ -248,13 +247,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             explainedPlan?.EstimatedIndexedCost,
             explainedPlan?.EstimatedCandidateDocuments ?? 0d,
             explainedPlan?.EstimatedCost ?? 0d,
-            planFamily.ToLabel(),
-            candidateKind.ToLabel(),
-            verifierKind.ToLabel(),
-            hasRunnerUp ? runnerUp.PlanFamily : null,
-            hasRunnerUp ? runnerUp.CandidateKind : null,
-            hasRunnerUp ? runnerUp.VerifierKind : null,
-            hasRunnerUp ? Math.Max(0d, runnerUp.EstimatedCost - (explainedPlan?.EstimatedCost ?? 0d)) : null,
+            candidateKind,
+            candidateCombination,
+            verifierKind,
+            runnerUp,
+            runnerUp is null ? null : Math.Max(0d, runnerUp.EstimatedCost - (explainedPlan?.EstimatedCost ?? 0d)),
             query.PatternMode == PatternMode.Regex ? query.TimeoutPolicy : TimeoutPolicy.Default,
             plannerAlternatives);
     }
@@ -2492,12 +2489,16 @@ internal struct PlannerAlternativeAccumulator
         SegmentCount++;
     }
 
-    public PlannerAlternative ToPlannerAlternative(SearchPlanFamily planFamily, SearchCandidateKind candidateKind, SearchVerifierKind verifierKind, bool usesIndex)
+    public PlannerAlternative ToPlannerAlternative(
+        SearchCandidateKind candidateKind,
+        SearchCandidateCombination candidateCombination,
+        SearchVerifierKind verifierKind,
+        bool usesIndex)
     {
         return new PlannerAlternative(
-            planFamily.ToLabel(),
-            candidateKind.ToLabel(),
-            verifierKind.ToLabel(),
+            candidateKind,
+            candidateCombination,
+            verifierKind,
             usesIndex,
             EstimatedDirectScanCost,
             EstimatedIndexedCost,

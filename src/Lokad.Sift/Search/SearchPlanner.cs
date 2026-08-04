@@ -74,16 +74,25 @@ internal static class SearchPlanner
         return selected;
     }
 
-    internal static SearchCandidateKind GetCandidateKind(in SearchQuery query, ReadOnlySpan<SelectedNGram> selected, in RegexExecutionPlan regexPlan, bool usesIndex, bool unionCandidates, bool branchUnion)
+    internal static SearchCandidateKind GetCandidateKind(
+        ReadOnlySpan<SelectedNGram> selected,
+        bool usesIndex)
     {
         var selectedLength = selected.Length == 0 ? 0 : selected[0].Length;
-        return SearchPlanKinds.GetCandidateKind(query, selectedLength, regexPlan, usesIndex, unionCandidates, branchUnion);
+        return SearchPlanKinds.GetCandidateKind(selectedLength, usesIndex);
     }
 
-    internal static SearchPlanFamily GetPlanFamily(in SearchQuery query, ReadOnlySpan<SelectedNGram> selected, bool hasMandatoryFragments, in RegexExecutionPlan regexPlan, bool usesIndex, bool unionCandidates, bool branchUnion)
+    internal static SearchCandidateCombination GetCandidateCombination(
+        ReadOnlySpan<SelectedNGram> selected,
+        bool usesIndex,
+        bool unionCandidates,
+        bool branchUnion)
     {
-        var selectedLength = selected.Length == 0 ? 0 : selected[0].Length;
-        return SearchPlanKinds.GetPlanFamily(query, selectedLength, hasMandatoryFragments, regexPlan, usesIndex, unionCandidates, branchUnion);
+        return SearchPlanKinds.GetCandidateCombination(
+            selected.Length,
+            usesIndex,
+            unionCandidates,
+            branchUnion);
     }
 
     internal static int GetTargetCandidateDocuments(int scopeDocuments, SiftOptions options)
@@ -417,8 +426,8 @@ internal readonly record struct SearchQueryFeatures(
 
 internal readonly record struct SearchPlanCandidate(
     LiteralPlan CandidatePlan,
-    SearchPlanFamily PlanFamily,
     SearchCandidateKind CandidateKind,
+    SearchCandidateCombination CandidateCombination,
     SearchVerifierKind VerifierKind,
     double EstimatedDirectScanCost,
     double? EstimatedIndexedCost,

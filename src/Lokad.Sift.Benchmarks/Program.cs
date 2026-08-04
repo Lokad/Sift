@@ -2202,22 +2202,22 @@ static RealQueryResult RunRealQuery(IIndexSnapshot snapshot, RealQueryDefinition
         query.Id,
         query.Intent,
         new QueryLatencyMetrics(samples[0], samples[medianIndex], samples[p95Index], samples.Length),
-        explain.PlanFamily,
-        explain.CandidateKind,
-        explain.VerifierKind,
+        GetPlanKey(explain),
+        explain.CandidateKind.ToString(),
+        explain.VerifierKind.ToString(),
         explain.EstimatedPathFilterCost,
         explain.EstimatedDirectScanCost,
         explain.EstimatedIndexedCost,
         explain.EstimatedCandidateDocuments,
         explain.EstimatedCost,
-        explain.RunnerUpPlanFamily,
-        explain.RunnerUpCandidateKind,
-        explain.RunnerUpVerifierKind,
+        explain.RunnerUp is null ? null : GetAlternativePlanKey(explain.PatternKind, explain.RunnerUp),
+        explain.RunnerUp?.CandidateKind.ToString(),
+        explain.RunnerUp?.VerifierKind.ToString(),
         explain.RunnerUpEstimatedCostDelta,
-        explain.PlannerAlternatives.Select(static alternative => new RealQueryPlannerAlternative(
-            alternative.PlanFamily,
-            alternative.CandidateKind,
-            alternative.VerifierKind,
+        explain.PlannerAlternatives.Select(alternative => new RealQueryPlannerAlternative(
+            GetAlternativePlanKey(explain.PatternKind, alternative),
+            alternative.CandidateKind.ToString(),
+            alternative.VerifierKind.ToString(),
             alternative.UsesIndex,
             alternative.EstimatedDirectScanCost,
             alternative.EstimatedIndexedCost,
@@ -2271,22 +2271,22 @@ static RealQueryResult CreateTimedOutQueryResult(RealQueryDefinition query, Sear
         query.Id,
         query.Intent,
         new QueryLatencyMetrics(timeout, timeout, timeout, 0),
-        explain.PlanFamily,
-        explain.CandidateKind,
-        explain.VerifierKind,
+        GetPlanKey(explain),
+        explain.CandidateKind.ToString(),
+        explain.VerifierKind.ToString(),
         explain.EstimatedPathFilterCost,
         explain.EstimatedDirectScanCost,
         explain.EstimatedIndexedCost,
         explain.EstimatedCandidateDocuments,
         explain.EstimatedCost,
-        explain.RunnerUpPlanFamily,
-        explain.RunnerUpCandidateKind,
-        explain.RunnerUpVerifierKind,
+        explain.RunnerUp is null ? null : GetAlternativePlanKey(explain.PatternKind, explain.RunnerUp),
+        explain.RunnerUp?.CandidateKind.ToString(),
+        explain.RunnerUp?.VerifierKind.ToString(),
         explain.RunnerUpEstimatedCostDelta,
-        explain.PlannerAlternatives.Select(static alternative => new RealQueryPlannerAlternative(
-            alternative.PlanFamily,
-            alternative.CandidateKind,
-            alternative.VerifierKind,
+        explain.PlannerAlternatives.Select(alternative => new RealQueryPlannerAlternative(
+            GetAlternativePlanKey(explain.PatternKind, alternative),
+            alternative.CandidateKind.ToString(),
+            alternative.VerifierKind.ToString(),
             alternative.UsesIndex,
             alternative.EstimatedDirectScanCost,
             alternative.EstimatedIndexedCost,
@@ -2311,6 +2311,16 @@ static RealQueryResult CreateTimedOutQueryResult(RealQueryDefinition query, Sear
         0,
         SearchStopReason.Cancelled.ToString(),
         true);
+}
+
+static string GetPlanKey(SearchPlan plan)
+{
+    return $"{plan.PatternKind}:{plan.CandidateKind}:{plan.CandidateCombination}:{plan.VerifierKind}";
+}
+
+static string GetAlternativePlanKey(SearchPatternKind patternKind, PlannerAlternative alternative)
+{
+    return $"{patternKind}:{alternative.CandidateKind}:{alternative.CandidateCombination}:{alternative.VerifierKind}";
 }
 
 static RealCorpusPlannerSummary BuildPlannerSummary(List<RealQueryResult> queries)

@@ -35,7 +35,8 @@ public sealed class CliSmokeTests
         var explain = RunCli($"explain \"{fixture.CorpusPath}\" beta --literal --path-prefix=src/");
         Assert.Equal(0, explain.ExitCode);
         Assert.Contains("pattern=Literal", explain.StandardOutput);
-        Assert.Contains("planFamily=LiteralDirectScan", explain.StandardOutput);
+        Assert.Contains("candidate=DirectScan", explain.StandardOutput);
+        Assert.Contains("combination=None", explain.StandardOutput);
         Assert.Contains("timeout=Default", explain.StandardOutput);
         Assert.Contains("pathPrefix=True", explain.StandardOutput);
         Assert.Contains("literalVerifier=True", explain.StandardOutput);

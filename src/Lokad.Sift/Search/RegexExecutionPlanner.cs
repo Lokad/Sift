@@ -74,27 +74,6 @@ internal static class RegexExecutionPlanner
         return false;
     }
 
-    public static SearchCandidateKind GetCandidateKind(in SearchQuery query, bool usesIndex, List<SelectedNGram> selected, in RegexExecutionPlan regexPlan)
-    {
-        if (!usesIndex)
-        {
-            return SearchCandidateKind.DirectScan;
-        }
-
-        if (selected.Count == 0)
-        {
-            return SearchCandidateKind.Indexed;
-        }
-
-        var selectedLength = selected.Count == 0 ? 0 : selected[0].Length;
-        return SearchPlanKinds.GetCandidateKind(query, selectedLength, regexPlan, usesIndex, unionCandidates: false, branchUnion: false);
-    }
-
-    public static SearchPlanFamily GetPlanFamily(in SearchQuery query, bool usesIndex, List<SelectedNGram> selected, bool hasMandatoryFragments, in RegexExecutionPlan regexPlan)
-    {
-        var selectedLength = selected.Count == 0 ? 0 : selected[0].Length;
-        return SearchPlanKinds.GetPlanFamily(query, selectedLength, hasMandatoryFragments, regexPlan, usesIndex, unionCandidates: false, branchUnion: false);
-    }
 }
 
 internal enum RegexExecutionKind
@@ -125,14 +104,6 @@ internal readonly record struct RegexExecutionPlan(
 
     public bool UsesUtf8Regex => Kind == RegexExecutionKind.Utf8;
 
-    public string PatternKind => Kind switch
-    {
-        RegexExecutionKind.ExactLiteral => "RegexLiteral",
-        RegexExecutionKind.Utf8 => "Utf8Regex",
-        RegexExecutionKind.Fallback => "Regex",
-        _ => "Literal"
-    };
-
     public double DirectScanCostMultiplier => Kind switch
     {
         RegexExecutionKind.Utf8 => 1.25d,
@@ -146,7 +117,4 @@ internal readonly record struct RegexExecutionPlan(
         RegexExecutionKind.Fallback => 4d,
         _ => 1d
     };
-
-    public SearchPlanFamily GetDirectScanPlanFamily(bool hasMandatoryFragments) =>
-        SearchPlanKinds.GetDirectScanPlanFamily(hasMandatoryFragments, this);
 }

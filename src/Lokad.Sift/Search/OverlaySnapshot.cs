@@ -272,25 +272,36 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var overlayPlan = _overlaySnapshot.Explain(query, pathFilter);
         var dominantPlan = basePlan.ScopeByteCount >= overlayPlan.ScopeByteCount ? basePlan : overlayPlan;
 
-        return dominantPlan with
-        {
-            ScopeDocumentCount = basePlan.ScopeDocumentCount + overlayPlan.ScopeDocumentCount,
-            ScopeByteCount = basePlan.ScopeByteCount + overlayPlan.ScopeByteCount,
-            UsesIndex = basePlan.UsesIndex || overlayPlan.UsesIndex,
-            UsesPathIndex = basePlan.UsesPathIndex || overlayPlan.UsesPathIndex,
-            CanUseLiteralVerifier = basePlan.CanUseLiteralVerifier && overlayPlan.CanUseLiteralVerifier,
-            CanUseNonBacktracking = basePlan.CanUseNonBacktracking && overlayPlan.CanUseNonBacktracking,
-            NeedsUnicodeDecode = basePlan.NeedsUnicodeDecode || overlayPlan.NeedsUnicodeDecode,
-            MayRequireWholeDocumentVerification = basePlan.MayRequireWholeDocumentVerification || overlayPlan.MayRequireWholeDocumentVerification,
-            EstimatedPathFilterCost = basePlan.EstimatedPathFilterCost + overlayPlan.EstimatedPathFilterCost,
-            EstimatedDirectScanCost = basePlan.EstimatedDirectScanCost + overlayPlan.EstimatedDirectScanCost,
-            EstimatedIndexedCost = SumNullable(basePlan.EstimatedIndexedCost, overlayPlan.EstimatedIndexedCost),
-            EstimatedCandidateDocuments = basePlan.EstimatedCandidateDocuments + overlayPlan.EstimatedCandidateDocuments,
-            EstimatedCost = basePlan.EstimatedCost + overlayPlan.EstimatedCost,
-            SelectedNgrams = MergeSelectedNgrams(basePlan.SelectedNgrams, overlayPlan.SelectedNgrams),
-            MandatoryFragments = MergeStrings(basePlan.MandatoryFragments, overlayPlan.MandatoryFragments),
-            AdvisorySeeds = MergeStrings(basePlan.AdvisorySeeds, overlayPlan.AdvisorySeeds)
-        };
+        return new SearchPlan(
+            dominantPlan.PatternKind,
+            dominantPlan.ResolvedCaseMode,
+            basePlan.ScopeDocumentCount + overlayPlan.ScopeDocumentCount,
+            basePlan.ScopeByteCount + overlayPlan.ScopeByteCount,
+            MergeStrings(basePlan.MandatoryFragments, overlayPlan.MandatoryFragments),
+            MergeStrings(basePlan.AdvisorySeeds, overlayPlan.AdvisorySeeds),
+            MergeSelectedNgrams(basePlan.SelectedNgrams, overlayPlan.SelectedNgrams),
+            dominantPlan.UsesPathPrefixFilter,
+            dominantPlan.UsesPathRegexFilter,
+            dominantPlan.UsesIncludeGlobs,
+            dominantPlan.UsesExcludeGlobs,
+            basePlan.UsesPathIndex || overlayPlan.UsesPathIndex,
+            basePlan.UsesIndex || overlayPlan.UsesIndex,
+            basePlan.CanUseLiteralVerifier && overlayPlan.CanUseLiteralVerifier,
+            basePlan.CanUseNonBacktracking && overlayPlan.CanUseNonBacktracking,
+            basePlan.NeedsUnicodeDecode || overlayPlan.NeedsUnicodeDecode,
+            basePlan.MayRequireWholeDocumentVerification || overlayPlan.MayRequireWholeDocumentVerification,
+            basePlan.EstimatedPathFilterCost + overlayPlan.EstimatedPathFilterCost,
+            basePlan.EstimatedDirectScanCost + overlayPlan.EstimatedDirectScanCost,
+            SumNullable(basePlan.EstimatedIndexedCost, overlayPlan.EstimatedIndexedCost),
+            basePlan.EstimatedCandidateDocuments + overlayPlan.EstimatedCandidateDocuments,
+            basePlan.EstimatedCost + overlayPlan.EstimatedCost,
+            dominantPlan.CandidateKind,
+            dominantPlan.CandidateCombination,
+            dominantPlan.VerifierKind,
+            dominantPlan.RunnerUp,
+            dominantPlan.RunnerUpEstimatedCostDelta,
+            dominantPlan.TimeoutPolicy,
+            dominantPlan.PlannerAlternatives);
     }
 
     public SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector)
@@ -320,23 +331,23 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var remainingBytes = query.MaxBytesScanned - overlayStats.BytesScanned;
         if (remainingHits <= 0)
         {
-            return overlayStats with { StopReason = SearchStopReason.MaxHits };
+            return overlayStats.WithStopReason(SearchStopReason.MaxHits);
         }
 
         if (remainingDocuments <= 0)
         {
-            return overlayStats with { StopReason = SearchStopReason.MaxDocuments };
+            return overlayStats.WithStopReason(SearchStopReason.MaxDocuments);
         }
 
         if (remainingBytes <= 0)
         {
-            return overlayStats with { StopReason = SearchStopReason.MaxBytesScanned };
+            return overlayStats.WithStopReason(SearchStopReason.MaxBytesScanned);
         }
 
         var remainingElapsedMilliseconds = query.MaxElapsedMilliseconds - watch.ElapsedMilliseconds;
         if (remainingElapsedMilliseconds <= 0)
         {
-            return overlayStats with { StopReason = SearchStopReason.MaxElapsedTime };
+            return overlayStats.WithStopReason(SearchStopReason.MaxElapsedTime);
         }
 
         var baseCollector = new TrackingCollector(collector);
@@ -529,21 +540,21 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             @base.StopReason);
     }
 
-    private static string[] MergeStrings(string[] left, string[] right)
+    private static string[] MergeStrings(IReadOnlyList<string> left, IReadOnlyList<string> right)
     {
-        if (left.Length == 0)
+        if (left.Count == 0)
         {
-            return right;
+            return [.. right];
         }
 
-        if (right.Length == 0)
+        if (right.Count == 0)
         {
-            return left;
+            return [.. left];
         }
 
-        var merged = new List<string>(left.Length + right.Length);
+        var merged = new List<string>(left.Count + right.Count);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < left.Length; i++)
+        for (var i = 0; i < left.Count; i++)
         {
             if (seen.Add(left[i]))
             {
@@ -551,7 +562,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
         }
 
-        for (var i = 0; i < right.Length; i++)
+        for (var i = 0; i < right.Count; i++)
         {
             if (seen.Add(right[i]))
             {
@@ -562,21 +573,23 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return [.. merged];
     }
 
-    private static SelectedNGram[] MergeSelectedNgrams(SelectedNGram[] left, SelectedNGram[] right)
+    private static SelectedNGram[] MergeSelectedNgrams(
+        IReadOnlyList<SelectedNGram> left,
+        IReadOnlyList<SelectedNGram> right)
     {
-        if (left.Length == 0)
+        if (left.Count == 0)
         {
-            return right;
+            return [.. right];
         }
 
-        if (right.Length == 0)
+        if (right.Count == 0)
         {
-            return left;
+            return [.. left];
         }
 
-        var merged = new List<SelectedNGram>(left.Length + right.Length);
+        var merged = new List<SelectedNGram>(left.Count + right.Count);
         var seen = new HashSet<(string Text, int Length)>();
-        for (var i = 0; i < left.Length; i++)
+        for (var i = 0; i < left.Count; i++)
         {
             var key = (left[i].Text, left[i].Length);
             if (seen.Add(key))
@@ -585,7 +598,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
         }
 
-        for (var i = 0; i < right.Length; i++)
+        for (var i = 0; i < right.Count; i++)
         {
             var key = (right[i].Text, right[i].Length);
             if (seen.Add(key))

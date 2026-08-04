@@ -110,9 +110,13 @@ internal static class SearchPlanCandidateBuilder
             : directScanCost;
         return new SearchPlanCandidate(
             literalPlan,
-            SearchPlanner.GetPlanFamily(features.Query, selected, features.HasMandatoryFragments, features.RegexPlan, literalPlan.UsesIndex, literalPlan.UnionCandidates, literalPlan.UnionGroupLengths is not null),
-            SearchPlanner.GetCandidateKind(features.Query, selected, features.RegexPlan, literalPlan.UsesIndex, literalPlan.UnionCandidates, literalPlan.UnionGroupLengths is not null),
-            SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan, literalPlan.UsesIndex),
+            SearchPlanner.GetCandidateKind(selected, literalPlan.UsesIndex),
+            SearchPlanner.GetCandidateCombination(
+                selected,
+                literalPlan.UsesIndex,
+                literalPlan.UnionCandidates,
+                literalPlan.UnionGroupLengths is not null),
+            SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan),
             directScanCost,
             estimatedIndexedCost,
             estimatedCandidates,
@@ -124,9 +128,9 @@ internal static class SearchPlanCandidateBuilder
     {
         return new SearchPlanCandidate(
             LiteralPlan.Direct(features.Query.CaseMode, scope.Count, scope.Bytes),
-            features.RegexPlan.GetDirectScanPlanFamily(features.HasMandatoryFragments),
             SearchCandidateKind.DirectScan,
-            GetVerifierKind(features, scope, usesIndex: false),
+            SearchCandidateCombination.None,
+            GetVerifierKind(features, scope),
             SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan),
             null,
             scope.Count,
@@ -181,9 +185,13 @@ internal static class SearchPlanCandidateBuilder
                 : estimatedIndexedCost ?? 0d;
         return new SearchPlanCandidate(
             literalPlan,
-            SearchPlanner.GetPlanFamily(features.Query, selected, features.HasMandatoryFragments, features.RegexPlan, usesIndex: true, literalPlan.UnionCandidates, literalPlan.UnionGroupLengths is not null),
-            SearchPlanner.GetCandidateKind(features.Query, selected, features.RegexPlan, usesIndex: true, literalPlan.UnionCandidates, literalPlan.UnionGroupLengths is not null),
-            GetVerifierKind(features, scope, usesIndex: true),
+            SearchPlanner.GetCandidateKind(selected, usesIndex: true),
+            SearchPlanner.GetCandidateCombination(
+                selected,
+                usesIndex: true,
+                literalPlan.UnionCandidates,
+                literalPlan.UnionGroupLengths is not null),
+            GetVerifierKind(features, scope),
             directScanCost,
             estimatedIndexedCost,
             estimatedCandidates,
@@ -193,13 +201,11 @@ internal static class SearchPlanCandidateBuilder
 
     private static SearchVerifierKind GetVerifierKind(
         in SearchQueryFeatures features,
-        SegmentScope scope,
-        bool usesIndex)
+        SegmentScope scope)
     {
         var verifier = SearchPlanKinds.GetVerifierKind(
             features.Query,
-            features.RegexPlan,
-            usesIndex);
+            features.RegexPlan);
         return verifier == SearchVerifierKind.Utf8Regex && scope.NonAsciiDocuments > 0
             ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
             : verifier;

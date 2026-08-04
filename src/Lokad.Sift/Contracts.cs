@@ -366,70 +366,264 @@ public readonly record struct RejectedDocument(
 
 public readonly record struct SelectedNGram(string Text, int Length, int DocFreq);
 
-public readonly record struct PlannerAlternative(
-    string PlanFamily,
-    string CandidateKind,
-    string VerifierKind,
-    bool UsesIndex,
-    double EstimatedDirectScanCost,
-    double? EstimatedIndexedCost,
-    double EstimatedCandidateDocuments,
-    double EstimatedCost,
-    int SegmentCount);
+public enum SearchPatternKind
+{
+    Literal,
+    RegexLiteral,
+    Utf8Regex,
+    RegexFallback
+}
 
-public sealed record SearchPlan(
-    string PatternKind,
-    CaseMode ResolvedCaseMode,
-    int ScopeDocumentCount,
-    long ScopeByteCount,
-    string[] MandatoryFragments,
-    string[] AdvisorySeeds,
-    SelectedNGram[] SelectedNgrams,
-    bool UsesPathPrefixFilter,
-    bool UsesPathRegexFilter,
-    bool UsesIncludeGlobs,
-    bool UsesExcludeGlobs,
-    bool UsesPathIndex,
-    bool UsesIndex,
-    bool CanUseLiteralVerifier,
-    bool CanUseNonBacktracking,
-    bool NeedsUnicodeDecode,
-    bool MayRequireWholeDocumentVerification,
-    double EstimatedPathFilterCost,
-    double EstimatedDirectScanCost,
-    double? EstimatedIndexedCost,
-    double EstimatedCandidateDocuments,
-    double EstimatedCost,
-    string PlanFamily,
-    string CandidateKind,
-    string VerifierKind,
-    string? RunnerUpPlanFamily,
-    string? RunnerUpCandidateKind,
-    string? RunnerUpVerifierKind,
-    double? RunnerUpEstimatedCostDelta,
-    TimeoutPolicy TimeoutPolicy,
-    PlannerAlternative[] PlannerAlternatives);
+public enum SearchCandidateKind
+{
+    DirectScan,
+    Index,
+    BigramIndex,
+    TrigramIndex
+}
 
-public sealed record SearchStats(
-    long ElapsedMilliseconds,
-    int ScopeDocuments,
-    long ScopeBytes,
-    long PostingsBytesRead,
-    int CandidateDocumentsAfterIndex,
-    int CandidateDocumentsAfterPrecheck,
-    int VerifiedDocuments,
-    long BytesScanned,
-    long DecodedChars,
-    int RegexInvocations,
-    int Utf8RegexInvocations,
-    int FallbackRegexInvocations,
-    int NonBacktrackingRegexInvocations,
-    int Utf8RegexMatchedDocuments,
-    long Utf8RegexMatchesEnumerated,
-    long Utf8RegexCacheHits,
-    long Utf8RegexCacheMisses,
-    int HitsReturned,
-    SearchStopReason StopReason);
+public enum SearchCandidateCombination
+{
+    None,
+    Intersection,
+    Union,
+    BranchUnion
+}
+
+public enum SearchVerifierKind
+{
+    Literal,
+    Utf8Regex,
+    Utf8RegexWithUnicodeFallback,
+    RegexFallback
+}
+
+public sealed class PlannerAlternative
+{
+    internal PlannerAlternative(
+        SearchCandidateKind candidateKind,
+        SearchCandidateCombination candidateCombination,
+        SearchVerifierKind verifierKind,
+        bool usesIndex,
+        double estimatedDirectScanCost,
+        double? estimatedIndexedCost,
+        double estimatedCandidateDocuments,
+        double estimatedCost,
+        int segmentCount)
+    {
+        CandidateKind = candidateKind;
+        CandidateCombination = candidateCombination;
+        VerifierKind = verifierKind;
+        UsesIndex = usesIndex;
+        EstimatedDirectScanCost = estimatedDirectScanCost;
+        EstimatedIndexedCost = estimatedIndexedCost;
+        EstimatedCandidateDocuments = estimatedCandidateDocuments;
+        EstimatedCost = estimatedCost;
+        SegmentCount = segmentCount;
+    }
+
+    public SearchCandidateKind CandidateKind { get; }
+    public SearchCandidateCombination CandidateCombination { get; }
+    public SearchVerifierKind VerifierKind { get; }
+    public bool UsesIndex { get; }
+    public double EstimatedDirectScanCost { get; }
+    public double? EstimatedIndexedCost { get; }
+    public double EstimatedCandidateDocuments { get; }
+    public double EstimatedCost { get; }
+    public int SegmentCount { get; }
+}
+
+public sealed class SearchPlan
+{
+    internal SearchPlan(
+        SearchPatternKind patternKind,
+        CaseMode resolvedCaseMode,
+        int scopeDocumentCount,
+        long scopeByteCount,
+        IReadOnlyList<string> mandatoryFragments,
+        IReadOnlyList<string> advisorySeeds,
+        IReadOnlyList<SelectedNGram> selectedNgrams,
+        bool usesPathPrefixFilter,
+        bool usesPathRegexFilter,
+        bool usesIncludeGlobs,
+        bool usesExcludeGlobs,
+        bool usesPathIndex,
+        bool usesIndex,
+        bool canUseLiteralVerifier,
+        bool canUseNonBacktracking,
+        bool needsUnicodeDecode,
+        bool mayRequireWholeDocumentVerification,
+        double estimatedPathFilterCost,
+        double estimatedDirectScanCost,
+        double? estimatedIndexedCost,
+        double estimatedCandidateDocuments,
+        double estimatedCost,
+        SearchCandidateKind candidateKind,
+        SearchCandidateCombination candidateCombination,
+        SearchVerifierKind verifierKind,
+        PlannerAlternative? runnerUp,
+        double? runnerUpEstimatedCostDelta,
+        TimeoutPolicy timeoutPolicy,
+        IReadOnlyList<PlannerAlternative> plannerAlternatives)
+    {
+        PatternKind = patternKind;
+        ResolvedCaseMode = resolvedCaseMode;
+        ScopeDocumentCount = scopeDocumentCount;
+        ScopeByteCount = scopeByteCount;
+        MandatoryFragments = Freeze(mandatoryFragments);
+        AdvisorySeeds = Freeze(advisorySeeds);
+        SelectedNgrams = Freeze(selectedNgrams);
+        UsesPathPrefixFilter = usesPathPrefixFilter;
+        UsesPathRegexFilter = usesPathRegexFilter;
+        UsesIncludeGlobs = usesIncludeGlobs;
+        UsesExcludeGlobs = usesExcludeGlobs;
+        UsesPathIndex = usesPathIndex;
+        UsesIndex = usesIndex;
+        CanUseLiteralVerifier = canUseLiteralVerifier;
+        CanUseNonBacktracking = canUseNonBacktracking;
+        NeedsUnicodeDecode = needsUnicodeDecode;
+        MayRequireWholeDocumentVerification = mayRequireWholeDocumentVerification;
+        EstimatedPathFilterCost = estimatedPathFilterCost;
+        EstimatedDirectScanCost = estimatedDirectScanCost;
+        EstimatedIndexedCost = estimatedIndexedCost;
+        EstimatedCandidateDocuments = estimatedCandidateDocuments;
+        EstimatedCost = estimatedCost;
+        CandidateKind = candidateKind;
+        CandidateCombination = candidateCombination;
+        VerifierKind = verifierKind;
+        RunnerUp = runnerUp;
+        RunnerUpEstimatedCostDelta = runnerUpEstimatedCostDelta;
+        TimeoutPolicy = timeoutPolicy;
+        PlannerAlternatives = Freeze(plannerAlternatives);
+
+        static IReadOnlyList<T> Freeze<T>(IReadOnlyList<T> values)
+        {
+            var copy = new T[values.Count];
+            for (var i = 0; i < values.Count; i++)
+            {
+                copy[i] = values[i];
+            }
+
+            return Array.AsReadOnly(copy);
+        }
+    }
+
+    public SearchPatternKind PatternKind { get; }
+    public CaseMode ResolvedCaseMode { get; }
+    public int ScopeDocumentCount { get; }
+    public long ScopeByteCount { get; }
+    public IReadOnlyList<string> MandatoryFragments { get; }
+    public IReadOnlyList<string> AdvisorySeeds { get; }
+    public IReadOnlyList<SelectedNGram> SelectedNgrams { get; }
+    public bool UsesPathPrefixFilter { get; }
+    public bool UsesPathRegexFilter { get; }
+    public bool UsesIncludeGlobs { get; }
+    public bool UsesExcludeGlobs { get; }
+    public bool UsesPathIndex { get; }
+    public bool UsesIndex { get; }
+    public bool CanUseLiteralVerifier { get; }
+    public bool CanUseNonBacktracking { get; }
+    public bool NeedsUnicodeDecode { get; }
+    public bool MayRequireWholeDocumentVerification { get; }
+    public double EstimatedPathFilterCost { get; }
+    public double EstimatedDirectScanCost { get; }
+    public double? EstimatedIndexedCost { get; }
+    public double EstimatedCandidateDocuments { get; }
+    public double EstimatedCost { get; }
+    public SearchCandidateKind CandidateKind { get; }
+    public SearchCandidateCombination CandidateCombination { get; }
+    public SearchVerifierKind VerifierKind { get; }
+    public PlannerAlternative? RunnerUp { get; }
+    public double? RunnerUpEstimatedCostDelta { get; }
+    public TimeoutPolicy TimeoutPolicy { get; }
+    public IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; }
+}
+
+public sealed class SearchStats
+{
+    internal SearchStats(
+        long elapsedMilliseconds,
+        int scopeDocuments,
+        long scopeBytes,
+        long postingsBytesRead,
+        int candidateDocumentsAfterIndex,
+        int candidateDocumentsAfterPrecheck,
+        int verifiedDocuments,
+        long bytesScanned,
+        long decodedChars,
+        int regexInvocations,
+        int utf8RegexInvocations,
+        int fallbackRegexInvocations,
+        int nonBacktrackingRegexInvocations,
+        int utf8RegexMatchedDocuments,
+        long utf8RegexMatchesEnumerated,
+        long utf8RegexCacheHits,
+        long utf8RegexCacheMisses,
+        int hitsReturned,
+        SearchStopReason stopReason)
+    {
+        ElapsedMilliseconds = elapsedMilliseconds;
+        ScopeDocuments = scopeDocuments;
+        ScopeBytes = scopeBytes;
+        PostingsBytesRead = postingsBytesRead;
+        CandidateDocumentsAfterIndex = candidateDocumentsAfterIndex;
+        CandidateDocumentsAfterPrecheck = candidateDocumentsAfterPrecheck;
+        VerifiedDocuments = verifiedDocuments;
+        BytesScanned = bytesScanned;
+        DecodedChars = decodedChars;
+        RegexInvocations = regexInvocations;
+        Utf8RegexInvocations = utf8RegexInvocations;
+        FallbackRegexInvocations = fallbackRegexInvocations;
+        NonBacktrackingRegexInvocations = nonBacktrackingRegexInvocations;
+        Utf8RegexMatchedDocuments = utf8RegexMatchedDocuments;
+        Utf8RegexMatchesEnumerated = utf8RegexMatchesEnumerated;
+        Utf8RegexCacheHits = utf8RegexCacheHits;
+        Utf8RegexCacheMisses = utf8RegexCacheMisses;
+        HitsReturned = hitsReturned;
+        StopReason = stopReason;
+    }
+
+    public long ElapsedMilliseconds { get; }
+    public int ScopeDocuments { get; }
+    public long ScopeBytes { get; }
+    public long PostingsBytesRead { get; }
+    public int CandidateDocumentsAfterIndex { get; }
+    public int CandidateDocumentsAfterPrecheck { get; }
+    public int VerifiedDocuments { get; }
+    public long BytesScanned { get; }
+    public long DecodedChars { get; }
+    public int RegexInvocations { get; }
+    public int Utf8RegexInvocations { get; }
+    public int FallbackRegexInvocations { get; }
+    public int NonBacktrackingRegexInvocations { get; }
+    public int Utf8RegexMatchedDocuments { get; }
+    public long Utf8RegexMatchesEnumerated { get; }
+    public long Utf8RegexCacheHits { get; }
+    public long Utf8RegexCacheMisses { get; }
+    public int HitsReturned { get; }
+    public SearchStopReason StopReason { get; }
+
+    internal SearchStats WithStopReason(SearchStopReason stopReason) => new(
+        ElapsedMilliseconds,
+        ScopeDocuments,
+        ScopeBytes,
+        PostingsBytesRead,
+        CandidateDocumentsAfterIndex,
+        CandidateDocumentsAfterPrecheck,
+        VerifiedDocuments,
+        BytesScanned,
+        DecodedChars,
+        RegexInvocations,
+        Utf8RegexInvocations,
+        FallbackRegexInvocations,
+        NonBacktrackingRegexInvocations,
+        Utf8RegexMatchedDocuments,
+        Utf8RegexMatchesEnumerated,
+        Utf8RegexCacheHits,
+        Utf8RegexCacheMisses,
+        HitsReturned,
+        stopReason);
+}
 
 public sealed record BuildStats(
     int SubmittedDocuments,

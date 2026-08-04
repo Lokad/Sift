@@ -442,7 +442,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task ExplainDoesNotExposePreparedQueryCacheArrays()
+    public async Task ExplainReturnsImmutablePreparedDiagnostics()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "needle and marker\n"));
         using var index = new SiftIndex(fixture.CorpusPath);
@@ -453,7 +453,8 @@ public sealed class SearchIntegrationTests
         var first = snapshot.Explain(query, new PathFilter());
         Assert.NotEmpty(first.MandatoryFragments);
         var expected = first.MandatoryFragments[0];
-        first.MandatoryFragments[0] = "corrupted";
+        var mutableView = Assert.IsAssignableFrom<IList<string>>(first.MandatoryFragments);
+        Assert.Throws<NotSupportedException>(() => mutableView[0] = "corrupted");
 
         var second = snapshot.Explain(query, new PathFilter());
         Assert.Equal(expected, second.MandatoryFragments[0]);
@@ -551,7 +552,7 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("(?<word>b(eta|ingo))", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
 
         Assert.True(plan.CanUseNonBacktracking);
-        Assert.Equal("RegexFallback", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
     }
 
     [Fact]
@@ -586,8 +587,8 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("b[a-z]+a", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal("Utf8Regex", plan.PatternKind);
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
         Assert.False(plan.CanUseNonBacktracking);
 
         var collector = new HitBuffer();
@@ -612,7 +613,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("b(?:eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("b(?:eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
@@ -633,7 +634,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("b(eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("b(eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
@@ -656,7 +657,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("B(?:ETA|INGO)", PatternMode.Regex, CaseMode.Insensitive), new PathFilter());
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("B(?:ETA|INGO)", PatternMode.Regex, CaseMode.Insensitive), new PathFilter(), collector);
@@ -680,7 +681,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("\\d+", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("\\d+", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
@@ -742,7 +743,7 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("\\bbeta\\b", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("\\bbeta\\b", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
@@ -767,7 +768,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:record|struct|class)\\s+[A-Z][A-Za-z0-9_]+", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
@@ -791,7 +792,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:Task|ValueTask|IAsyncEnumerable)\\b", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter());
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
@@ -842,8 +843,8 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
 
-        Assert.StartsWith("Utf8RegexFragment", plan.PlanFamily, StringComparison.Ordinal);
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
         Assert.Equal(3, stats.HitsReturned);
         Assert.True(stats.Utf8RegexMatchesEnumerated < 100);
         Assert.Equal(0, stats.FallbackRegexInvocations);
@@ -870,7 +871,8 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
 
-        Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("Union", StringComparison.Ordinal));
+        Assert.Contains(plan.PlannerAlternatives, static alternative =>
+            alternative.UsesIndex && alternative.CandidateCombination == SearchCandidateCombination.Union);
         Assert.Equal(3, stats.HitsReturned);
     }
 
@@ -979,7 +981,8 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:Get|TryGet|Create)[A-Z][A-Za-z0-9]+Async\\b", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
-        Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("BranchUnion", StringComparison.Ordinal));
+        Assert.Contains(plan.PlannerAlternatives, static alternative =>
+            alternative.UsesIndex && alternative.CandidateCombination == SearchCandidateCombination.BranchUnion);
     }
 
     [Fact]
@@ -1119,7 +1122,8 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("services\\.(?:AddSingleton|AddScoped|AddTransient)\\b", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
-        Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("BranchUnion", StringComparison.Ordinal));
+        Assert.Contains(plan.PlannerAlternatives, static alternative =>
+            alternative.UsesIndex && alternative.CandidateCombination == SearchCandidateCombination.BranchUnion);
     }
 
     [Fact]
@@ -1150,7 +1154,7 @@ public sealed class SearchIntegrationTests
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.True(plan.UsesIndex);
-        Assert.Contains("Union", plan.PlanFamily, StringComparison.Ordinal);
+        Assert.Equal(SearchCandidateCombination.Union, plan.CandidateCombination);
         Assert.True(stats.CandidateDocumentsAfterIndex < stats.ScopeDocuments);
         Assert.Equal(3000, stats.HitsReturned);
     }
@@ -1182,7 +1186,8 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
 
-        Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("Union", StringComparison.Ordinal));
+        Assert.Contains(plan.PlannerAlternatives, static alternative =>
+            alternative.UsesIndex && alternative.CandidateCombination == SearchCandidateCombination.Union);
         Assert.Equal(2250, stats.HitsReturned);
     }
 
@@ -1210,7 +1215,8 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
-        Assert.Contains(plan.PlannerAlternatives, static alternative => alternative.UsesIndex && alternative.PlanFamily.Contains("Union", StringComparison.Ordinal));
+        Assert.Contains(plan.PlannerAlternatives, static alternative =>
+            alternative.UsesIndex && alternative.CandidateCombination == SearchCandidateCombination.Union);
         Assert.Equal(1000, stats.HitsReturned);
     }
 
@@ -1231,7 +1237,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive) { WholeWord = true }, new PathFilter(), collector);
 
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
         Assert.False(plan.NeedsUnicodeDecode);
         Assert.Single(collector.Hits);
         Assert.Equal(1, stats.HitsReturned);
@@ -1257,7 +1263,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("alpha.*", PatternMode.Regex, CaseMode.Sensitive) { WholeLine = true }, new PathFilter(), collector);
 
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
         Assert.False(plan.NeedsUnicodeDecode);
         Assert.Equal(3, collector.Hits.Count);
         Assert.Equal(3, stats.HitsReturned);
@@ -1280,7 +1286,7 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("\\x41[\\cA]\\e\\[\\a\\f\\v", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
 
-        Assert.Equal("Utf8Regex", plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
         Assert.False(plan.NeedsUnicodeDecode);
         Assert.Single(collector.Hits);
         Assert.Equal(1, stats.HitsReturned);
@@ -1327,8 +1333,8 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("beta", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal("RegexLiteral", plan.PatternKind);
-        Assert.Equal("Utf8RegexLiteral", plan.VerifierKind);
+        Assert.Equal(SearchPatternKind.RegexLiteral, plan.PatternKind);
+        Assert.Equal(SearchVerifierKind.Literal, plan.VerifierKind);
         Assert.True(plan.CanUseLiteralVerifier);
 
         var collector = new HitBuffer();
@@ -1441,8 +1447,8 @@ public sealed class SearchIntegrationTests
         var stats = snapshot.Search(query, new PathFilter(), collector);
 
         Assert.False(plan.UsesIndex);
-        Assert.Equal("DirectScan", plan.CandidateKind);
-        Assert.Equal("Utf8RegexWithUnicodeFallback", plan.VerifierKind);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
+        Assert.Equal(SearchVerifierKind.Utf8RegexWithUnicodeFallback, plan.VerifierKind);
         Assert.True(plan.NeedsUnicodeDecode);
         Assert.Equal(900, stats.FallbackRegexInvocations);
         Assert.Equal(0, stats.Utf8RegexInvocations);
@@ -1599,9 +1605,9 @@ public sealed class SearchIntegrationTests
 
         Assert.True(plan.UsesIndex);
         Assert.NotEmpty(plan.SelectedNgrams);
-        Assert.Equal("LiteralTrigram", plan.PlanFamily);
-        Assert.Equal("Literal", plan.PatternKind);
-        Assert.Equal("ContentTrigram", plan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
+        Assert.Equal(SearchPatternKind.Literal, plan.PatternKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
         Assert.True(plan.CanUseLiteralVerifier);
         Assert.False(plan.NeedsUnicodeDecode);
     }
@@ -1628,7 +1634,7 @@ public sealed class SearchIntegrationTests
         Assert.Single(TestHelpers.GetStorage(index).ReadManifest().Segments);
         Assert.True(plan.ScopeDocumentCount < 8192);
         Assert.True(plan.UsesIndex);
-        Assert.Equal("ContentTrigram", plan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
     }
 
     [Fact]
@@ -1645,9 +1651,8 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.False(plan.UsesIndex);
-        Assert.Equal("LiteralDirectScan", plan.PlanFamily);
-        Assert.Equal("DirectScan", plan.CandidateKind);
-        Assert.Equal("LiteralScan", plan.VerifierKind);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
+        Assert.Equal(SearchVerifierKind.Literal, plan.VerifierKind);
         Assert.Empty(plan.SelectedNgrams);
         Assert.False(plan.MayRequireWholeDocumentVerification);
     }
@@ -1672,7 +1677,7 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.True(plan.UsesIndex);
-        Assert.Equal("ContentTrigram", plan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
     }
 
     [Fact]
@@ -1696,7 +1701,7 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("be", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.False(plan.UsesIndex);
-        Assert.Equal("LiteralDirectScan", plan.PlanFamily);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
     }
 
     [Fact]
@@ -1714,7 +1719,7 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.False(plan.UsesIndex);
-        Assert.Equal("LiteralDirectScan", plan.PlanFamily);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
     }
 
     [Fact]
@@ -1735,7 +1740,7 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.True(plan.UsesIndex);
-        Assert.Equal("LiteralTrigram", plan.PlanFamily);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
     }
 
     [Fact]
@@ -1757,12 +1762,12 @@ public sealed class SearchIntegrationTests
         var trigramPlan = snapshot.Explain(new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.True(bigramPlan.UsesIndex);
-        Assert.Equal("LiteralBigram", bigramPlan.PlanFamily);
-        Assert.Equal("ContentBigram", bigramPlan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.BigramIndex, bigramPlan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.BigramIndex, bigramPlan.CandidateKind);
         Assert.All(bigramPlan.SelectedNgrams, static gram => Assert.Equal(2, gram.Length));
         Assert.True(trigramPlan.UsesIndex);
-        Assert.Equal("LiteralTrigram", trigramPlan.PlanFamily);
-        Assert.Equal("ContentTrigram", trigramPlan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, trigramPlan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, trigramPlan.CandidateKind);
         Assert.All(trigramPlan.SelectedNgrams, static gram => Assert.Equal(3, gram.Length));
     }
 
@@ -1782,7 +1787,7 @@ public sealed class SearchIntegrationTests
 
         Assert.True(plan.UsesIndex);
         Assert.Single(plan.SelectedNgrams);
-        Assert.Equal("ContentTrigram", plan.CandidateKind);
+        Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
     }
 
     [Fact]
@@ -1802,11 +1807,11 @@ public sealed class SearchIntegrationTests
         Assert.NotEmpty(plan.MandatoryFragments);
         if (plan.UsesIndex)
         {
-            Assert.True(plan.SelectedNgrams.Length >= 1);
+            Assert.True(plan.SelectedNgrams.Count >= 1);
         }
         else
         {
-            Assert.Equal("DirectScan", plan.CandidateKind);
+            Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
             Assert.Empty(plan.SelectedNgrams);
         }
     }
@@ -1840,9 +1845,8 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("CAF\u00C9", PatternMode.Literal, CaseMode.Insensitive), new PathFilter());
 
         Assert.False(plan.UsesIndex);
-        Assert.Equal("LiteralDirectScan", plan.PlanFamily);
-        Assert.Equal("DirectScan", plan.CandidateKind);
-        Assert.Equal("LiteralScan", plan.VerifierKind);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
+        Assert.Equal(SearchVerifierKind.Literal, plan.VerifierKind);
         Assert.True(plan.NeedsUnicodeDecode);
     }
 
@@ -1862,7 +1866,7 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Insensitive) { WholeLine = true }, new PathFilter());
 
         Assert.False(plan.NeedsUnicodeDecode);
-        Assert.Equal("LiteralDirectScan", plan.PlanFamily);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
     }
 
     [Fact]
@@ -2370,8 +2374,8 @@ public sealed class SearchIntegrationTests
         Assert.True(plan.UsesIndex);
         Assert.Contains("async", plan.MandatoryFragments);
         Assert.Contains("Task<", plan.MandatoryFragments);
-        Assert.StartsWith("Utf8RegexFragment", plan.PlanFamily, StringComparison.Ordinal);
-        Assert.StartsWith("Utf8Regex", plan.CandidateKind, StringComparison.Ordinal);
+        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
+        Assert.NotEqual(SearchCandidateKind.DirectScan, plan.CandidateKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("async\\s+Task<", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
@@ -2404,7 +2408,7 @@ public sealed class SearchIntegrationTests
         Assert.True(plan.UsesIndex);
         Assert.Contains("Get", plan.MandatoryFragments);
         Assert.Contains("Async", plan.MandatoryFragments);
-        Assert.StartsWith("Utf8RegexFragment", plan.PlanFamily, StringComparison.Ordinal);
+        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "Asy");
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "syn");
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "ync");
@@ -2431,7 +2435,8 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("foo(?=bar)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
 
-        Assert.Equal("RegexFragmentDirectScan", plan.PlanFamily);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
+        Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
         Assert.Contains("foo", plan.MandatoryFragments);
         Assert.Contains("bar", plan.MandatoryFragments);
         Assert.False(plan.CanUseNonBacktracking);
@@ -2512,7 +2517,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("(foo|bar)\\1", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
 
-        Assert.StartsWith("RegexFragment", plan.PlanFamily, StringComparison.Ordinal);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
         Assert.Empty(plan.MandatoryFragments);
         Assert.Contains("foo", plan.AdvisorySeeds);
         Assert.Contains("bar", plan.AdvisorySeeds);
@@ -2554,7 +2559,7 @@ public sealed class SearchIntegrationTests
         var query = new SearchQuery("(?i:debug)\\s*=\\s*true", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter());
 
-        Assert.StartsWith("RegexFragment", plan.PlanFamily, StringComparison.Ordinal);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
         Assert.Contains("debug", plan.AdvisorySeeds);
         Assert.Contains("true", plan.AdvisorySeeds);
 
