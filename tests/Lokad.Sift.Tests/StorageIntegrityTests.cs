@@ -12,6 +12,21 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageIntegrityTests
 {
     [Fact]
+    public async Task InMemoryStorageSharesFrozenManifestAcrossReaders()
+    {
+        var storage = new InMemorySiftStorage();
+        using var index = new SiftIndex(storage, new SiftOptions());
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha\n")]));
+
+        var manifest = storage.ReadManifest();
+        Assert.Same(manifest, storage.ReadManifest());
+        using var first = ((ISiftStorage)storage).OpenReadSnapshot();
+        using var second = ((ISiftStorage)storage).OpenReadSnapshot();
+        Assert.Same(manifest, first.Manifest);
+        Assert.Same(manifest, second.Manifest);
+    }
+
+    [Fact]
     public async Task SnapshotOpenReusesParsedManifestAndObservesExternalPublication()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha"));

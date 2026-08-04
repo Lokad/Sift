@@ -59,7 +59,9 @@ internal sealed class InMemorySiftStorage : ISiftStorage
     {
         lock (_stateLock)
         {
-            _manifest = CloneManifest(manifest);
+            // Freeze caller-owned arrays once at publication. Published manifests
+            // are immutable storage state and can then be shared by every reader.
+            _manifest = FreezeManifest(manifest);
             _ = ReclaimUnreferencedSegmentsUnderWriterLock();
         }
     }
@@ -68,9 +70,8 @@ internal sealed class InMemorySiftStorage : ISiftStorage
     {
         lock (_stateLock)
         {
-            return _manifest is not null
-                ? CloneManifest(_manifest)
-                : throw new FileNotFoundException("Sift manifest is not present in memory-backed storage.");
+            return _manifest ??
+                throw new FileNotFoundException("Sift manifest is not present in memory-backed storage.");
         }
     }
 
@@ -166,9 +167,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
     {
         lock (_stateLock)
         {
-            var manifest = _manifest is not null
-                ? CloneManifest(_manifest)
-                : new CorpusManifest(Guid.Empty, 0, []);
+            var manifest = _manifest ?? new CorpusManifest(Guid.Empty, 0, []);
             if (manifest.Segments.Count == 0)
             {
                 return new StorageReadSnapshot(manifest, EmptyDisposable.Instance);
@@ -361,7 +360,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    private static CorpusManifest CloneManifest(CorpusManifest manifest)
+    private static CorpusManifest FreezeManifest(CorpusManifest manifest)
     {
         var segments = new SegmentManifestEntry[manifest.Segments.Count];
         for (var i = 0; i < manifest.Segments.Count; i++)
