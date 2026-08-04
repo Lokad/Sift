@@ -26,12 +26,22 @@ internal static class Utf8RegexEngine
         CaseMode resolvedCaseMode,
         [NotNullWhen(true)] out Utf8RegexProgram? program)
     {
+        var analysis = RegexFragmentAnalyzer.AnalyzePattern(query.Pattern);
+        return TryCompile(query, resolvedCaseMode, analysis.IsExactLiteral, out program);
+    }
+
+    public static bool TryCompile(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        bool isExactLiteral,
+        [NotNullWhen(true)] out Utf8RegexProgram? program)
+    {
         program = null;
         var pattern = RegexVerifier.BuildUtf8Pattern(query);
         if (query.PatternMode != PatternMode.Regex ||
             resolvedCaseMode == CaseMode.Smart ||
             !IsAscii(pattern) ||
-            RegexFragmentAnalyzer.TryExtractExactLiteral(query.Pattern, out _))
+            isExactLiteral)
         {
             return false;
         }

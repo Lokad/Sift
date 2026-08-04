@@ -6,6 +6,13 @@ namespace Lokad.Sift.Search;
 
 internal sealed class PathFilterMatcher
 {
+    internal const int CacheCapacity = 256;
+    internal const int CacheCharacterCapacity = 256 * 1024;
+    private static readonly BoundedLruCache<PathFilterCacheKey, PathFilterMatcher> Cache = new(
+        CacheCapacity,
+        CacheCharacterCapacity,
+        static key => key.CharacterCount);
+    private static readonly PathFilterMatcher Empty = new(new PathFilter());
     private readonly string? _pathPrefix;
     private readonly byte[] _pathPrefixUtf8;
     private readonly GlobMatcher[] _includes;
@@ -13,6 +20,25 @@ internal sealed class PathFilterMatcher
     private readonly Regex? _pathRegex;
     private readonly string[] _accelerationFragments;
     private readonly int[] _pathTrigrams;
+    internal static int CacheCount => Cache.Count;
+    internal static int CacheCharacters => Cache.Weight;
+
+    public static PathFilterMatcher Prepare(in PathFilter filter)
+    {
+        if (filter.PathPrefix is null &&
+            filter.PathRegex is null &&
+            filter.IncludeGlobs is null or { Length: 0 } &&
+            filter.ExcludeGlobs is null or { Length: 0 })
+        {
+            return Empty;
+        }
+
+        var key = new PathFilterCacheKey(filter);
+        return Cache.GetOrAdd(
+            key,
+            static cacheKey => new PathFilterMatcher(cacheKey.ToPathFilter()),
+            out _);
+    }
 
     public PathFilterMatcher(in PathFilter filter)
     {
@@ -504,4 +530,112 @@ internal enum GlobMatcherKind
     SingleSegmentWildcard,
     RecursiveSuffix,
     Regex
+}
+
+internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
+{
+    private readonly string? _pathPrefix;
+    private readonly string? _pathRegex;
+    private readonly string[]? _includeGlobs;
+    private readonly string[]? _excludeGlobs;
+    private readonly int _hashCode;
+
+    public PathFilterCacheKey(in PathFilter filter)
+    {
+        _pathPrefix = filter.PathPrefix;
+        _pathRegex = filter.PathRegex;
+        _includeGlobs = filter.IncludeGlobs?.ToArray();
+        _excludeGlobs = filter.ExcludeGlobs?.ToArray();
+
+        var hash = new HashCode();
+        hash.Add(_pathPrefix, StringComparer.Ordinal);
+        hash.Add(_pathRegex, StringComparer.Ordinal);
+        AddPatterns(ref hash, _includeGlobs);
+        AddPatterns(ref hash, _excludeGlobs);
+        _hashCode = hash.ToHashCode();
+        CharacterCount = (_pathPrefix?.Length ?? 0) +
+            (_pathRegex?.Length ?? 0) +
+            GetCharacterCount(_includeGlobs) +
+            GetCharacterCount(_excludeGlobs);
+    }
+
+    public int CharacterCount { get; }
+
+    public bool Equals(PathFilterCacheKey? other)
+    {
+        return other is not null &&
+            string.Equals(_pathPrefix, other._pathPrefix, StringComparison.Ordinal) &&
+            string.Equals(_pathRegex, other._pathRegex, StringComparison.Ordinal) &&
+            SequenceEqual(_includeGlobs, other._includeGlobs) &&
+            SequenceEqual(_excludeGlobs, other._excludeGlobs);
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return obj is PathFilterCacheKey other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        return _hashCode;
+    }
+
+    public PathFilter ToPathFilter()
+    {
+        return new PathFilter(_pathPrefix, _includeGlobs, _excludeGlobs, _pathRegex);
+    }
+
+    private static void AddPatterns(ref HashCode hash, string[]? patterns)
+    {
+        if (patterns is null)
+        {
+            hash.Add(-1);
+            return;
+        }
+
+        hash.Add(patterns.Length);
+        for (var i = 0; i < patterns.Length; i++)
+        {
+            hash.Add(patterns[i], StringComparer.Ordinal);
+        }
+    }
+
+    private static int GetCharacterCount(string[]? patterns)
+    {
+        if (patterns is null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        for (var i = 0; i < patterns.Length; i++)
+        {
+            count = checked(count + (patterns[i]?.Length ?? 0));
+        }
+
+        return count;
+    }
+
+    private static bool SequenceEqual(string[]? left, string[]? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left is null || right is null || left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            if (!string.Equals(left[i], right[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

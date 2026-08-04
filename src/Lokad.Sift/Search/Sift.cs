@@ -1384,6 +1384,13 @@ public sealed class Sift : ISift
                 nameof(options),
                 "OverlayCompactionSegmentThreshold must be positive.");
         }
+
+        if (options.MaxSegmentParallelism <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "MaxSegmentParallelism must be positive.");
+        }
     }
 
     private IDisposable BeginActivity(SiftActivity activity)

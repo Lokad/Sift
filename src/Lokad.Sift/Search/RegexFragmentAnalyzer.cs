@@ -5,6 +5,53 @@ namespace Lokad.Sift.Search;
 internal static class RegexFragmentAnalyzer
 {
     internal readonly record struct AdvisorySeedPlan(string[] Seeds, bool RequiresIgnoreCase);
+    internal readonly record struct PatternAnalysis(
+        bool IsExactLiteral,
+        string? ExactLiteral,
+        string[] MandatoryFragments,
+        AdvisorySeedPlan AdvisorySeeds);
+
+    public static PatternAnalysis AnalyzePattern(string pattern)
+    {
+        if (string.IsNullOrEmpty(pattern))
+        {
+            return new PatternAnalysis(true, string.Empty, [], new AdvisorySeedPlan([], false));
+        }
+
+        const int limit = 8;
+        var parser = new Parser(pattern, limit, advisoryMode: true);
+        var result = parser.ParseExpression();
+        if (!parser.IsComplete)
+        {
+            return new PatternAnalysis(
+                false,
+                null,
+                [],
+                new AdvisorySeedPlan([], parser.RequiresIgnoreCase));
+        }
+
+        var merged = new List<string>(result.AdvisorySeeds.Length + result.Fragments.Length);
+        for (var i = 0; i < result.AdvisorySeeds.Length; i++)
+        {
+            merged.Add(result.AdvisorySeeds[i]);
+        }
+
+        for (var i = 0; i < result.Fragments.Length; i++)
+        {
+            if (!ContainsOrdinal(merged, result.Fragments[i]))
+            {
+                merged.Add(result.Fragments[i]);
+            }
+        }
+
+        return new PatternAnalysis(
+            result.ExactLiteral is not null && !parser.RequiresIgnoreCase,
+            result.ExactLiteral,
+            parser.RequiresIgnoreCase ? [] : SelectBestFragments(result.Fragments, limit),
+            new AdvisorySeedPlan(
+                SelectBestFragments([.. merged], limit),
+                parser.RequiresIgnoreCase));
+    }
 
     public static bool TryExtractExactLiteral(string pattern, out string literal)
     {

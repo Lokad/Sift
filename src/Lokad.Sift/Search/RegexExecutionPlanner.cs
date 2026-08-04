@@ -5,7 +5,10 @@ namespace Lokad.Sift.Search;
 
 internal static class RegexExecutionPlanner
 {
-    public static RegexExecutionPlan Resolve(in SearchQuery query, CaseMode resolvedCaseMode)
+    public static RegexExecutionPlan Resolve(
+        in SearchQuery query,
+        CaseMode resolvedCaseMode,
+        in RegexFragmentAnalyzer.PatternAnalysis analysis)
     {
         if (query.PatternMode != PatternMode.Regex)
         {
@@ -15,12 +18,13 @@ internal static class RegexExecutionPlanner
         // Invariant regex case folding is not equivalent to ordinal or ASCII folding.
         // Only sensitive regexes can therefore be replaced by the literal verifier.
         if (resolvedCaseMode == CaseMode.Sensitive &&
-            RegexFragmentAnalyzer.TryExtractExactLiteral(query.Pattern, out var exactLiteral))
+            analysis.IsExactLiteral &&
+            analysis.ExactLiteral is { } exactLiteral)
         {
             return RegexExecutionPlan.ForExactLiteral(exactLiteral);
         }
 
-        if (Utf8RegexEngine.TryCompile(query, resolvedCaseMode, out var byteRegexProgram))
+        if (Utf8RegexEngine.TryCompile(query, resolvedCaseMode, analysis.IsExactLiteral, out var byteRegexProgram))
         {
             return RegexExecutionPlan.ForUtf8Regex(byteRegexProgram);
         }

@@ -14,6 +14,12 @@ namespace Lokad.Sift.Search;
 
 internal sealed class SearchSnapshot : IIndexSnapshot
 {
+    internal const int PreparedQueryCacheCapacity = 256;
+    internal const int PreparedQueryCacheCharacterCapacity = 256 * 1024;
+    private static readonly BoundedLruCache<PreparedQueryKey, PreparedSearchQuery> PreparedQueryCache = new(
+        PreparedQueryCacheCapacity,
+        PreparedQueryCacheCharacterCapacity,
+        static key => key.Pattern.Length);
     private const int OrderedAnchorPrecheckCandidateLimit = 3000;
     private const int ConstrainedOrderedAnchorPrecheckCandidateLimit = 50000;
     private const int MaxConstrainedGapSearchBytes = 512;
@@ -33,6 +39,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private Action? _onDisposed;
     private readonly Action<Exception>? _onIndexFailure;
     private int _disposed;
+    internal static int PreparedQueryCacheCount => PreparedQueryCache.Count;
+    internal static int PreparedQueryCacheCharacters => PreparedQueryCache.Weight;
 
     public SearchSnapshot(
         ISiftStorage storage,
@@ -41,11 +49,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         Action? onDisposed,
         Action<Exception>? onIndexFailure)
     {
-        if (searchOptions.SegmentParallelism < 0)
+        if (searchOptions.SegmentParallelism < 0 ||
+            searchOptions.SegmentParallelism > options.MaxSegmentParallelism)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(searchOptions),
-                "SegmentParallelism cannot be negative.");
+                $"SegmentParallelism must be between zero and {options.MaxSegmentParallelism}.");
         }
 
         _storage = storage;
@@ -129,12 +138,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private SearchPlan ExplainCore(in SearchQuery query, in PathFilter pathFilter)
     {
         using var operation = BeginOperation();
-        var resolvedCaseMode = ResolveCaseMode(query);
-        var matcher = new PathFilterMatcher(pathFilter);
-        var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
-        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
-        var mandatoryFragments = anchors.GetMandatoryTexts();
-        var advisorySeeds = anchors.GetAdvisoryTexts();
+        var preparedQuery = PrepareSearchQuery(query);
+        var resolvedCaseMode = preparedQuery.ResolvedCaseMode;
+        var matcher = PathFilterMatcher.Prepare(pathFilter);
+        var regexPlan = preparedQuery.RegexPlan;
+        var anchors = preparedQuery.Anchors;
+        var mandatoryFragments = preparedQuery.MandatoryFragments;
+        var advisorySeeds = preparedQuery.AdvisorySeeds;
         var scopeDocuments = 0;
         long scopeBytes = 0;
         var selected = new List<SelectedNGram>(4);
@@ -302,6 +312,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         using var operation = BeginOperation();
         var watch = Stopwatch.StartNew();
+        var preparedQuery = PrepareSearchQuery(query);
+        var matcher = PathFilterMatcher.Prepare(pathFilter);
         using var deadlineCancellation = CreateDeadlineCancellation(
             query.MaxElapsedMilliseconds,
             cancellationToken);
@@ -309,7 +321,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return CanUseSegmentParallelSearch(query)
             ? SearchParallel(
                 query,
-                pathFilter,
+                matcher,
+                preparedQuery,
                 collector,
                 pathVisibility,
                 effectiveCancellationToken,
@@ -317,7 +330,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 watch)
             : SearchSequential(
                 query,
-                pathFilter,
+                matcher,
+                preparedQuery,
                 collector,
                 pathVisibility,
                 effectiveCancellationToken,
@@ -327,7 +341,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SearchStats SearchSequential(
         in SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilterMatcher matcher,
+        PreparedSearchQuery preparedQuery,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken,
@@ -336,15 +351,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ArgumentNullException.ThrowIfNull(collector);
 
-        var matcher = new PathFilterMatcher(pathFilter);
-        var resolvedCaseMode = ResolveCaseMode(query);
-        var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
-        var preparedRegex = PrepareRegexExecution(query, resolvedCaseMode, regexPlan);
-        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
-        var mandatoryFragments = anchors.GetMandatoryTexts();
-        var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
-        var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
-        var preparedOrderedAnchorGroups = PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups);
+        var resolvedCaseMode = preparedQuery.ResolvedCaseMode;
+        var regexPlan = preparedQuery.RegexPlan;
+        var preparedRegex = preparedQuery.GetRegexExecution();
+        var anchors = preparedQuery.Anchors;
+        var mandatoryFragments = preparedQuery.MandatoryFragments;
+        var preparedLiteral = preparedQuery.Literal;
+        var preparedMandatoryFragments = preparedQuery.MandatoryFragmentsForPrecheck;
+        var preparedOrderedAnchorGroups = preparedQuery.OrderedAnchorGroups;
         var scopeDocuments = 0;
         long scopeBytes = 0;
         long postingsBytesRead = 0;
@@ -550,7 +564,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SearchStats SearchParallel(
         in SearchQuery query,
-        in PathFilter pathFilter,
+        PathFilterMatcher matcher,
+        PreparedSearchQuery preparedQuery,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken,
@@ -559,14 +574,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ArgumentNullException.ThrowIfNull(collector);
 
-        var matcher = new PathFilterMatcher(pathFilter);
-        var resolvedCaseMode = ResolveCaseMode(query);
-        var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode);
-        var preparedRegex = PrepareRegexExecution(query, resolvedCaseMode, regexPlan);
-        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan);
-        var preparedLiteral = PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral);
-        var preparedMandatoryFragments = PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode);
-        var preparedOrderedAnchorGroups = PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups);
+        var resolvedCaseMode = preparedQuery.ResolvedCaseMode;
+        var regexPlan = preparedQuery.RegexPlan;
+        var preparedRegex = preparedQuery.GetRegexExecution();
+        var anchors = preparedQuery.Anchors;
+        var preparedLiteral = preparedQuery.Literal;
+        var preparedMandatoryFragments = preparedQuery.MandatoryFragmentsForPrecheck;
+        var preparedOrderedAnchorGroups = preparedQuery.OrderedAnchorGroups;
         var queryCopy = query;
 
         var scopeDocuments = 0;
@@ -1092,6 +1106,21 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private void ValidateQuery(in SearchQuery query)
     {
         ArgumentNullException.ThrowIfNull(query.Pattern);
+        if (!Enum.IsDefined(query.PatternMode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "PatternMode is invalid.");
+        }
+
+        if (!Enum.IsDefined(query.CaseMode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "CaseMode is invalid.");
+        }
+
+        if (!Enum.IsDefined(query.TimeoutPolicy))
+        {
+            throw new ArgumentOutOfRangeException(nameof(query), "TimeoutPolicy is invalid.");
+        }
+
         if (query.Pattern.Length > _options.MaxPatternCharacters)
         {
             throw new ArgumentException(
@@ -1882,6 +1911,44 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return loweredNeedle;
     }
 
+    private static PreparedSearchQuery PrepareSearchQuery(in SearchQuery query)
+    {
+        var key = new PreparedQueryKey(
+            query.Pattern,
+            query.PatternMode,
+            query.CaseMode,
+            query.WholeWord,
+            query.WholeLine,
+            query.Multiline,
+            query.DotAll,
+            query.TimeoutPolicy);
+        return PreparedQueryCache.GetOrAdd(
+            key,
+            static cacheKey => CreatePreparedSearchQuery(cacheKey),
+            out _);
+    }
+
+    private static PreparedSearchQuery CreatePreparedSearchQuery(PreparedQueryKey key)
+    {
+        var query = key.ToSearchQuery();
+        var resolvedCaseMode = ResolveCaseMode(query);
+        var analysis = query.PatternMode == PatternMode.Regex
+            ? RegexFragmentAnalyzer.AnalyzePattern(query.Pattern)
+            : default;
+        var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode, analysis);
+        var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan, analysis);
+        return new PreparedSearchQuery(
+            resolvedCaseMode,
+            regexPlan,
+            anchors,
+            anchors.GetMandatoryTexts(),
+            anchors.GetAdvisoryTexts(),
+            PrepareLiteralQuery(query, resolvedCaseMode, regexPlan.ExactLiteral),
+            PrepareMandatoryFragments(anchors.MandatoryAnchors, resolvedCaseMode),
+            PrepareOrderedAnchorGroups(anchors.OrderedAnchorGroups),
+            () => PrepareRegexExecution(query, resolvedCaseMode, regexPlan));
+    }
+
     private static PreparedLiteralQuery? PrepareLiteralQuery(
         in SearchQuery query,
         CaseMode resolvedCaseMode,
@@ -1987,7 +2054,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private static SearchQueryAnchors BuildQueryAnchors(
         in SearchQuery query,
         CaseMode resolvedCaseMode,
-        in RegexExecutionPlan regexPlan)
+        in RegexExecutionPlan regexPlan,
+        in RegexFragmentAnalyzer.PatternAnalysis analysis)
     {
         if (query.PatternMode == PatternMode.Regex &&
             resolvedCaseMode == CaseMode.Insensitive &&
@@ -1998,8 +2066,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return new SearchQueryAnchors([], [], CaseMode.Sensitive, []);
         }
 
-        var mandatoryFragments = GetMandatoryFragments(query, regexPlan.ExactLiteral);
-        var advisorySeeds = GetAdvisorySeeds(query, regexPlan.ExactLiteral, mandatoryFragments, out var advisoryCaseMode);
+        var mandatoryFragments = GetMandatoryFragments(query, regexPlan.ExactLiteral, analysis);
+        var advisorySeeds = GetAdvisorySeeds(query, regexPlan.ExactLiteral, mandatoryFragments, analysis, out var advisoryCaseMode);
         var mandatoryAnchors = new SearchLiteralAnchor[mandatoryFragments.Length];
         for (var i = 0; i < mandatoryFragments.Length; i++)
         {
@@ -2037,19 +2105,27 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return new SearchQueryAnchors(mandatoryAnchors, advisoryAnchors, advisoryCaseMode, orderedAnchorGroups);
     }
 
-    private static string[] GetMandatoryFragments(in SearchQuery query, string? exactRegexLiteral)
+    private static string[] GetMandatoryFragments(
+        in SearchQuery query,
+        string? exactRegexLiteral,
+        in RegexFragmentAnalyzer.PatternAnalysis analysis)
     {
         if (query.PatternMode == PatternMode.Regex)
         {
             return exactRegexLiteral is not null
                 ? [exactRegexLiteral]
-                : PruneRedundantMandatoryFragments(RegexFragmentAnalyzer.ExtractMandatoryFragments(query.Pattern));
+                : PruneRedundantMandatoryFragments(analysis.MandatoryFragments);
         }
 
         return string.IsNullOrEmpty(query.Pattern) ? [] : [query.Pattern];
     }
 
-    private static string[] GetAdvisorySeeds(in SearchQuery query, string? exactRegexLiteral, string[] mandatoryFragments, out CaseMode advisoryCaseMode)
+    private static string[] GetAdvisorySeeds(
+        in SearchQuery query,
+        string? exactRegexLiteral,
+        string[] mandatoryFragments,
+        in RegexFragmentAnalyzer.PatternAnalysis analysis,
+        out CaseMode advisoryCaseMode)
     {
         advisoryCaseMode = query.CaseMode switch
         {
@@ -2062,7 +2138,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return [];
         }
 
-        var advisoryPlan = RegexFragmentAnalyzer.AnalyzeAdvisorySeeds(query.Pattern);
+        var advisoryPlan = analysis.AdvisorySeeds;
         advisoryCaseMode = advisoryPlan.RequiresIgnoreCase ? CaseMode.Insensitive : advisoryCaseMode;
         var seeds = advisoryPlan.Seeds;
         if (seeds.Length == 0)
@@ -2364,6 +2440,84 @@ internal readonly struct SnapshotOperation : IDisposable
     public void Dispose()
     {
         _lifetimeLock.ExitReadLock();
+    }
+}
+
+internal readonly record struct PreparedQueryKey(
+    string Pattern,
+    PatternMode PatternMode,
+    CaseMode CaseMode,
+    bool WholeWord,
+    bool WholeLine,
+    bool Multiline,
+    bool DotAll,
+    TimeoutPolicy TimeoutPolicy)
+{
+    public SearchQuery ToSearchQuery()
+    {
+        return new SearchQuery(Pattern, PatternMode, CaseMode)
+        {
+            WholeWord = WholeWord,
+            WholeLine = WholeLine,
+            Multiline = Multiline,
+            DotAll = DotAll,
+            TimeoutPolicy = TimeoutPolicy
+        };
+    }
+}
+
+internal sealed class PreparedSearchQuery
+{
+    private readonly Lazy<PreparedRegexExecution> _regexExecution;
+
+    public PreparedSearchQuery(
+        CaseMode resolvedCaseMode,
+        RegexExecutionPlan regexPlan,
+        SearchQueryAnchors anchors,
+        string[] mandatoryFragments,
+        string[] advisorySeeds,
+        PreparedLiteralQuery? literal,
+        PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
+        PreparedOrderedAnchor[][] orderedAnchorGroups,
+        Func<PreparedRegexExecution> prepareRegexExecution)
+    {
+        ResolvedCaseMode = resolvedCaseMode;
+        RegexPlan = regexPlan;
+        Anchors = anchors;
+        MandatoryFragments = mandatoryFragments;
+        AdvisorySeeds = advisorySeeds;
+        Literal = literal;
+        MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
+        OrderedAnchorGroups = orderedAnchorGroups;
+        _regexExecution = new Lazy<PreparedRegexExecution>(
+            prepareRegexExecution,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    public CaseMode ResolvedCaseMode { get; }
+    public RegexExecutionPlan RegexPlan { get; }
+    public SearchQueryAnchors Anchors { get; }
+    public string[] MandatoryFragments { get; }
+    public string[] AdvisorySeeds { get; }
+    public PreparedLiteralQuery? Literal { get; }
+    public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
+    public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
+
+    public PreparedRegexExecution GetRegexExecution()
+    {
+        var wasPrepared = _regexExecution.IsValueCreated;
+        var execution = _regexExecution.Value;
+        if (wasPrepared && execution.FallbackRegex is not null)
+        {
+            RegexVerifier.RecordPreparedCacheHit();
+        }
+
+        if (!wasPrepared || execution.Utf8Regex is not { CacheHit: false } utf8Regex)
+        {
+            return execution;
+        }
+
+        return execution with { Utf8Regex = utf8Regex with { CacheHit = true } };
     }
 }
 

@@ -250,6 +250,8 @@ public sealed class SiftOptions
     // Compacts an overlay once it retains this many segments beyond the minimum
     // needed for its current live document and byte counts.
     public int OverlayCompactionSegmentThreshold { get; init; } = 8;
+    // Prevents one search from creating an excessive number of segment workers.
+    public int MaxSegmentParallelism { get; init; } = 64;
 }
 
 public sealed record BuildOptions

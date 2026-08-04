@@ -91,4 +91,40 @@ public sealed class CacheTests
         Assert.True(RegexVerifier.CacheCount <= RegexVerifier.CacheCapacity);
         Assert.True(RegexVerifier.CachePatternCharacters <= RegexVerifier.CachePatternCharacterCapacity);
     }
+
+    [Fact]
+    public async Task PreparedQueryAndPathFilterCachesAreBounded()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "needle")]));
+        using var snapshot = index.OpenSnapshot();
+
+        for (var i = 0; i < SearchSnapshot.PreparedQueryCacheCapacity + 32; i++)
+        {
+            var suffix = $"bounded-prepared-{i}";
+            _ = snapshot.Explain(
+                new SearchQuery($"needle(?#${suffix})", PatternMode.Regex, CaseMode.Sensitive),
+                new PathFilter { PathRegex = $"src/.+(?#${suffix})" });
+        }
+
+        Assert.True(SearchSnapshot.PreparedQueryCacheCount <= SearchSnapshot.PreparedQueryCacheCapacity);
+        Assert.True(SearchSnapshot.PreparedQueryCacheCharacters <= SearchSnapshot.PreparedQueryCacheCharacterCapacity);
+        Assert.True(PathFilterMatcher.CacheCount <= PathFilterMatcher.CacheCapacity);
+        Assert.True(PathFilterMatcher.CacheCharacters <= PathFilterMatcher.CacheCharacterCapacity);
+    }
+
+    [Fact]
+    public void PreparedPathFilterDoesNotObserveCallerArrayMutation()
+    {
+        var includes = new[] { "src/**" };
+        var matcher = PathFilterMatcher.Prepare(new PathFilter { IncludeGlobs = includes });
+
+        includes[0] = "tests/**";
+
+        Assert.True(matcher.IsMatch("src/a.txt"));
+        Assert.False(matcher.IsMatch("tests/a.txt"));
+        Assert.Same(
+            matcher,
+            PathFilterMatcher.Prepare(new PathFilter { IncludeGlobs = ["src/**"] }));
+    }
 }

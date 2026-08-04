@@ -8,6 +8,29 @@ namespace Lokad.Sift.Tests;
 public sealed class SearchIntegrationTests
 {
     [Fact]
+    public async Task SearchRejectsInvalidModesAndExcessiveParallelism()
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { MaxSegmentParallelism = 4 });
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            index.OpenSnapshot(new SearchOptions(segmentParallelism: 5)));
+        using var snapshot = index.OpenSnapshot();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => snapshot.Explain(
+            new SearchQuery("alpha", (PatternMode)int.MaxValue, CaseMode.Sensitive),
+            new PathFilter()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => snapshot.Explain(
+            new SearchQuery("alpha", PatternMode.Literal, (CaseMode)int.MaxValue),
+            new PathFilter()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => snapshot.Explain(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive)
+            {
+                TimeoutPolicy = (TimeoutPolicy)int.MaxValue
+            },
+            new PathFilter()));
+    }
+
+    [Fact]
     public async Task SearchRejectsOversizedQueryAndPathPatterns()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions
