@@ -762,7 +762,7 @@ public sealed class MutationIntegrationTests
         var second = index.GetMaintenanceStats();
 
         Assert.Equal(10_000, first.EstimatedReclaimableContentBytes);
-        Assert.Equal(first, second);
+        Assert.Equivalent(first, second, strict: true);
         Assert.Equal(segmentOpensBeforeStats, storage.SegmentOpenCount);
     }
 

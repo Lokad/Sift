@@ -795,7 +795,7 @@ public sealed class StorageIntegrityTests
         var second = reopened.GetMaintenanceStats();
 
         Assert.Equal("alpha\n".Length, first.EstimatedReclaimableContentBytes);
-        Assert.Equal(first, second);
+        Assert.Equivalent(first, second, strict: true);
         Assert.Equal(segmentOpensAfterFirstStats, storage.SegmentOpenCount);
 
         await reopened.Update(new InMemoryDocumentSource([]), []);
