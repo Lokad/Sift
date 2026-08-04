@@ -900,6 +900,7 @@ public sealed class StorageIntegrityTests
             CreateStoredDocument("src/ascii.txt", "alpha"),
             CreateStoredDocument("src/unicode.txt", "café")
         };
+        using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
         var (current, _) = SegmentWriter.WriteToBytes(0x1234UL, documents, CancellationToken.None);
         var currentChecksumOffset = BinaryPrimitives.ReadInt64LittleEndian(current.AsSpan(52));
         var removedBytes = SegmentFormat.StatsLength - SegmentFormat.LegacyStatsLength;

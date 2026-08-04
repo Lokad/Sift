@@ -148,7 +148,10 @@ internal sealed class CorpusStorage : ISiftStorage
 
     public IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken)
     {
-        return new WriteSession(this, AcquireWriterLock(cancellationToken));
+        return new WriteSession(
+            this,
+            AcquireWriterLock(cancellationToken),
+            SegmentIndexBuilder.AcquireWorkspaceLease());
     }
 
     private SegmentManifestEntry PublishSegment<TDocument>(
@@ -2027,9 +2030,13 @@ internal sealed class CorpusStorage : ISiftStorage
         }
     }
 
-    private sealed class WriteSession(CorpusStorage storage, IDisposable writerLock) : IStorageWriteSession
+    private sealed class WriteSession(
+        CorpusStorage storage,
+        IDisposable writerLock,
+        IDisposable indexingWorkspaceLease) : IStorageWriteSession
     {
         private IDisposable? _writerLock = writerLock;
+        private IDisposable? _indexingWorkspaceLease = indexingWorkspaceLease;
 
         public SegmentManifestEntry PublishSegment<TDocument>(
             IReadOnlyList<TDocument> documents,
@@ -2059,6 +2066,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
         public void Dispose()
         {
+            Interlocked.Exchange(ref _indexingWorkspaceLease, null)?.Dispose();
             Interlocked.Exchange(ref _writerLock, null)?.Dispose();
         }
     }

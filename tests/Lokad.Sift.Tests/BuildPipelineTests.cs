@@ -244,6 +244,7 @@ public sealed class BuildPipelineTests
     {
         using var cancellation = new CancellationTokenSource();
         var document = new CancelOnContentReadDocument(cancellation);
+        using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
 
         Assert.Throws<OperationCanceledException>(() =>
             SegmentWriter.WriteToBytes(

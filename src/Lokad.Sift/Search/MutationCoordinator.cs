@@ -1,5 +1,3 @@
-using Lokad.Sift.Storage;
-
 namespace Lokad.Sift;
 
 internal sealed class MutationCoordinator : IDisposable
@@ -33,7 +31,6 @@ internal sealed class MutationCoordinator : IDisposable
         try
         {
             Volatile.Write(ref _currentActivity, (int)activity);
-            using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
             return await Task.Run(
                 async () => await mutation(operationCancellation.Token).ConfigureAwait(false),
                 CancellationToken.None).ConfigureAwait(false);

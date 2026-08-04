@@ -16,6 +16,14 @@ internal static class SegmentIndexBuilder
         return new WorkspaceLease();
     }
 
+    internal static void ThrowIfWorkspaceLeaseMissing()
+    {
+        if (Volatile.Read(ref s_workspaceLeaseCount) == 0)
+        {
+            throw new InvalidOperationException("A Sift indexing workspace lease is required.");
+        }
+    }
+
     public static BuiltIndex BuildContentIndex<TDocument>(
         IReadOnlyList<TDocument> documents,
         int gramLength,

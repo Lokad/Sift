@@ -13,7 +13,7 @@ internal static unsafe class SegmentWriter
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
     {
-        using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
+        SegmentIndexBuilder.ThrowIfWorkspaceLeaseMissing();
         using var prepared = Prepare(documents, cancellationToken);
         ensureCapacity(prepared.TotalLength);
         using var stream = new FileStream(path, new FileStreamOptions
@@ -56,7 +56,7 @@ internal static unsafe class SegmentWriter
     public static (byte[] Bytes, long ContentBytes) WriteToBytes<TDocument>(ulong segmentId, IReadOnlyList<TDocument> documents, CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
     {
-        using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
+        SegmentIndexBuilder.ThrowIfWorkspaceLeaseMissing();
         using var prepared = Prepare(documents, cancellationToken);
         var bytes = GC.AllocateUninitializedArray<byte>(prepared.TotalLength);
         WritePrepared(bytes, segmentId, documents, prepared, cancellationToken);
