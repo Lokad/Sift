@@ -8,6 +8,7 @@ These are the only NuGet packages allowed as direct `PackageReference` entries i
 
 - Lokad.Utf8Regex
 - BenchmarkDotNet
+- Microsoft.SourceLink.GitHub
 - Microsoft.NET.Test.Sdk
 - xunit
 - xunit.runner.visualstudio

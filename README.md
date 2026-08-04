@@ -22,7 +22,7 @@ static async Task Example()
 {
 var indexPath = @"C:\data\sift-index";
 
-using var index = new Sift(indexPath, new SiftOptions
+using var index = new SiftIndex(indexPath, new SiftOptions
 {
     TargetSegmentDocumentCount = 50_000, // Start a new segment once about 50k documents accumulate.
     TargetSegmentContentBytes = 64L * 1024 * 1024, // Or once a segment reaches about 64 MiB of content.
@@ -33,7 +33,7 @@ using var index = new Sift(indexPath, new SiftOptions
     MaxPathFilterCharacters = 16 * 1024 // Bound aggregate path-filter preparation.
 });
 // Alternative in-memory form:
-// using var index = Sift.CreateInMemory();
+// using var index = SiftIndex.CreateInMemory();
 
 // 1. Build the initial index.
 var initialDocuments = new InMemoryDocumentSource(
@@ -163,7 +163,7 @@ Document bodies are conservatively treated as borrowed until the next
 operation can set `ContentLifetime` to
 `DocumentContentLifetime.UntilOperationCompletes`; Sift then avoids copying the
 body before unchanged-update detection and segment publication.
-Deletion lists passed to `Update` or `Apply` are read asynchronously without an
+Deletion lists passed to `Update` are read asynchronously without an
 eager copy; keep the list and its entries unchanged until the returned task
 completes.
 
@@ -172,7 +172,7 @@ For transient overlay workspaces, open an overlay snapshot on top of the shared 
 ```csharp
 using var overlay = index.OpenOverlaySnapshot();
 
-await overlay.Apply(
+await overlay.Update(
     new InMemoryDocumentSource(
     [
         new SubmittedDocument("src/lib/math.cs", Encoding.UTF8.GetBytes("static class MathEx { int Mul(int a, int b) => a * b; }"))
@@ -186,7 +186,7 @@ overlay.Search(
     overlayCollector);
 
 // The base index is unchanged until you explicitly fold the overlay back.
-var foldBack = await overlay.ApplyTo(index);
+var foldBack = await overlay.CommitToBase(index);
 ```
 
 Use the same policy for the recommendation and the maintenance operation:
@@ -228,7 +228,7 @@ publication and manifest publication. No separate cleanup call is required.
 Snapshots acquire an immutable generation lease read-only; opening or disposing a
 snapshot does not create files or take the writer lock.
 
-Corrupt manifest, lease, or segment metadata is fail-closed. The `Sift` instance
+Corrupt manifest, lease, or segment metadata is fail-closed. The `SiftIndex` instance
 remains constructible and reports `RequiresRebuild`; searches, updates, and
 maintenance reject the unusable index. Calling `Build(...)` is the explicit
 recovery operation: it purges the derived index artifacts, publishes a fresh
@@ -264,18 +264,19 @@ The main consumer-facing assembly is:
 
 - `Lokad.Sift`
 
-For advanced storage-engine consumers, `Lokad.Sift.Storage` is also a supported public namespace for direct manifest/segment access and storage-oriented tooling.
+Storage formats, manifests, and mapped segments are implementation details; the
+supported package surface is the root `Lokad.Sift` namespace.
 
 Typical usage:
 
-1. create a `Sift`
+1. create a `SiftIndex`
 2. build the index from `IDocumentSource` or `IAsyncEnumerable<SubmittedDocument>`
 3. open a snapshot
 4. search and materialize hits
 5. apply `Update(...)` for upserts/deletions
 6. optionally run `Compact(...)`
 
-For transient or embedded scenarios, use `Sift.CreateInMemory()` instead of a filesystem-backed corpus root.
+For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of a filesystem-backed corpus root.
 
 ## Notes for consumers
 

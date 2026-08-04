@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `ISift.ShouldCompact(CompactOptions)` as the authoritative hint for
+- Added `ISiftIndex.ShouldCompact(CompactOptions)` as the authoritative hint for
   actionable compaction work, avoiding false recommendations based on aggregate
   segment count alone.
 - Made compaction hints account for replacement eligibility and quota capacity,
@@ -42,7 +42,7 @@
   off the managed heap.
 - Deferred path encoding and line-index construction until after unchanged
   upserts have been removed from an update partition.
-- Released pooled native indexing workspaces when the last `Sift` instance is
+- Released pooled native indexing workspaces when the last `SiftIndex` instance is
   disposed and exposed their current footprint through process metrics.
 - Reduced regex-search overhead by preparing verifiers once per query,
   coalescing concurrent cache creation, and mapping Unicode offsets
@@ -109,11 +109,11 @@
   revision, and physical storage generation.
 - Removed nullable `SiftOptions` entry points; callers either omit the options
   through the dedicated overload or provide a non-null instance.
-- Made `SearchQuery`, `DocumentKey`, and `SubmittedDocument` reference contracts
-  so required values cannot silently become invalid through `default`.
+- Made `SearchQuery` a reference contract and made default `DocumentKey` and
+  `SubmittedDocument` values fail explicitly when their required path is read.
 - Made large search, mutation, maintenance, and storage result contracts
   reference types to avoid copying oversized value types.
-- Moved convenience operation overloads to `SiftContractExtensions`; interfaces
+- Moved convenience operation overloads to `SiftIndexExtensions`; interfaces
   now expose only the canonical cancellation- and options-aware operations.
 - Internalized storage formats, mapped segments, manifests, and codec helpers;
   the supported package surface is the root `Lokad.Sift` integration contract.

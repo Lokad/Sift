@@ -99,13 +99,15 @@ A search query consists of:
 * `WholeLine`
 * `Multiline`
 * `DotAll`
-* `IncludeGlobs[]`
-* `ExcludeGlobs[]`
-* `PathRegex`
 * `MaxHits`
-* `MaxDocuments`
+* `MaxMatchedDocuments`
 * `MaxBytesScanned`
+* `MaxHitsPerDocument`
+* `MaxElapsedMilliseconds`
 * `TimeoutPolicy`
+
+A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
+`PathRegex`.
 
 ### 4.2 Path semantics
 
@@ -756,7 +758,8 @@ Columns in materialized hits are UTF-16 code-unit columns.
 
 Provide an in-process, library-first, filesystem-agnostic API.
 
-The primary consumer surface is the root `Lokad.Sift` namespace. In addition, `Lokad.Sift.Storage` is a supported advanced API for storage inspection, diagnostics, and storage-oriented tooling over manifests and immutable segments.
+The supported consumer surface is the root `Lokad.Sift` namespace. Storage
+formats, mapped segments, manifests, and codecs are implementation details.
 
 ```csharp
 public enum PatternMode { Literal, Regex }
@@ -779,7 +782,7 @@ public sealed record SearchQuery
             multiline: false,
             dotAll: false,
             maxHits: 10_000,
-            maxDocuments: int.MaxValue,
+            maxMatchedDocuments: int.MaxValue,
             maxBytesScanned: long.MaxValue,
             timeoutPolicy: TimeoutPolicy.StopSearch,
             maxHitsPerDocument: int.MaxValue,
@@ -794,7 +797,7 @@ public sealed record SearchQuery
         bool multiline,
         bool dotAll,
         int maxHits,
-        int maxDocuments,
+        int maxMatchedDocuments,
         long maxBytesScanned,
         TimeoutPolicy timeoutPolicy,
         int maxHitsPerDocument,
@@ -808,7 +811,7 @@ public sealed record SearchQuery
         Multiline = multiline;
         DotAll = dotAll;
         MaxHits = maxHits;
-        MaxDocuments = maxDocuments;
+        MaxMatchedDocuments = maxMatchedDocuments;
         MaxBytesScanned = maxBytesScanned;
         TimeoutPolicy = timeoutPolicy;
         MaxHitsPerDocument = maxHitsPerDocument;
@@ -823,33 +826,33 @@ public sealed record SearchQuery
     public bool Multiline { get; init; }
     public bool DotAll { get; init; }
     public int MaxHits { get; init; }
-    public int MaxDocuments { get; init; }
+    public int MaxMatchedDocuments { get; init; }
     public long MaxBytesScanned { get; init; }
     public TimeoutPolicy TimeoutPolicy { get; init; }
     public int MaxHitsPerDocument { get; init; }
     public long MaxElapsedMilliseconds { get; init; }
 }
 
-public readonly record struct PathFilter
+public sealed class PathFilter
 {
     public PathFilter()
         : this(pathPrefix: null, includeGlobs: null, excludeGlobs: null, pathRegex: null) { }
 
     public PathFilter(
         string? pathPrefix,
-        string[]? includeGlobs,
-        string[]? excludeGlobs,
+        IReadOnlyList<string>? includeGlobs,
+        IReadOnlyList<string>? excludeGlobs,
         string? pathRegex)
     {
         PathPrefix = pathPrefix;
-        IncludeGlobs = includeGlobs;
-        ExcludeGlobs = excludeGlobs;
+        IncludeGlobs = includeGlobs ?? Array.Empty<string>();
+        ExcludeGlobs = excludeGlobs ?? Array.Empty<string>();
         PathRegex = pathRegex;
     }
 
     public string? PathPrefix { get; init; }
-    public string[]? IncludeGlobs { get; init; }
-    public string[]? ExcludeGlobs { get; init; }
+    public IReadOnlyList<string> IncludeGlobs { get; init; }
+    public IReadOnlyList<string> ExcludeGlobs { get; init; }
     public string? PathRegex { get; init; }
 }
 
@@ -875,6 +878,8 @@ public readonly record struct DocumentKey
 
 public readonly record struct SubmittedDocument
 {
+    private readonly string? _path;
+
     public SubmittedDocument(string path, ReadOnlyMemory<byte> content)
         : this(path, content, lastModifiedUtc: null) { }
 
@@ -894,13 +899,13 @@ public readonly record struct SubmittedDocument
         DateTimeOffset? lastModifiedUtc,
         DocumentContentLifetime contentLifetime)
     {
-        Path = path;
+        _path = DocumentPath.Normalize(path);
         Content = content;
         LastModifiedUtc = lastModifiedUtc;
         ContentLifetime = contentLifetime;
     }
 
-    public string Path { get; }
+    public string Path => _path ?? throw new InvalidOperationException("The submitted document is uninitialized.");
     public ReadOnlyMemory<byte> Content { get; }
     public DateTimeOffset? LastModifiedUtc { get; }
     public DocumentContentLifetime ContentLifetime { get; }
@@ -924,31 +929,32 @@ public interface IDocumentSource
 public interface IIndexSnapshot : IDisposable
 {
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
-    SearchPlan Explain(SearchQuery query, in PathFilter pathFilter);
-    SearchStats Search(SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
+    SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
+    SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
 }
 
 public interface IOverlaySnapshot : IIndexSnapshot
 {
-    Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<UpdateStats> Apply(
+    Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
-        OverlayApplyOptions options,
+        OverlayUpdateOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
+    Task<UpdateStats> CommitToBase(ISiftIndex baseIndex, UpdateOptions options, CancellationToken cancellationToken);
+    Task<UpdateStats> ApplyDeltaTo(ISiftIndex target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
-public interface ISift : IDisposable
+public interface ISiftIndex : IDisposable
 {
     bool RequiresRebuild { get; }
     IndexIdentity GetIndexIdentity();
     IndexState GetIndexState();
     IIndexSnapshot OpenSnapshot(SearchOptions options);
     IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
-    ActivityStats GetActivityStats();
+    WriteActivityStats GetWriteActivityStats();
     IndexValidationStats GetValidationStats();
     MaintenanceStats GetMaintenanceStats();
     StorageStats GetStorageStats();
@@ -982,16 +988,16 @@ public interface ISift : IDisposable
 ```
 
 Convenience overloads that supply default options or cancellation tokens are
-extension methods in `SiftContractExtensions`; the interfaces keep their core
+extension methods in `SiftIndexExtensions`; the interfaces keep their core
 contracts explicit.
 
 Memory ownership rule:
 
 * `SubmittedDocument.Content` is borrowed memory whose declared lifetime is set by `ContentLifetime`
 * for `UntilNextRead`, Sift fully consumes or copies `Content` before calling `TryReadNext` again, and the source may reuse the buffer in that next call
-* for `UntilOperationCompletes`, the source keeps `Content` immutable until the enclosing build, update, or apply task completes
+* for `UntilOperationCompletes`, the source keeps `Content` immutable until the enclosing build or update task completes
 * the core library must not retain caller-owned buffers beyond the declared lifetime
-* deletion lists passed to update or apply remain unchanged until the returned task completes
+* deletion lists passed to update remain unchanged until the returned task completes
 
 API rules:
 
@@ -999,61 +1005,22 @@ API rules:
 * async wrappers are allowed outside the hot path
 * results must stream through `IHitCollector`
 * no mandatory “load all hits into list” API in the core layer
-* `null` path-filter fields mean “no filter”; empty arrays are equivalent to `null`
+* `null` path-filter constructor inputs mean “no filter”; exposed include/exclude collections are never `null`
 * document ingestion is caller-driven; filesystem crawling belongs in an adapter above the core library
 
 ---
 
 ## 11. Project structure
 
-A solution Lokad.Sift.slnx
+A solution `Lokad.Sift.slnx` with these projects:
 
-Use these projects:
+* `Lokad.Sift`
 
-* `Lokad.Sift.Core`
-
-  * public contracts
-  * query model
-  * stats model
-  * path models
-
-* `Lokad.Sift.LowLevel`
-
-  * codecs
-  * SIMD scanners
-  * bitsets
-  * pooled buffers
-  * unsafe helpers
-  * byte/char classification
-
-* `Lokad.Sift.Storage`
-
-  * manifest reader/writer
-  * segment reader/writer
-  * mmap region abstractions
-  * checksums
-  * format versioning
-
-* `Lokad.Sift.Indexer`
-
-  * discovery
-  * UTF-8 validation
-  * normalization
-  * segment assignment
-  * postings build
-  * publication
-  * compaction
-
-* `Lokad.Sift.Search`
-
-  * query planner
-  * regex analyzer
-  * path planner
-  * candidate generation
-  * literal verifier
-* byte regex verifier
-* regex fallback/oracle adapter
-  * hit materializer
+  * root public contracts
+  * low-level codecs and scanners
+  * internal storage formats and mapped segments
+  * indexing, publication, and compaction
+  * planning, verification, and hit materialization
 
 * `Lokad.Sift.Cli`
 
@@ -1078,6 +1045,10 @@ The CLI is an adapter over the core library; it may source documents from the fi
   * integration
   * fuzz
   * differential correctness
+
+* `Lokad.Sift.TestHost`
+
+  * subprocess fixtures for lifecycle and recovery tests
 
 ---
 
