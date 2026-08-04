@@ -19,13 +19,19 @@ public sealed class CorpusStorage : ISiftStorage
     private readonly string _rootPath;
     private readonly long _maximumPhysicalBytes;
     private readonly object _layoutLock = new();
+    private readonly object _capacityBudgetLock = new();
+    private readonly object _manifestCacheLock = new();
     private readonly ConcurrentDictionary<ulong, byte> _validatedSegmentIds = new();
     private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
     private bool _reclamationIntentKnownDurable;
     private long _segmentOpenCount;
     private long _reclamationFailureCount;
+    private long _corpusPhysicalScanCount;
+    private long _manifestParseCount;
     private string? _lastReclamationFailure;
+    private CapacityBudget? _capacityBudget;
+    private ManifestCacheEntry? _manifestCache;
 
     public CorpusStorage(string rootPath)
         : this(rootPath, long.MaxValue)
@@ -45,6 +51,8 @@ public sealed class CorpusStorage : ISiftStorage
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
     internal int ValidatedSegmentCount => _validatedSegmentIds.Count;
     internal long SegmentOpenCount => Interlocked.Read(ref _segmentOpenCount);
+    internal long CorpusPhysicalScanCount => Interlocked.Read(ref _corpusPhysicalScanCount);
+    internal long ManifestParseCount => Interlocked.Read(ref _manifestParseCount);
     private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
     private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
     internal PublicationFaultInjector? FaultInjector { get; set; }
@@ -114,13 +122,13 @@ public sealed class CorpusStorage : ISiftStorage
             try
             {
                 EnsureLayout();
-                return stream;
+                return StartWriterLease(stream);
             }
             catch (InvalidDataException)
             {
                 // The writer lock is also required to replace a corrupt derived
                 // index. The operation itself still observes the corruption.
-                return stream;
+                return StartWriterLease(stream);
             }
             catch
             {
@@ -186,7 +194,52 @@ public sealed class CorpusStorage : ISiftStorage
 
     public CorpusManifest ReadManifest()
     {
-        return ReadManifest(ManifestPath);
+        var stamp = ReadManifestStamp();
+        lock (_manifestCacheLock)
+        {
+            if (_manifestCache is { } cached && cached.Stamp == stamp)
+            {
+                return cached.Manifest;
+            }
+        }
+
+        var manifest = ReadManifest(ManifestPath);
+        Interlocked.Increment(ref _manifestParseCount);
+        var currentStamp = ReadManifestStamp();
+        if (currentStamp == stamp && manifest.Generation == stamp.Generation)
+        {
+            lock (_manifestCacheLock)
+            {
+                _manifestCache = new ManifestCacheEntry(stamp, manifest);
+            }
+        }
+
+        return manifest;
+    }
+
+    private ManifestStamp ReadManifestStamp()
+    {
+        using var stream = new FileStream(
+            ManifestPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length < SegmentFormat.LegacyManifestHeaderSize + sizeof(ulong))
+        {
+            throw new InvalidDataException("Invalid Sift manifest length.");
+        }
+
+        Span<byte> header = stackalloc byte[36];
+        stream.ReadExactly(header);
+        if (LittleEndianCodec.ReadUInt64(header) != SegmentFormat.ManifestMagic)
+        {
+            throw new InvalidDataException("Invalid Sift manifest magic.");
+        }
+
+        return new ManifestStamp(
+            LittleEndianCodec.ReadUInt64(header[28..]),
+            stream.Length,
+            File.GetLastWriteTimeUtc(ManifestPath).Ticks);
     }
 
     private static CorpusManifest ReadManifest(string manifestPath)
@@ -391,6 +444,14 @@ public sealed class CorpusStorage : ISiftStorage
 
     public long? GetAvailableBytes()
     {
+        lock (_capacityBudgetLock)
+        {
+            if (_capacityBudget is { } budget)
+            {
+                return budget.AvailableBytes;
+            }
+        }
+
         return GetAvailableBytes(GetCorpusPhysicalBytes());
     }
 
@@ -436,10 +497,16 @@ public sealed class CorpusStorage : ISiftStorage
                 $"Sift requires {requiredBytes} available bytes to publish a {addedBytes}-byte file " +
                 $"while retaining {minimumFreeBytesAfterPublication} bytes, but only {availableBytes} bytes are available.");
         }
+
+        lock (_capacityBudgetLock)
+        {
+            _capacityBudget?.Debit(addedBytes);
+        }
     }
 
     private long GetCorpusPhysicalBytes()
     {
+        Interlocked.Increment(ref _corpusPhysicalScanCount);
         if (!Directory.Exists(_rootPath))
         {
             return 0;
@@ -459,6 +526,72 @@ public sealed class CorpusStorage : ISiftStorage
         }
 
         return bytes;
+    }
+
+    private IDisposable StartWriterLease(FileStream stream)
+    {
+        try
+        {
+            lock (_capacityBudgetLock)
+            {
+                if (_capacityBudget is not null)
+                {
+                    throw new InvalidOperationException("A CorpusStorage writer lease is already active.");
+                }
+
+                var physicalBytes = GetCorpusPhysicalBytes();
+                _capacityBudget = new CapacityBudget(
+                    physicalBytes,
+                    GetAvailableBytes(physicalBytes));
+            }
+
+            return new WriterLease(this, stream);
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    private void EndWriterLease()
+    {
+        lock (_capacityBudgetLock)
+        {
+            _capacityBudget = null;
+        }
+    }
+
+    private void RefreshCapacityBudget()
+    {
+        lock (_capacityBudgetLock)
+        {
+            if (_capacityBudget is null)
+            {
+                return;
+            }
+
+            var physicalBytes = GetCorpusPhysicalBytes();
+            _capacityBudget = new CapacityBudget(
+                physicalBytes,
+                GetAvailableBytes(physicalBytes));
+        }
+    }
+
+    private void CreditCapacity(long removedBytes)
+    {
+        lock (_capacityBudgetLock)
+        {
+            _capacityBudget?.Credit(removedBytes);
+        }
+    }
+
+    private long GetAccountedCorpusPhysicalBytes()
+    {
+        lock (_capacityBudgetLock)
+        {
+            return _capacityBudget?.PhysicalBytes ?? GetCorpusPhysicalBytes();
+        }
     }
 
     bool ISiftStorage.IsReclamationPending
@@ -726,6 +859,7 @@ public sealed class CorpusStorage : ISiftStorage
                 try
                 {
                     Directory.Delete(segment.DirectoryPath, recursive: true);
+                    CreditCapacity(segment.Bytes);
                 }
                 catch (DirectoryNotFoundException)
                 {
@@ -745,6 +879,7 @@ public sealed class CorpusStorage : ISiftStorage
             if (abandonedSegments.Count > 0)
             {
                 FlushDirectoryEntry(SegmentsPath);
+                RefreshCapacityBudget();
             }
 
             if (failedCount > 0)
@@ -810,6 +945,11 @@ public sealed class CorpusStorage : ISiftStorage
         _segmentDirectoriesRecovered = true;
         SetReclamationPending(isPending: false);
         FlushDirectoryEntry(_rootPath);
+        lock (_manifestCacheLock)
+        {
+            _manifestCache = null;
+        }
+        RefreshCapacityBudget();
     }
 
     private void WriteManifest(CorpusManifest manifest)
@@ -874,6 +1014,9 @@ public sealed class CorpusStorage : ISiftStorage
 
         LittleEndianCodec.WriteUInt64(span.Slice(checksumOffset, checksumLength), Hashing.Fnv1A64(span.Slice(0, checksumOffset)));
 
+        var previousManifestBytes = File.Exists(ManifestPath)
+            ? new FileInfo(ManifestPath).Length
+            : 0;
         EnsureCapacity(size, minimumFreeBytesAfterPublication: 0);
         using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
@@ -893,7 +1036,13 @@ public sealed class CorpusStorage : ISiftStorage
             File.Move(tempPath, ManifestPath, overwrite: true);
         }
 
+        CreditCapacity(previousManifestBytes);
+
         FlushDirectoryEntry(_rootPath);
+        lock (_manifestCacheLock)
+        {
+            _manifestCache = new ManifestCacheEntry(ReadManifestStamp(), manifest);
+        }
         if (File.Exists(RebuildRequiredPath))
         {
             File.Delete(RebuildRequiredPath);
@@ -1387,6 +1536,7 @@ public sealed class CorpusStorage : ISiftStorage
             {
                 Directory.Delete(segment.DirectoryPath, recursive: true);
                 ForgetSegmentValidation(segment.SegmentId);
+                CreditCapacity(segment.Bytes);
                 reclaimedSegmentCount++;
                 reclaimedSegmentBytes += segment.Bytes;
             }
@@ -1468,7 +1618,7 @@ public sealed class CorpusStorage : ISiftStorage
             retiredSegmentBytes - deferredSegmentBytes,
             reclamation.BlockedSegmentBytes);
         var temporaryBytes = GetTemporaryBytes();
-        var corpusPhysicalBytes = GetCorpusPhysicalBytes();
+        var corpusPhysicalBytes = GetAccountedCorpusPhysicalBytes();
         return new StorageStats(
             ManifestSegmentCount: manifestSegmentCount,
             ManifestSegmentBytes: manifestSegmentBytes,
@@ -1830,6 +1980,15 @@ public sealed class CorpusStorage : ISiftStorage
         string DirectoryPath,
         long Bytes);
 
+    private readonly record struct ManifestStamp(
+        ulong Generation,
+        long Length,
+        long LastWriteUtcTicks);
+
+    private sealed record ManifestCacheEntry(
+        ManifestStamp Stamp,
+        CorpusManifest Manifest);
+
     private readonly record struct GenerationLeaseData(
         Guid CorpusId,
         ulong Generation,
@@ -1840,6 +1999,50 @@ public sealed class CorpusStorage : ISiftStorage
         int LeasedGenerationCount,
         ulong? OldestLeasedGeneration,
         bool IsBlocked);
+
+    private sealed class CapacityBudget(long physicalBytes, long? availableBytes)
+    {
+        public long PhysicalBytes { get; private set; } = physicalBytes;
+        public long? AvailableBytes { get; private set; } = availableBytes;
+
+        public void Debit(long bytes)
+        {
+            PhysicalBytes = checked(PhysicalBytes + bytes);
+            if (AvailableBytes is { } available)
+            {
+                AvailableBytes = Math.Max(0, available - bytes);
+            }
+        }
+
+        public void Credit(long bytes)
+        {
+            PhysicalBytes = Math.Max(0, PhysicalBytes - bytes);
+            if (AvailableBytes is { } available)
+            {
+                AvailableBytes = available > long.MaxValue - bytes
+                    ? long.MaxValue
+                    : available + bytes;
+            }
+        }
+    }
+
+    private sealed class WriterLease(CorpusStorage owner, FileStream stream) : IDisposable
+    {
+        private CorpusStorage? _owner = owner;
+        private FileStream? _stream = stream;
+
+        public void Dispose()
+        {
+            var currentOwner = Interlocked.Exchange(ref _owner, null);
+            if (currentOwner is null)
+            {
+                return;
+            }
+
+            currentOwner.EndWriterLease();
+            Interlocked.Exchange(ref _stream, null)?.Dispose();
+        }
+    }
 
     private sealed class EmptyDisposable : IDisposable
     {

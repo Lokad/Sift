@@ -12,6 +12,53 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageIntegrityTests
 {
     [Fact]
+    public async Task SnapshotOpenReusesParsedManifestAndObservesExternalPublication()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha"));
+        var firstStorage = new CorpusStorage(fixture.CorpusPath);
+        using var first = new SiftIndex(firstStorage, new SiftOptions());
+        await first.Build(fixture.CreateSource());
+
+        var baselineParses = firstStorage.ManifestParseCount;
+        for (var i = 0; i < 10; i++)
+        {
+            using var snapshot = first.OpenSnapshot();
+        }
+
+        Assert.Equal(baselineParses, firstStorage.ManifestParseCount);
+
+        using (var second = new SiftIndex(fixture.CorpusPath))
+        {
+            await second.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        }
+
+        using var refreshed = first.OpenSnapshot();
+        Assert.True(refreshed.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+        Assert.Equal(baselineParses + 1, firstStorage.ManifestParseCount);
+    }
+
+    [Fact]
+    public async Task MultiSegmentBuildScansCorpusCapacityOnce()
+    {
+        using var fixture = new CorpusFixture();
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        using var index = new SiftIndex(storage, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1,
+            MinimumFreeBytesAfterMutation = 0
+        });
+        var baselineScans = storage.CorpusPhysicalScanCount;
+        var documents = Enumerable.Range(0, 8)
+            .Select(static i => ($"src/{i}.txt", $"document {i}"))
+            .ToArray();
+
+        var build = await index.Build(new InMemoryDocumentSource(documents));
+
+        Assert.Equal(8, build.SegmentCount);
+        Assert.Equal(baselineScans + 1, storage.CorpusPhysicalScanCount);
+    }
+
+    [Fact]
     public async Task SegmentValidationObservesCancellation()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
