@@ -13,6 +13,7 @@ internal interface ISiftStorage
     long? GetAvailableBytes();
     void EnsureSnapshotMetadata();
     StorageReadSnapshot OpenReadSnapshot();
+    StorageReadSnapshot OpenReadSnapshotForValidation();
     StorageStats GetStorageStats();
     void ReclaimUnreferencedSegments(CancellationToken cancellationToken);
 }

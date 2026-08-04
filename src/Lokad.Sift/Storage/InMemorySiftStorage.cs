@@ -171,6 +171,16 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 
     StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
     {
+        return OpenReadSnapshot();
+    }
+
+    StorageReadSnapshot ISiftStorage.OpenReadSnapshotForValidation()
+    {
+        return OpenReadSnapshot();
+    }
+
+    private StorageReadSnapshot OpenReadSnapshot()
+    {
         lock (_stateLock)
         {
             var manifest = _manifest ?? new CorpusManifest(Guid.Empty, 0, []);

@@ -19,6 +19,16 @@ internal sealed class CorpusManifestCache
             }
         }
 
+        return Refresh(manifestPath, stamp);
+    }
+
+    public CorpusManifest Refresh(string manifestPath)
+    {
+        return Refresh(manifestPath, ReadStamp(manifestPath));
+    }
+
+    private CorpusManifest Refresh(string manifestPath, ManifestStamp stamp)
+    {
         var manifest = CorpusManifestCodec.Read(manifestPath);
         Interlocked.Increment(ref _parseCount);
         var currentStamp = ReadStamp(manifestPath);

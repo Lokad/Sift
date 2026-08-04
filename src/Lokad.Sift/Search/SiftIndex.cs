@@ -351,7 +351,7 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             var watch = Stopwatch.StartNew();
-            using var snapshot = _storage.OpenReadSnapshot();
+            using var snapshot = _storage.OpenReadSnapshotForValidation();
             var manifest = snapshot.Manifest;
             var segmentBytes = new long[manifest.Segments.Count];
             long totalBytes = 0;

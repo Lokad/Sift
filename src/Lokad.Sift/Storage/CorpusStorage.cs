@@ -450,6 +450,16 @@ internal sealed class CorpusStorage : ISiftStorage
 
     StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
     {
+        return OpenReadSnapshot(_manifestCache.Read);
+    }
+
+    StorageReadSnapshot ISiftStorage.OpenReadSnapshotForValidation()
+    {
+        return OpenReadSnapshot(_manifestCache.Refresh);
+    }
+
+    private StorageReadSnapshot OpenReadSnapshot(Func<string, CorpusManifest> readManifest)
+    {
         // Publication can advance the manifest between the read and lease open; retry only that race.
         while (true)
         {
@@ -460,7 +470,7 @@ internal sealed class CorpusStorage : ISiftStorage
                     EmptyDisposable.Instance);
             }
 
-            var manifest = ReadManifest();
+            var manifest = readManifest(ManifestPath);
             var leasePath = GetGenerationLeasePath(manifest.Generation);
             FileStream lease;
             try
@@ -470,7 +480,7 @@ internal sealed class CorpusStorage : ISiftStorage
             }
             catch (FileNotFoundException)
             {
-                if (HasManifest && ReadManifest().Generation != manifest.Generation)
+                if (HasManifest && readManifest(ManifestPath).Generation != manifest.Generation)
                 {
                     continue;
                 }
@@ -480,7 +490,7 @@ internal sealed class CorpusStorage : ISiftStorage
             }
             catch (DirectoryNotFoundException)
             {
-                if (HasManifest && ReadManifest().Generation != manifest.Generation)
+                if (HasManifest && readManifest(ManifestPath).Generation != manifest.Generation)
                 {
                     continue;
                 }
@@ -490,7 +500,7 @@ internal sealed class CorpusStorage : ISiftStorage
             }
             catch (IOException)
             {
-                if (HasManifest && ReadManifest().Generation != manifest.Generation)
+                if (HasManifest && readManifest(ManifestPath).Generation != manifest.Generation)
                 {
                     continue;
                 }

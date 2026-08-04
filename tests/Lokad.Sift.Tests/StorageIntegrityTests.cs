@@ -851,6 +851,29 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task ExplicitValidationRechecksACachedManifestWithAnUnchangedStamp()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var manifestPath = Path.Combine(fixture.CorpusPath, "manifest.bin");
+        var lastWriteTime = File.GetLastWriteTimeUtc(manifestPath);
+
+        using (var stream = new FileStream(manifestPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Position = stream.Length - 1;
+            var current = stream.ReadByte();
+            stream.Position--;
+            stream.WriteByte(unchecked((byte)(current ^ 0x5A)));
+        }
+
+        File.SetLastWriteTimeUtc(manifestPath, lastWriteTime);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => index.Validate());
+        Assert.True(index.RequiresRebuild);
+    }
+
+    [Fact]
     public async Task ManifestSegmentCountMustFitTheEncodedTable()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
@@ -1373,6 +1396,8 @@ public sealed class StorageIntegrityTests
         public long? GetAvailableBytes() => inner.GetAvailableBytes();
         public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();
         public StorageReadSnapshot OpenReadSnapshot() => inner.OpenReadSnapshot();
+        public StorageReadSnapshot OpenReadSnapshotForValidation() =>
+            inner.OpenReadSnapshotForValidation();
         public StorageStats GetStorageStats() => inner.GetStorageStats();
         public void ReclaimUnreferencedSegments(CancellationToken cancellationToken) =>
             inner.ReclaimUnreferencedSegments(cancellationToken);
@@ -1411,6 +1436,8 @@ public sealed class StorageIntegrityTests
         public long? GetAvailableBytes() => inner.GetAvailableBytes();
         public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();
         public StorageReadSnapshot OpenReadSnapshot() => inner.OpenReadSnapshot();
+        public StorageReadSnapshot OpenReadSnapshotForValidation() =>
+            inner.OpenReadSnapshotForValidation();
         public StorageStats GetStorageStats() => inner.GetStorageStats();
         public void ReclaimUnreferencedSegments(CancellationToken cancellationToken) =>
             inner.ReclaimUnreferencedSegments(cancellationToken);
