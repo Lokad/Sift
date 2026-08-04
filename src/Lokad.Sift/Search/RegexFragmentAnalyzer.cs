@@ -21,13 +21,32 @@ internal static class RegexFragmentAnalyzer
         const int limit = 8;
         var parser = new Parser(pattern, limit, advisoryMode: true);
         var result = parser.ParseExpression();
-        if (!parser.IsComplete)
+        return CreatePatternAnalysis(result, parser.IsComplete, parser.RequiresIgnoreCase, limit);
+    }
+
+    public static PatternAnalysis AnalyzePattern(Utf8RegexSyntax syntax)
+    {
+        const int limit = 8;
+        return CreatePatternAnalysis(
+            AnalyzeSyntaxNode(syntax.Root, limit),
+            isComplete: true,
+            requiresIgnoreCase: false,
+            limit);
+    }
+
+    private static PatternAnalysis CreatePatternAnalysis(
+        NodeResult result,
+        bool isComplete,
+        bool requiresIgnoreCase,
+        int limit)
+    {
+        if (!isComplete)
         {
             return new PatternAnalysis(
                 false,
                 null,
                 [],
-                new AdvisorySeedPlan([], parser.RequiresIgnoreCase));
+                new AdvisorySeedPlan([], requiresIgnoreCase));
         }
 
         var merged = new List<string>(result.AdvisorySeeds.Length + result.Fragments.Length);
@@ -45,12 +64,65 @@ internal static class RegexFragmentAnalyzer
         }
 
         return new PatternAnalysis(
-            result.ExactLiteral is not null && !parser.RequiresIgnoreCase,
+            result.ExactLiteral is not null && !requiresIgnoreCase,
             result.ExactLiteral,
-            parser.RequiresIgnoreCase ? [] : SelectBestFragments(result.Fragments, limit),
+            requiresIgnoreCase ? [] : SelectBestFragments(result.Fragments, limit),
             new AdvisorySeedPlan(
                 SelectBestFragments([.. merged], limit),
-                parser.RequiresIgnoreCase));
+                requiresIgnoreCase));
+    }
+
+    private static NodeResult AnalyzeSyntaxNode(Utf8RegexNode node, int limit)
+    {
+        switch (node)
+        {
+            case Utf8RegexSequence sequence:
+                {
+                    var result = NodeResult.SequenceSeed;
+                    for (var i = 0; i < sequence.Children.Length; i++)
+                    {
+                        result = NodeResult.Concat(result, AnalyzeSyntaxNode(sequence.Children[i], limit), limit);
+                    }
+
+                    return result;
+                }
+            case Utf8RegexAlternation alternation:
+                {
+                    var result = AnalyzeSyntaxNode(alternation.Options[0], limit);
+                    for (var i = 1; i < alternation.Options.Length; i++)
+                    {
+                        result = NodeResult.Intersect(result, AnalyzeSyntaxNode(alternation.Options[i], limit), limit);
+                    }
+
+                    return result;
+                }
+            case Utf8RegexRepeat repeat:
+                {
+                    if (repeat.Min == 0)
+                    {
+                        return NodeResult.Optional;
+                    }
+
+                    var child = AnalyzeSyntaxNode(repeat.Child, limit);
+                    return repeat.Min == 1 && repeat.Max == 1 ? child : child.MakeRepeated();
+                }
+            case Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal } atom:
+                return NodeResult.Literal(((char)atom.Literal).ToString());
+            // Keep character classes conservative. The normalized set no longer
+            // carries enough syntax information to distinguish every escaped form.
+            case Utf8RegexAtom { Kind: Utf8RegexAtomKind.CharClass }:
+                return NodeResult.RequiredNonLiteral;
+            case Utf8RegexAtom
+            {
+                Kind: Utf8RegexAtomKind.WordBoundary or
+                Utf8RegexAtomKind.NonWordBoundary or
+                Utf8RegexAtomKind.StartAnchor or
+                Utf8RegexAtomKind.EndAnchor
+            }:
+                return NodeResult.ZeroWidth;
+            default:
+                return NodeResult.RequiredNonLiteral;
+        }
     }
 
     public static bool TryExtractExactLiteral(string pattern, out string literal)

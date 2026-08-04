@@ -8,7 +8,8 @@ internal static class RegexExecutionPlanner
     public static RegexExecutionPlan Resolve(
         in SearchQuery query,
         CaseMode resolvedCaseMode,
-        in RegexFragmentAnalyzer.PatternAnalysis analysis)
+        in RegexFragmentAnalyzer.PatternAnalysis analysis,
+        Utf8RegexSyntax? utf8Syntax)
     {
         if (query.PatternMode != PatternMode.Regex)
         {
@@ -24,7 +25,8 @@ internal static class RegexExecutionPlanner
             return RegexExecutionPlan.ForExactLiteral(exactLiteral);
         }
 
-        if (Utf8RegexEngine.TryCompile(query, resolvedCaseMode, analysis.IsExactLiteral, out var byteRegexProgram))
+        if (utf8Syntax is not null &&
+            Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, utf8Syntax, out var byteRegexProgram))
         {
             return RegexExecutionPlan.ForUtf8Regex(byteRegexProgram);
         }
@@ -99,7 +101,7 @@ internal enum RegexExecutionKind
 {
     Literal,
     ExactLiteral,
-    Byte,
+    Utf8,
     Fallback
 }
 
@@ -113,7 +115,7 @@ internal readonly record struct RegexExecutionPlan(
 
     public static RegexExecutionPlan ForExactLiteral(string literal) => new(RegexExecutionKind.ExactLiteral, literal, null, null);
 
-    public static RegexExecutionPlan ForUtf8Regex(Utf8RegexProgram program) => new(RegexExecutionKind.Byte, null, program, null);
+    public static RegexExecutionPlan ForUtf8Regex(Utf8RegexProgram program) => new(RegexExecutionKind.Utf8, null, program, null);
 
     public static RegexExecutionPlan ForFallback(PreparedRegexVerifier preparedRegex) => new(RegexExecutionKind.Fallback, null, null, preparedRegex);
 
@@ -121,26 +123,26 @@ internal readonly record struct RegexExecutionPlan(
 
     public bool IsExactLiteral => Kind == RegexExecutionKind.ExactLiteral;
 
-    public bool UsesUtf8Regex => Kind == RegexExecutionKind.Byte;
+    public bool UsesUtf8Regex => Kind == RegexExecutionKind.Utf8;
 
     public string PatternKind => Kind switch
     {
         RegexExecutionKind.ExactLiteral => "RegexLiteral",
-        RegexExecutionKind.Byte => "Utf8Regex",
+        RegexExecutionKind.Utf8 => "Utf8Regex",
         RegexExecutionKind.Fallback => "Regex",
         _ => "Literal"
     };
 
     public double DirectScanCostMultiplier => Kind switch
     {
-        RegexExecutionKind.Byte => 1.25d,
+        RegexExecutionKind.Utf8 => 1.25d,
         RegexExecutionKind.Fallback => 3d,
         _ => 1d
     };
 
     public double VerifierCostMultiplier => Kind switch
     {
-        RegexExecutionKind.Byte => 1.5d,
+        RegexExecutionKind.Utf8 => 1.5d,
         RegexExecutionKind.Fallback => 4d,
         _ => 1d
     };

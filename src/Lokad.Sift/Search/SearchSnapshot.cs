@@ -1929,10 +1929,22 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         var query = key.ToSearchQuery();
         var resolvedCaseMode = ResolveCaseMode(query);
-        var analysis = query.PatternMode == PatternMode.Regex
-            ? RegexFragmentAnalyzer.AnalyzePattern(query.Pattern)
-            : default;
-        var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode, analysis);
+        Utf8RegexSyntax? utf8Syntax = null;
+        RegexFragmentAnalyzer.PatternAnalysis analysis = default;
+        if (query.PatternMode == PatternMode.Regex)
+        {
+            if (Utf8RegexEngine.TryParseSyntax(query, resolvedCaseMode, out var parsedSyntax))
+            {
+                utf8Syntax = parsedSyntax;
+                analysis = RegexFragmentAnalyzer.AnalyzePattern(parsedSyntax);
+            }
+            else
+            {
+                analysis = RegexFragmentAnalyzer.AnalyzePattern(query.Pattern);
+            }
+        }
+
+        var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode, analysis, utf8Syntax);
         var anchors = BuildQueryAnchors(query, resolvedCaseMode, regexPlan, analysis);
         return new PreparedSearchQuery(
             resolvedCaseMode,

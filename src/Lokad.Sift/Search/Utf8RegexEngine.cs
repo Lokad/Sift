@@ -26,22 +26,26 @@ internal static class Utf8RegexEngine
         CaseMode resolvedCaseMode,
         [NotNullWhen(true)] out Utf8RegexProgram? program)
     {
+        program = null;
         var analysis = RegexFragmentAnalyzer.AnalyzePattern(query.Pattern);
-        return TryCompile(query, resolvedCaseMode, analysis.IsExactLiteral, out program);
+        if (!TryParseSyntax(query, resolvedCaseMode, out var syntax))
+        {
+            return false;
+        }
+
+        return TryCompile(query, analysis.IsExactLiteral, syntax, out program);
     }
 
-    public static bool TryCompile(
+    public static bool TryParseSyntax(
         in SearchQuery query,
         CaseMode resolvedCaseMode,
-        bool isExactLiteral,
-        [NotNullWhen(true)] out Utf8RegexProgram? program)
+        [NotNullWhen(true)] out Utf8RegexSyntax? syntax)
     {
-        program = null;
-        var pattern = RegexVerifier.BuildUtf8Pattern(query);
+        syntax = null;
+        var pattern = query.Pattern;
         if (query.PatternMode != PatternMode.Regex ||
             resolvedCaseMode == CaseMode.Smart ||
-            !IsAscii(pattern) ||
-            isExactLiteral)
+            !IsAscii(pattern))
         {
             return false;
         }
@@ -52,7 +56,28 @@ internal static class Utf8RegexEngine
             return false;
         }
 
-        program = Compiler.Compile(pattern, root, multiline, dotAll, ignoreCase);
+        syntax = new Utf8RegexSyntax(root, multiline, dotAll, ignoreCase);
+        return true;
+    }
+
+    public static bool TryCompile(
+        in SearchQuery query,
+        bool isExactLiteral,
+        Utf8RegexSyntax syntax,
+        [NotNullWhen(true)] out Utf8RegexProgram? program)
+    {
+        program = null;
+        if (isExactLiteral)
+        {
+            return false;
+        }
+
+        program = Compiler.Compile(
+            RegexVerifier.BuildUtf8Pattern(query),
+            syntax.Root,
+            syntax.Multiline,
+            syntax.DotAll,
+            syntax.IgnoreCase);
         return true;
     }
 
@@ -304,7 +329,7 @@ internal static class Utf8RegexEngine
                         return false;
                     }
 
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, NormalizeLiteral(literal), null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, literal, null, false);
                     return true;
                 case '(':
                     return TryParseGroup(out node);
@@ -323,7 +348,7 @@ internal static class Utf8RegexEngine
                         return false;
                     }
 
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, NormalizeLiteral((byte)current), null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, (byte)current, null, false);
                     return true;
             }
         }
@@ -400,11 +425,6 @@ internal static class Utf8RegexEngine
             }
 
             _index++;
-            if (_ignoreCase)
-            {
-                AddAsciiCasePairs(set);
-            }
-
             node = new Utf8RegexAtom(Utf8RegexAtomKind.CharClass, 0, set, negated);
             return true;
         }
@@ -609,11 +629,6 @@ internal static class Utf8RegexEngine
 
             negated = _pattern[_index] is 'D' or 'S' or 'W';
             _index++;
-            if (_ignoreCase && !negated)
-            {
-                AddAsciiCasePairs(set);
-            }
-
             return true;
         }
 
@@ -756,23 +771,6 @@ internal static class Utf8RegexEngine
             }
 
             return false;
-        }
-
-        private byte NormalizeLiteral(byte value)
-        {
-            return _ignoreCase ? AsciiCase.Fold(value) : value;
-        }
-
-        private static void AddAsciiCasePairs(bool[] set)
-        {
-            for (var value = (byte)'A'; value <= (byte)'Z'; value++)
-            {
-                if (set[value] || set[value + 32])
-                {
-                    set[value] = true;
-                    set[value + 32] = true;
-                }
-            }
         }
 
         private static bool[] BuildAsciiSet(Func<byte, bool> predicate)
@@ -1407,6 +1405,12 @@ internal sealed record Utf8RegexProgram(
     bool IgnoreCase,
     byte[][]? LeadingLiteralSet,
     Utf8RegexOrderedAnchorGroup[]? OrderedAnchorGroups);
+
+internal sealed record Utf8RegexSyntax(
+    Utf8RegexNode Root,
+    bool Multiline,
+    bool DotAll,
+    bool IgnoreCase);
 
 internal readonly record struct Utf8RegexCacheKey(
     string Pattern,

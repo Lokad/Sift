@@ -173,7 +173,7 @@ internal static class SearchPlanKinds
         return regexPlan.Kind switch
         {
             RegexExecutionKind.ExactLiteral => SearchPlanFamily.RegexLiteralDirectScan,
-            RegexExecutionKind.Byte => hasMandatoryFragments ? SearchPlanFamily.Utf8RegexFragmentDirectScan : SearchPlanFamily.Utf8RegexDirectScan,
+            RegexExecutionKind.Utf8 => hasMandatoryFragments ? SearchPlanFamily.Utf8RegexFragmentDirectScan : SearchPlanFamily.Utf8RegexDirectScan,
             RegexExecutionKind.Fallback => hasMandatoryFragments ? SearchPlanFamily.RegexFragmentDirectScan : SearchPlanFamily.RegexDirectScan,
             _ => SearchPlanFamily.LiteralDirectScan
         };
@@ -204,7 +204,7 @@ internal static class SearchPlanKinds
         return regexPlan.Kind switch
         {
             RegexExecutionKind.ExactLiteral => GetRegexLiteralCandidateKind(selectedLength),
-            RegexExecutionKind.Byte => GetRegexCandidateKind(selectedLength, unionCandidates, branchUnion, SearchCandidateKind.Utf8RegexIndexed, SearchCandidateKind.Utf8RegexBigram, SearchCandidateKind.Utf8RegexTrigram, SearchCandidateKind.Utf8RegexIndexedUnion, SearchCandidateKind.Utf8RegexBigramUnion, SearchCandidateKind.Utf8RegexTrigramUnion, SearchCandidateKind.Utf8RegexIndexedBranchUnion, SearchCandidateKind.Utf8RegexBigramBranchUnion, SearchCandidateKind.Utf8RegexTrigramBranchUnion),
+            RegexExecutionKind.Utf8 => GetRegexCandidateKind(selectedLength, unionCandidates, branchUnion, SearchCandidateKind.Utf8RegexIndexed, SearchCandidateKind.Utf8RegexBigram, SearchCandidateKind.Utf8RegexTrigram, SearchCandidateKind.Utf8RegexIndexedUnion, SearchCandidateKind.Utf8RegexBigramUnion, SearchCandidateKind.Utf8RegexTrigramUnion, SearchCandidateKind.Utf8RegexIndexedBranchUnion, SearchCandidateKind.Utf8RegexBigramBranchUnion, SearchCandidateKind.Utf8RegexTrigramBranchUnion),
             RegexExecutionKind.Fallback => GetRegexCandidateKind(selectedLength, unionCandidates, branchUnion, SearchCandidateKind.RegexIndexed, SearchCandidateKind.RegexBigram, SearchCandidateKind.RegexTrigram, SearchCandidateKind.RegexIndexedUnion, SearchCandidateKind.RegexBigramUnion, SearchCandidateKind.RegexTrigramUnion, SearchCandidateKind.RegexIndexedBranchUnion, SearchCandidateKind.RegexBigramBranchUnion, SearchCandidateKind.RegexTrigramBranchUnion),
             _ => selectedLength switch
             {
@@ -244,7 +244,7 @@ internal static class SearchPlanKinds
                 3 => SearchPlanFamily.RegexLiteralTrigram,
                 _ => SearchPlanFamily.RegexLiteralIndexed
             },
-            RegexExecutionKind.Byte => GetRegexPlanFamily(selectedLength, unionCandidates, branchUnion, SearchPlanFamily.Utf8RegexFragmentIndexed, SearchPlanFamily.Utf8RegexFragmentBigram, SearchPlanFamily.Utf8RegexFragmentTrigram, SearchPlanFamily.Utf8RegexFragmentIndexedUnion, SearchPlanFamily.Utf8RegexFragmentBigramUnion, SearchPlanFamily.Utf8RegexFragmentTrigramUnion, SearchPlanFamily.Utf8RegexFragmentIndexedBranchUnion, SearchPlanFamily.Utf8RegexFragmentBigramBranchUnion, SearchPlanFamily.Utf8RegexFragmentTrigramBranchUnion),
+            RegexExecutionKind.Utf8 => GetRegexPlanFamily(selectedLength, unionCandidates, branchUnion, SearchPlanFamily.Utf8RegexFragmentIndexed, SearchPlanFamily.Utf8RegexFragmentBigram, SearchPlanFamily.Utf8RegexFragmentTrigram, SearchPlanFamily.Utf8RegexFragmentIndexedUnion, SearchPlanFamily.Utf8RegexFragmentBigramUnion, SearchPlanFamily.Utf8RegexFragmentTrigramUnion, SearchPlanFamily.Utf8RegexFragmentIndexedBranchUnion, SearchPlanFamily.Utf8RegexFragmentBigramBranchUnion, SearchPlanFamily.Utf8RegexFragmentTrigramBranchUnion),
             RegexExecutionKind.Fallback => GetRegexPlanFamily(selectedLength, unionCandidates, branchUnion, SearchPlanFamily.RegexFragmentIndexed, SearchPlanFamily.RegexFragmentBigram, SearchPlanFamily.RegexFragmentTrigram, SearchPlanFamily.RegexFragmentIndexedUnion, SearchPlanFamily.RegexFragmentBigramUnion, SearchPlanFamily.RegexFragmentTrigramUnion, SearchPlanFamily.RegexFragmentIndexedBranchUnion, SearchPlanFamily.RegexFragmentBigramBranchUnion, SearchPlanFamily.RegexFragmentTrigramBranchUnion),
             _ => selectedLength switch
             {
@@ -270,7 +270,7 @@ internal static class SearchPlanKinds
 
         return regexPlan.Kind switch
         {
-            RegexExecutionKind.Byte => SearchVerifierKind.Utf8Regex,
+            RegexExecutionKind.Utf8 => SearchVerifierKind.Utf8Regex,
             RegexExecutionKind.Fallback => SearchVerifierKind.RegexFallback,
             _ => SearchVerifierKind.LiteralScan
         };
