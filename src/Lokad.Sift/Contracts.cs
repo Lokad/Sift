@@ -624,20 +624,47 @@ public sealed class SearchStats
         stopReason);
 }
 
-public sealed record BuildStats(
-    int SubmittedDocuments,
-    int IndexedDocuments,
-    int RejectedDocuments,
-    int SegmentCount,
-    long SubmittedBytes,
-    long ContentBytes,
-    long RejectedBytes,
-    long ElapsedMilliseconds,
-    // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
-    long PeakManagedBytes)
+public sealed record BuildStats
 {
+    internal BuildStats(
+        int submittedDocuments,
+        int indexedDocuments,
+        int rejectedDocuments,
+        int segmentCount,
+        long submittedBytes,
+        long contentBytes,
+        long rejectedBytes,
+        long elapsedMilliseconds,
+        long peakManagedBytes,
+        IReadOnlyList<RejectedDocument> rejectedDocumentDetails,
+        IndexIdentity committedIdentity)
+    {
+        SubmittedDocuments = submittedDocuments;
+        IndexedDocuments = indexedDocuments;
+        RejectedDocuments = rejectedDocuments;
+        SegmentCount = segmentCount;
+        SubmittedBytes = submittedBytes;
+        ContentBytes = contentBytes;
+        RejectedBytes = rejectedBytes;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        PeakManagedBytes = peakManagedBytes;
+        RejectedDocumentDetails = Freeze(rejectedDocumentDetails);
+        CommittedIdentity = committedIdentity;
+    }
+
+    public int SubmittedDocuments { get; }
+    public int IndexedDocuments { get; }
+    public int RejectedDocuments { get; }
+    public int SegmentCount { get; }
+    public long SubmittedBytes { get; }
+    public long ContentBytes { get; }
+    public long RejectedBytes { get; }
+    public long ElapsedMilliseconds { get; }
+    // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
+    public long PeakManagedBytes { get; }
+
     /// <summary>Documents omitted from the completed build, with their rejection reasons.</summary>
-    public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; init; } = [];
+    public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; }
 
     /// <summary>Identity of the index state committed by the completed build.</summary>
     /// <remarks>
@@ -645,33 +672,88 @@ public sealed record BuildStats(
     ///     <see cref="BuildOptions.CommitMetadataProvider"/> have the default identity
     ///     because the manifest has not yet been committed.
     /// </remarks>
-    public IndexIdentity CommittedIdentity { get; init; }
+    public IndexIdentity CommittedIdentity { get; }
+
+    internal BuildStats WithPeakManagedBytes(long peakManagedBytes) => new(
+        SubmittedDocuments,
+        IndexedDocuments,
+        RejectedDocuments,
+        SegmentCount,
+        SubmittedBytes,
+        ContentBytes,
+        RejectedBytes,
+        ElapsedMilliseconds,
+        peakManagedBytes,
+        RejectedDocumentDetails,
+        CommittedIdentity);
+
+    internal static IReadOnlyList<RejectedDocument> Freeze(IReadOnlyList<RejectedDocument> documents)
+    {
+        var copy = new RejectedDocument[documents.Count];
+        for (var i = 0; i < documents.Count; i++)
+        {
+            copy[i] = documents[i];
+        }
+
+        return Array.AsReadOnly(copy);
+    }
 }
 
-public sealed record UpdateStats(
-    int SubmittedUpserts,
-    int UpsertedDocuments,
-    // Valid replacements omitted because both indexed metadata and body bytes already match.
-    int SkippedUpserts,
-    int RejectedUpserts,
-    // Explicit deletions that removed a live document; missing paths are not counted.
-    int DeletedDocuments,
-    int PublishedSegments,
-    long SubmittedBytes,
-    long ContentBytes,
-    // Normalized body bytes proven identical to their current indexed versions.
-    long SkippedBytes,
-    long RejectedBytes,
-    IReadOnlyList<RejectedDocument> RejectedDocuments,
-    long ElapsedMilliseconds)
+public sealed record UpdateStats
 {
+    internal UpdateStats(
+        int submittedUpserts,
+        int upsertedDocuments,
+        int skippedUpserts,
+        int rejectedUpserts,
+        int deletedDocuments,
+        int publishedSegments,
+        long submittedBytes,
+        long contentBytes,
+        long skippedBytes,
+        long rejectedBytes,
+        IReadOnlyList<RejectedDocument> rejectedDocuments,
+        long elapsedMilliseconds,
+        IndexIdentity committedIdentity)
+    {
+        SubmittedUpserts = submittedUpserts;
+        UpsertedDocuments = upsertedDocuments;
+        SkippedUpserts = skippedUpserts;
+        RejectedUpserts = rejectedUpserts;
+        DeletedDocuments = deletedDocuments;
+        PublishedSegments = publishedSegments;
+        SubmittedBytes = submittedBytes;
+        ContentBytes = contentBytes;
+        SkippedBytes = skippedBytes;
+        RejectedBytes = rejectedBytes;
+        RejectedDocuments = BuildStats.Freeze(rejectedDocuments);
+        ElapsedMilliseconds = elapsedMilliseconds;
+        CommittedIdentity = committedIdentity;
+    }
+
+    public int SubmittedUpserts { get; }
+    public int UpsertedDocuments { get; }
+    // Valid replacements omitted because both indexed metadata and body bytes already match.
+    public int SkippedUpserts { get; }
+    public int RejectedUpserts { get; }
+    // Explicit deletions that removed a live document; missing paths are not counted.
+    public int DeletedDocuments { get; }
+    public int PublishedSegments { get; }
+    public long SubmittedBytes { get; }
+    public long ContentBytes { get; }
+    // Normalized body bytes proven identical to their current indexed versions.
+    public long SkippedBytes { get; }
+    public long RejectedBytes { get; }
+    public IReadOnlyList<RejectedDocument> RejectedDocuments { get; }
+    public long ElapsedMilliseconds { get; }
+
     /// <summary>Identity of the index state returned by the completed update.</summary>
     /// <remarks>
     ///     This is set on the final result returned by <c>Update</c>. The provisional
     ///     statistics passed to <see cref="UpdateOptions.CommitMetadataProvider"/>
     ///     have the default identity because the manifest has not yet been committed.
     /// </remarks>
-    public IndexIdentity CommittedIdentity { get; init; }
+    public IndexIdentity CommittedIdentity { get; }
 }
 
 public sealed record CompactOptions
@@ -720,16 +802,45 @@ public sealed record CompactOptions
     public long MinimumFreeBytesAfterCompaction { get; init; }
 }
 
-public sealed record CompactStats(
-    int InputSegments,
-    int OutputSegments,
-    int MergedDocuments,
-    long ContentBytes,
-    long ElapsedMilliseconds,
+public sealed record CompactStats
+{
+    internal CompactStats(
+        int inputSegments,
+        int outputSegments,
+        int mergedDocuments,
+        long contentBytes,
+        long elapsedMilliseconds,
+        long peakManagedBytes,
+        bool hasMoreWork)
+    {
+        InputSegments = inputSegments;
+        OutputSegments = outputSegments;
+        MergedDocuments = mergedDocuments;
+        ContentBytes = contentBytes;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        PeakManagedBytes = peakManagedBytes;
+        HasMoreWork = hasMoreWork;
+    }
+
+    public int InputSegments { get; }
+    public int OutputSegments { get; }
+    public int MergedDocuments { get; }
+    public long ContentBytes { get; }
+    public long ElapsedMilliseconds { get; }
     // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
-    long PeakManagedBytes,
+    public long PeakManagedBytes { get; }
     // True when the same policy can make progress in another bounded pass.
-    bool HasMoreWork);
+    public bool HasMoreWork { get; }
+
+    internal CompactStats WithPeakManagedBytes(long peakManagedBytes) => new(
+        InputSegments,
+        OutputSegments,
+        MergedDocuments,
+        ContentBytes,
+        ElapsedMilliseconds,
+        peakManagedBytes,
+        HasMoreWork);
+}
 
 public enum SiftActivity
 {
@@ -785,77 +896,157 @@ public readonly record struct IndexValidationStats(
     public bool IsReady => State == IndexValidationState.Ready;
 }
 
-public sealed record MaintenanceStats(
-    // Manifest generation observed by this snapshot.
-    ulong Generation,
-    // Packs referenced by the manifest.
-    int SegmentCount,
-    // All rows, including superseded and deleted versions.
-    int TotalDocuments,
-    // Rows visible to new snapshots.
-    int LiveDocuments,
-    // Rows retained only until compaction.
-    int DeadDocuments,
-    // Dead rows as a share of all rows.
-    double DeadDocumentFraction,
-    // Dead body bytes as a share of all body bytes.
-    double DeadContentFraction,
-    // Body bytes before dead content is reclaimed.
-    long ContentBytes,
-    // Body bytes expected to remain after compaction.
-    long EstimatedLiveContentBytes,
-    // Body bytes attributable to dead rows.
-    long EstimatedReclaimableContentBytes,
-    // Manifest entries used to mask dead rows.
-    long DeadOrdinalEntries,
-    // Packs containing at least one dead row.
-    int SegmentsWithDeletions,
-    // Live packs below both targets; diagnostic only, because they may not fit together.
-    int SmallSegmentCount);
+public sealed record MaintenanceStats
+{
+    internal MaintenanceStats(
+        ulong generation,
+        int segmentCount,
+        int totalDocuments,
+        int liveDocuments,
+        int deadDocuments,
+        double deadDocumentFraction,
+        double deadContentFraction,
+        long contentBytes,
+        long estimatedLiveContentBytes,
+        long estimatedReclaimableContentBytes,
+        long deadOrdinalEntries,
+        int segmentsWithDeletions,
+        int smallSegmentCount)
+    {
+        Generation = generation;
+        SegmentCount = segmentCount;
+        TotalDocuments = totalDocuments;
+        LiveDocuments = liveDocuments;
+        DeadDocuments = deadDocuments;
+        DeadDocumentFraction = deadDocumentFraction;
+        DeadContentFraction = deadContentFraction;
+        ContentBytes = contentBytes;
+        EstimatedLiveContentBytes = estimatedLiveContentBytes;
+        EstimatedReclaimableContentBytes = estimatedReclaimableContentBytes;
+        DeadOrdinalEntries = deadOrdinalEntries;
+        SegmentsWithDeletions = segmentsWithDeletions;
+        SmallSegmentCount = smallSegmentCount;
+    }
 
-public sealed record StorageStats(
+    // Manifest generation observed by this snapshot.
+    public ulong Generation { get; }
+    // Packs referenced by the manifest.
+    public int SegmentCount { get; }
+    // All rows, including superseded and deleted versions.
+    public int TotalDocuments { get; }
+    // Rows visible to new snapshots.
+    public int LiveDocuments { get; }
+    // Rows retained only until compaction.
+    public int DeadDocuments { get; }
+    // Dead rows as a share of all rows.
+    public double DeadDocumentFraction { get; }
+    // Dead body bytes as a share of all body bytes.
+    public double DeadContentFraction { get; }
+    // Body bytes before dead content is reclaimed.
+    public long ContentBytes { get; }
+    // Body bytes expected to remain after compaction.
+    public long EstimatedLiveContentBytes { get; }
+    // Body bytes attributable to dead rows.
+    public long EstimatedReclaimableContentBytes { get; }
+    // Manifest entries used to mask dead rows.
+    public long DeadOrdinalEntries { get; }
+    // Packs containing at least one dead row.
+    public int SegmentsWithDeletions { get; }
+    // Live packs below both targets; diagnostic only, because they may not fit together.
+    public int SmallSegmentCount { get; }
+}
+
+public sealed record StorageStats
+{
+    internal StorageStats(
+        int manifestSegmentCount,
+        long manifestSegmentBytes,
+        int physicalSegmentCount,
+        long physicalSegmentBytes,
+        int retiredSegmentCount,
+        long retiredSegmentBytes,
+        long temporaryBytes,
+        long corpusPhysicalBytes,
+        long maximumPhysicalBytes,
+        long? availableBytes,
+        int leasedGenerationCount,
+        ulong? oldestLeasedGeneration,
+        int snapshotDeferredSegmentCount,
+        long snapshotDeferredSegmentBytes,
+        int pendingDeletionSegmentCount,
+        long pendingDeletionSegmentBytes,
+        int blockedReclamationSegmentCount,
+        long blockedReclamationSegmentBytes,
+        bool isReclamationBlocked,
+        long reclamationFailureCount,
+        string? lastReclamationFailure)
+    {
+        ManifestSegmentCount = manifestSegmentCount;
+        ManifestSegmentBytes = manifestSegmentBytes;
+        PhysicalSegmentCount = physicalSegmentCount;
+        PhysicalSegmentBytes = physicalSegmentBytes;
+        RetiredSegmentCount = retiredSegmentCount;
+        RetiredSegmentBytes = retiredSegmentBytes;
+        TemporaryBytes = temporaryBytes;
+        CorpusPhysicalBytes = corpusPhysicalBytes;
+        MaximumPhysicalBytes = maximumPhysicalBytes;
+        AvailableBytes = availableBytes;
+        LeasedGenerationCount = leasedGenerationCount;
+        OldestLeasedGeneration = oldestLeasedGeneration;
+        SnapshotDeferredSegmentCount = snapshotDeferredSegmentCount;
+        SnapshotDeferredSegmentBytes = snapshotDeferredSegmentBytes;
+        PendingDeletionSegmentCount = pendingDeletionSegmentCount;
+        PendingDeletionSegmentBytes = pendingDeletionSegmentBytes;
+        BlockedReclamationSegmentCount = blockedReclamationSegmentCount;
+        BlockedReclamationSegmentBytes = blockedReclamationSegmentBytes;
+        IsReclamationBlocked = isReclamationBlocked;
+        ReclamationFailureCount = reclamationFailureCount;
+        LastReclamationFailure = lastReclamationFailure;
+    }
+
     // Currently reachable packs that are also present on disk.
-    int ManifestSegmentCount,
+    public int ManifestSegmentCount { get; }
     // On-disk lengths of those packs; this excludes manifest metadata.
-    long ManifestSegmentBytes,
+    public long ManifestSegmentBytes { get; }
     // All well-named directories containing a pack, including unreachable packs.
-    int PhysicalSegmentCount,
+    public int PhysicalSegmentCount { get; }
     // Segment-pack footprint only; temporary and lifecycle files are excluded.
-    long PhysicalSegmentBytes,
+    public long PhysicalSegmentBytes { get; }
     // Packs unreachable from the current manifest, regardless of why they remain.
-    int RetiredSegmentCount,
+    public int RetiredSegmentCount { get; }
     // On-disk lengths of the unreachable packs.
-    long RetiredSegmentBytes,
+    public long RetiredSegmentBytes { get; }
     // Incomplete publication files, not retired packs awaiting reclamation.
-    long TemporaryBytes,
+    public long TemporaryBytes { get; }
     // Complete corpus-root footprint used for quota admission, including lifecycle metadata.
-    long CorpusPhysicalBytes,
+    public long CorpusPhysicalBytes { get; }
     // Configured corpus-root quota; long.MaxValue means only filesystem capacity is relevant.
-    long MaximumPhysicalBytes,
+    public long MaximumPhysicalBytes { get; }
     // Bytes currently admissible under both the corpus quota and filesystem capacity, when known.
-    long? AvailableBytes,
+    public long? AvailableBytes { get; }
     // Non-current generations held open by at least one reader.
-    int LeasedGenerationCount,
+    public int LeasedGenerationCount { get; }
     // Lowest held generation, or null when no superseded snapshot remains.
-    ulong? OldestLeasedGeneration,
+    public ulong? OldestLeasedGeneration { get; }
     // Retired packs retained solely because a live snapshot can still read them.
-    int SnapshotDeferredSegmentCount,
+    public int SnapshotDeferredSegmentCount { get; }
     // On-disk lengths of the snapshot-protected packs.
-    long SnapshotDeferredSegmentBytes,
+    public long SnapshotDeferredSegmentBytes { get; }
     // Retired packs proven unreachable but not removed by the latest sweep.
-    int PendingDeletionSegmentCount,
+    public int PendingDeletionSegmentCount { get; }
     // On-disk lengths still eligible for deletion.
-    long PendingDeletionSegmentBytes,
+    public long PendingDeletionSegmentBytes { get; }
     // Retired packs whose reachability cannot be proven from lifecycle metadata.
-    int BlockedReclamationSegmentCount,
+    public int BlockedReclamationSegmentCount { get; }
     // On-disk lengths withheld from deletion because reachability is uncertain.
-    long BlockedReclamationSegmentBytes,
+    public long BlockedReclamationSegmentBytes { get; }
     // True when metadata uncertainty prevents destructive reclamation.
-    bool IsReclamationBlocked,
+    public bool IsReclamationBlocked { get; }
     // Number of reclamation sweeps that failed before producing structured sweep statistics.
-    long ReclamationFailureCount,
+    public long ReclamationFailureCount { get; }
     // Most recent exceptional reclamation failure, or null when no sweep has failed.
-    string? LastReclamationFailure);
+    public string? LastReclamationFailure { get; }
+}
 
 public readonly record struct MaterializedHit(
     string Path,

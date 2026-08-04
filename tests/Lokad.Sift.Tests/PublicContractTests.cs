@@ -56,6 +56,29 @@ public sealed class PublicContractTests
         Assert.False(typeof(StorageStats).IsValueType);
     }
 
+    [Fact]
+    public void OperationResultsAreOutputOnly()
+    {
+        Type[] resultTypes =
+        [
+            typeof(SearchPlan),
+            typeof(SearchStats),
+            typeof(BuildStats),
+            typeof(UpdateStats),
+            typeof(CompactStats),
+            typeof(MaintenanceStats),
+            typeof(StorageStats)
+        ];
+
+        foreach (var resultType in resultTypes)
+        {
+            Assert.Empty(resultType.GetConstructors(BindingFlags.Public | BindingFlags.Instance));
+            Assert.DoesNotContain(
+                resultType.GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                static property => property.CanWrite);
+        }
+    }
+
     private static int CountMethods<T>(string name)
     {
         return typeof(T).GetMethods(BindingFlags.Public | BindingFlags.Instance)

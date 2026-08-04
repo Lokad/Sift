@@ -186,7 +186,7 @@ public sealed class Sift : ISift
                 using var measurement = ManagedMemoryPeakMeasurement.Start();
                 var stats = await build(operationCancellation).ConfigureAwait(false);
                 var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
-                return stats with { PeakManagedBytes = peakManagedBytes };
+                return stats.WithPeakManagedBytes(peakManagedBytes);
             },
             cancellationToken);
     }
@@ -479,19 +479,19 @@ public sealed class Sift : ISift
         var estimatedLiveContentBytes = contentBytes - reclaimableContentBytes;
 
         return new MaintenanceStats(
-            Generation: manifest.Generation,
-            SegmentCount: segmentCount,
-            TotalDocuments: totalDocuments,
-            LiveDocuments: liveDocuments,
-            DeadDocuments: deadDocuments,
-            DeadDocumentFraction: deadDocumentFraction,
-            DeadContentFraction: deadContentFraction,
-            ContentBytes: contentBytes,
-            EstimatedLiveContentBytes: estimatedLiveContentBytes,
-            EstimatedReclaimableContentBytes: reclaimableContentBytes,
-            DeadOrdinalEntries: deadDocuments,
-            SegmentsWithDeletions: segmentsWithDeletions,
-            SmallSegmentCount: smallSegmentCount);
+            generation: manifest.Generation,
+            segmentCount: segmentCount,
+            totalDocuments: totalDocuments,
+            liveDocuments: liveDocuments,
+            deadDocuments: deadDocuments,
+            deadDocumentFraction: deadDocumentFraction,
+            deadContentFraction: deadContentFraction,
+            contentBytes: contentBytes,
+            estimatedLiveContentBytes: estimatedLiveContentBytes,
+            estimatedReclaimableContentBytes: reclaimableContentBytes,
+            deadOrdinalEntries: deadDocuments,
+            segmentsWithDeletions: segmentsWithDeletions,
+            smallSegmentCount: smallSegmentCount);
     }
 
     public StorageStats GetStorageStats()
@@ -766,18 +766,19 @@ public sealed class Sift : ISift
             var requiresManifestMigration = existingManifest.Segments.Any(
                 static segment => segment.DeadContentBytes < 0);
             var pendingStats = new UpdateStats(
-                SubmittedUpserts: upsertLoad.Submitted,
-                UpsertedDocuments: upsertLoad.Accepted,
-                SkippedUpserts: upsertLoad.Skipped,
-                RejectedUpserts: upsertLoad.Rejected,
-                DeletedDocuments: deletedDocuments,
-                PublishedSegments: publishedSegments.Count,
-                SubmittedBytes: upsertLoad.SubmittedBytes,
-                ContentBytes: upsertLoad.AcceptedBytes,
-                SkippedBytes: upsertLoad.SkippedBytes,
-                RejectedBytes: upsertLoad.RejectedBytes,
-                RejectedDocuments: upsertLoad.RejectedDocuments,
-                ElapsedMilliseconds: watch.ElapsedMilliseconds);
+                submittedUpserts: upsertLoad.Submitted,
+                upsertedDocuments: upsertLoad.Accepted,
+                skippedUpserts: upsertLoad.Skipped,
+                rejectedUpserts: upsertLoad.Rejected,
+                deletedDocuments: deletedDocuments,
+                publishedSegments: publishedSegments.Count,
+                submittedBytes: upsertLoad.SubmittedBytes,
+                contentBytes: upsertLoad.AcceptedBytes,
+                skippedBytes: upsertLoad.SkippedBytes,
+                rejectedBytes: upsertLoad.RejectedBytes,
+                rejectedDocuments: upsertLoad.RejectedDocuments,
+                elapsedMilliseconds: watch.ElapsedMilliseconds,
+                committedIdentity: default);
             var commitMetadata = options.CommitMetadataProvider is null
                 ? existingManifest.CommitMetadata
                 : options.CommitMetadataProvider(pendingStats).ToArray();
@@ -862,21 +863,19 @@ public sealed class Sift : ISift
 
         watch.Stop();
         return new UpdateStats(
-            SubmittedUpserts: upsertLoad.Submitted,
-            UpsertedDocuments: upsertLoad.Accepted,
-            SkippedUpserts: upsertLoad.Skipped,
-            RejectedUpserts: upsertLoad.Rejected,
-            DeletedDocuments: deletedDocuments,
-            PublishedSegments: publishedSegments.Count,
-            SubmittedBytes: upsertLoad.SubmittedBytes,
-            ContentBytes: upsertLoad.AcceptedBytes,
-            SkippedBytes: upsertLoad.SkippedBytes,
-            RejectedBytes: upsertLoad.RejectedBytes,
-            RejectedDocuments: upsertLoad.RejectedDocuments,
-            ElapsedMilliseconds: watch.ElapsedMilliseconds)
-        {
-            CommittedIdentity = committedIdentity
-        };
+            submittedUpserts: upsertLoad.Submitted,
+            upsertedDocuments: upsertLoad.Accepted,
+            skippedUpserts: upsertLoad.Skipped,
+            rejectedUpserts: upsertLoad.Rejected,
+            deletedDocuments: deletedDocuments,
+            publishedSegments: publishedSegments.Count,
+            submittedBytes: upsertLoad.SubmittedBytes,
+            contentBytes: upsertLoad.AcceptedBytes,
+            skippedBytes: upsertLoad.SkippedBytes,
+            rejectedBytes: upsertLoad.RejectedBytes,
+            rejectedDocuments: upsertLoad.RejectedDocuments,
+            elapsedMilliseconds: watch.ElapsedMilliseconds,
+            committedIdentity: committedIdentity);
     }
 
     private static void ValidateUpdateOptions(UpdateOptions options)
@@ -916,7 +915,7 @@ public sealed class Sift : ISift
                     using var measurement = ManagedMemoryPeakMeasurement.Start();
                     var stats = CompactCore(options, operationCancellation);
                     var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
-                    return stats with { PeakManagedBytes = peakManagedBytes };
+                    return stats.WithPeakManagedBytes(peakManagedBytes);
                 }
                 catch (Exception exception) when (IsIndexCorruption(exception))
                 {
@@ -943,13 +942,13 @@ public sealed class Sift : ISift
         {
             watch.Stop();
             return new CompactStats(
-                InputSegments: 0,
-                OutputSegments: 0,
-                MergedDocuments: 0,
-                ContentBytes: 0,
-                ElapsedMilliseconds: watch.ElapsedMilliseconds,
-                PeakManagedBytes: 0,
-                HasMoreWork: false);
+                inputSegments: 0,
+                outputSegments: 0,
+                mergedDocuments: 0,
+                contentBytes: 0,
+                elapsedMilliseconds: watch.ElapsedMilliseconds,
+                peakManagedBytes: 0,
+                hasMoreWork: false);
         }
 
         writeSession.EnsureReplacementAllowed();
@@ -1000,13 +999,13 @@ public sealed class Sift : ISift
 
         watch.Stop();
         return new CompactStats(
-            InputSegments: selectedSegmentIds.Count,
-            OutputSegments: newSegments.Count,
-            MergedDocuments: publication.MergedDocuments,
-            ContentBytes: publication.ContentBytes,
-            ElapsedMilliseconds: watch.ElapsedMilliseconds,
-            PeakManagedBytes: 0,
-            HasMoreWork: writeSession.CanReplaceSegments() &&
+            inputSegments: selectedSegmentIds.Count,
+            outputSegments: newSegments.Count,
+            mergedDocuments: publication.MergedDocuments,
+            contentBytes: publication.ContentBytes,
+            elapsedMilliseconds: watch.ElapsedMilliseconds,
+            peakManagedBytes: 0,
+            hasMoreWork: writeSession.CanReplaceSegments() &&
                 HasActionableCompactionWorkUnderWriterLock(
                     manifest,
                     options,

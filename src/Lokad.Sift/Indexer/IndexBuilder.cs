@@ -102,18 +102,17 @@ internal sealed class IndexBuilder
                 }).ConfigureAwait(false);
 
             var pendingStats = new BuildStats(
-                SubmittedDocuments: load.Submitted,
-                IndexedDocuments: load.Accepted,
-                RejectedDocuments: load.Rejected,
-                SegmentCount: entries.Count,
-                SubmittedBytes: load.SubmittedBytes,
-                ContentBytes: load.AcceptedBytes,
-                RejectedBytes: load.RejectedBytes,
-                ElapsedMilliseconds: watch.ElapsedMilliseconds,
-                PeakManagedBytes: 0)
-            {
-                RejectedDocumentDetails = load.RejectedDocuments
-            };
+                submittedDocuments: load.Submitted,
+                indexedDocuments: load.Accepted,
+                rejectedDocuments: load.Rejected,
+                segmentCount: entries.Count,
+                submittedBytes: load.SubmittedBytes,
+                contentBytes: load.AcceptedBytes,
+                rejectedBytes: load.RejectedBytes,
+                elapsedMilliseconds: watch.ElapsedMilliseconds,
+                peakManagedBytes: 0,
+                rejectedDocumentDetails: load.RejectedDocuments,
+                committedIdentity: default);
             var commitMetadata = options.CommitMetadataProvider?.Invoke(pendingStats).ToArray() ?? [];
             if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
             {
@@ -137,22 +136,20 @@ internal sealed class IndexBuilder
         watch.Stop();
 
         return new BuildStats(
-            SubmittedDocuments: load.Submitted,
-            IndexedDocuments: load.Accepted,
-            RejectedDocuments: load.Rejected,
-            SegmentCount: entries.Count,
-            SubmittedBytes: load.SubmittedBytes,
-            ContentBytes: load.AcceptedBytes,
-            RejectedBytes: load.RejectedBytes,
-            ElapsedMilliseconds: watch.ElapsedMilliseconds,
-            PeakManagedBytes: 0)
-        {
-            RejectedDocumentDetails = load.RejectedDocuments,
-            CommittedIdentity = new IndexIdentity(
+            submittedDocuments: load.Submitted,
+            indexedDocuments: load.Accepted,
+            rejectedDocuments: load.Rejected,
+            segmentCount: entries.Count,
+            submittedBytes: load.SubmittedBytes,
+            contentBytes: load.AcceptedBytes,
+            rejectedBytes: load.RejectedBytes,
+            elapsedMilliseconds: watch.ElapsedMilliseconds,
+            peakManagedBytes: 0,
+            rejectedDocumentDetails: load.RejectedDocuments,
+            committedIdentity: new IndexIdentity(
                 corpusId,
                 ContentRevision: 1,
-                StorageGeneration: generation)
-        };
+                StorageGeneration: generation));
     }
 
     public static StreamedDocuments StreamDocuments(

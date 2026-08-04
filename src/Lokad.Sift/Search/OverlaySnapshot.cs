@@ -201,10 +201,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             overlayUpdate.SkippedBytes,
             load.RejectedBytes,
             load.RejectedDocuments,
-            watch.ElapsedMilliseconds)
-        {
-            CommittedIdentity = overlayUpdate.CommittedIdentity
-        };
+            watch.ElapsedMilliseconds,
+            overlayUpdate.CommittedIdentity);
     }
 
     public Task<UpdateStats> ApplyTo(ISift target)
