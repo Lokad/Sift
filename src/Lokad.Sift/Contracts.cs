@@ -239,6 +239,8 @@ public readonly record struct SubmittedDocument
 
 public sealed class SiftOptions
 {
+    public const int MaximumSelectedNgramCount = 256;
+
     public int MaxDocumentBytes { get; init; } = 32 * 1024 * 1024;
     public int TargetSegmentDocumentCount { get; init; } = 50_000;
     public long TargetSegmentContentBytes { get; init; } = 64L * 1024 * 1024;

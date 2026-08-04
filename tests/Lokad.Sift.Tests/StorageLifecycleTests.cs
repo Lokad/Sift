@@ -585,6 +585,31 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public void SiftOptionsRejectValuesOutsidePlannerAndSegmentRepresentations()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SiftIndex.CreateInMemory(new SiftOptions
+            {
+                MaxSelectedNgrams = SiftOptions.MaximumSelectedNgramCount + 1
+            }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SiftIndex.CreateInMemory(new SiftOptions
+            {
+                TargetSegmentContentBytes = long.MaxValue
+            }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SiftIndex.CreateInMemory(new SiftOptions
+            {
+                TargetSegmentDocumentCount = int.MaxValue
+            }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SiftIndex.CreateInMemory(new SiftOptions
+            {
+                MaxDocumentBytes = int.MaxValue
+            }));
+    }
+
+    [Fact]
     public void MutationReserveCoversOneDefaultCompactionPass()
     {
         var sift = new SiftOptions();

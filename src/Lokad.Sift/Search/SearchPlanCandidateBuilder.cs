@@ -241,6 +241,11 @@ internal static class SearchPlanCandidateBuilder
             return null;
         }
 
+        if (leadingLiteralSet.Length > options.MaxSelectedNgrams)
+        {
+            return null;
+        }
+
         var sharedFragments = new List<LiteralPlan>(mandatoryFragments.Length);
         for (var i = 0; i < mandatoryFragments.Length; i++)
         {
@@ -251,7 +256,7 @@ internal static class SearchPlanCandidateBuilder
             }
         }
 
-        var selected = new List<SelectedGram>(Math.Min(leadingLiteralSet.Length * 2, options.MaxSelectedNgrams * Math.Max(1, leadingLiteralSet.Length)));
+        var selected = new List<SelectedGram>(options.MaxSelectedNgrams);
         var groupLengths = new List<int>(leadingLiteralSet.Length);
         IndexRegionPair? pair = null;
         var gramLength = 0;
@@ -276,13 +281,18 @@ internal static class SearchPlanCandidateBuilder
                 return null;
             }
 
-            var branch = new List<SelectedGram>(indexed.SelectedGrams.Length + sharedFragments.Count);
-            AddBranchGrams(branch, indexed.SelectedGrams);
+            var remainingBranchMinimum = leadingLiteralSet.Length - i - 1;
+            var branchCapacity = options.MaxSelectedNgrams - selected.Count - remainingBranchMinimum;
+            var branch = new List<SelectedGram>(branchCapacity);
+            AddBranchGrams(branch, indexed.SelectedGrams, branchCapacity);
             for (var fragmentIndex = 0; fragmentIndex < sharedFragments.Count; fragmentIndex++)
             {
                 if (sharedFragments[fragmentIndex].IndexPair.Equals(pair.Value))
                 {
-                    AddBranchGrams(branch, sharedFragments[fragmentIndex].SelectedGrams);
+                    AddBranchGrams(
+                        branch,
+                        sharedFragments[fragmentIndex].SelectedGrams,
+                        branchCapacity);
                 }
             }
 
@@ -465,9 +475,12 @@ internal static class SearchPlanCandidateBuilder
         return density >= densityThreshold;
     }
 
-    private static void AddBranchGrams(List<SelectedGram> branch, ReadOnlySpan<SelectedGram> grams)
+    private static void AddBranchGrams(
+        List<SelectedGram> branch,
+        ReadOnlySpan<SelectedGram> grams,
+        int maximumCount)
     {
-        for (var i = 0; i < grams.Length; i++)
+        for (var i = 0; i < grams.Length && branch.Count < maximumCount; i++)
         {
             TryAddSelectedGram(branch, grams[i]);
         }

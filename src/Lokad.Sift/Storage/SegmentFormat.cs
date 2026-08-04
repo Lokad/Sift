@@ -57,6 +57,13 @@ internal static class SegmentFormat
     public const int NonAsciiDocumentCountOffset = LegacyStatsLength;
     public const int NonAsciiContentBytesOffset = NonAsciiDocumentCountOffset + 4;
     public const int StatsLength = NonAsciiContentBytesOffset + 8;
+    public const int FixedSegmentBytes =
+        HeaderSize +
+        RegionCount * RegionDirectoryEntrySize +
+        StatsLength +
+        RegionCount * ChecksumEntrySize;
+    public const int MaximumContentBlobBytes = int.MaxValue - FixedSegmentBytes;
+    public const int MaximumDocumentCount = (int.MaxValue - FixedSegmentBytes) / DocumentRowSize;
 
     public static int GetLexiconSuffixSize(SegmentRegionId regionId)
     {

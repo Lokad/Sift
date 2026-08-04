@@ -1211,19 +1211,28 @@ public sealed class Sift : ISift
 
     private static void ValidateSiftOptions(SiftOptions options)
     {
-        if (options.MaxDocumentBytes <= 0)
+        if (options.MaxDocumentBytes <= 0 ||
+            options.MaxDocumentBytes > SegmentFormat.MaximumContentBlobBytes)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxDocumentBytes must be positive.");
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"MaxDocumentBytes must be between one and {SegmentFormat.MaximumContentBlobBytes}.");
         }
 
-        if (options.TargetSegmentDocumentCount <= 0)
+        if (options.TargetSegmentDocumentCount <= 0 ||
+            options.TargetSegmentDocumentCount > SegmentFormat.MaximumDocumentCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "TargetSegmentDocumentCount must be positive.");
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"TargetSegmentDocumentCount must be between one and {SegmentFormat.MaximumDocumentCount}.");
         }
 
-        if (options.TargetSegmentContentBytes <= 0)
+        if (options.TargetSegmentContentBytes <= 0 ||
+            options.TargetSegmentContentBytes > SegmentFormat.MaximumContentBlobBytes)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "TargetSegmentContentBytes must be positive.");
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"TargetSegmentContentBytes must be between one and {SegmentFormat.MaximumContentBlobBytes}.");
         }
 
         if (options.MaximumPhysicalBytes <= 0)
@@ -1253,9 +1262,12 @@ public sealed class Sift : ISift
                 "DirectScanCandidateDensityThreshold cannot be negative or NaN.");
         }
 
-        if (options.MaxSelectedNgrams <= 0)
+        if (options.MaxSelectedNgrams <= 0 ||
+            options.MaxSelectedNgrams > SiftOptions.MaximumSelectedNgramCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxSelectedNgrams must be positive.");
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"MaxSelectedNgrams must be between one and {SiftOptions.MaximumSelectedNgramCount}.");
         }
 
         if (options.MaxMaterializedMatchBytes <= 0 ||
