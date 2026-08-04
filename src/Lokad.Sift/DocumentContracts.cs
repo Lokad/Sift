@@ -19,7 +19,7 @@ public enum DocumentContentLifetime
     /// <summary>The source may reuse or mutate the buffer on its next read.</summary>
     UntilNextRead,
 
-    /// <summary>The bytes remain immutable until the build, update, or apply operation completes.</summary>
+    /// <summary>The bytes remain immutable until the build or update operation completes.</summary>
     UntilOperationCompletes
 }
 

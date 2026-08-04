@@ -115,6 +115,7 @@ public readonly record struct SearchOptions
         SegmentParallelism = segmentParallelism;
     }
 
+    /// <summary>Gets the number of segments searched concurrently. Zero uses the default of one.</summary>
     public int SegmentParallelism { get; init; }
 }
 

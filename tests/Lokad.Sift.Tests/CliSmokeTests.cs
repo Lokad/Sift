@@ -155,31 +155,5 @@ public sealed class CliSmokeTests
         }
     }
 
-    private sealed class InMemoryDocumentSource : IDocumentSource
-    {
-        private readonly IReadOnlyList<(string Path, string Content)> _documents;
-        private int _index;
-
-        public InMemoryDocumentSource(IReadOnlyList<(string Path, string Content)> documents)
-        {
-            _documents = documents;
-        }
-
-        public bool TryReadNext(out SubmittedDocument document)
-        {
-            if (_index >= _documents.Count)
-            {
-                document = default;
-                return false;
-            }
-
-            var next = _documents[_index++];
-            document = new SubmittedDocument(next.Path, Encoding.UTF8.GetBytes(next.Content));
-            return true;
-        }
-    }
 }
-
-
-
 

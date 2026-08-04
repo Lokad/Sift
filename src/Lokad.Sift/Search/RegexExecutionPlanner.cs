@@ -26,9 +26,9 @@ internal static class RegexExecutionPlanner
         }
 
         if (utf8Syntax is not null &&
-            Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, utf8Syntax, out var byteRegexProgram))
+            Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, utf8Syntax, out var utf8RegexProgram))
         {
-            return RegexExecutionPlan.ForUtf8Regex(byteRegexProgram);
+            return RegexExecutionPlan.ForUtf8Regex(utf8RegexProgram);
         }
 
         return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, resolvedCaseMode));

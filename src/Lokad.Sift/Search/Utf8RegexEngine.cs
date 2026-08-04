@@ -74,15 +74,15 @@ internal static class Utf8RegexEngine
         int hitLimit,
         IHitCollector collector,
         ref int hitsReturned,
-        ref int byteRegexInvocations,
-        ref int byteRegexMatchedDocuments,
-        ref long byteRegexStartPositionsTried,
+        ref int utf8RegexInvocations,
+        ref int utf8RegexMatchedDocuments,
+        ref long utf8RegexMatchesEnumerated,
         ref SearchStopReason stopReason)
     {
         _ = preparedOrderedAnchorGroups;
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
-        byteRegexInvocations++;
+        utf8RegexInvocations++;
 
         var matched = false;
         try
@@ -102,7 +102,7 @@ internal static class Utf8RegexEngine
                 }
 
                 matched = true;
-                byteRegexStartPositionsTried++;
+                utf8RegexMatchesEnumerated++;
                 var endByte = startByte + lengthInBytes;
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
@@ -134,7 +134,7 @@ internal static class Utf8RegexEngine
 
         if (matched)
         {
-            byteRegexMatchedDocuments++;
+            utf8RegexMatchedDocuments++;
         }
 
         return matched;

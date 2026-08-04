@@ -612,10 +612,10 @@ public sealed class StorageLifecycleTests
     [Fact]
     public void MutationReserveCoversOneDefaultCompactionPass()
     {
-        var sift = new SiftOptions();
+        var options = new SiftOptions();
         var compact = new CompactOptions();
 
-        Assert.True(sift.MinimumFreeBytesAfterMutation >=
+        Assert.True(options.MinimumFreeBytesAfterMutation >=
                     compact.MaxInputSegmentBytes + compact.MinimumFreeBytesAfterCompaction);
     }
 

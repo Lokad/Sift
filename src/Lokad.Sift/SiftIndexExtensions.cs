@@ -2,106 +2,106 @@ namespace Lokad.Sift;
 
 public static class SiftIndexExtensions
 {
-    public static IIndexSnapshot OpenSnapshot(this ISiftIndex sift)
+    public static IIndexSnapshot OpenSnapshot(this ISiftIndex index)
     {
-        return sift.OpenSnapshot(new SearchOptions());
+        return index.OpenSnapshot(new SearchOptions());
     }
 
-    public static IOverlaySnapshot OpenOverlaySnapshot(this ISiftIndex sift)
+    public static IOverlaySnapshot OpenOverlaySnapshot(this ISiftIndex index)
     {
-        return sift.OpenOverlaySnapshot(new SearchOptions());
+        return index.OpenOverlaySnapshot(new SearchOptions());
     }
 
-    public static Task<IndexValidationStats> Validate(this ISiftIndex sift)
+    public static Task<IndexValidationStats> Validate(this ISiftIndex index)
     {
-        return sift.Validate(CancellationToken.None);
+        return index.Validate(CancellationToken.None);
     }
 
-    public static Task<BuildStats> Build(this ISiftIndex sift, IDocumentSource documents)
-        => Build(sift, documents, new BuildOptions(), CancellationToken.None);
+    public static Task<BuildStats> Build(this ISiftIndex index, IDocumentSource documents)
+        => Build(index, documents, new BuildOptions(), CancellationToken.None);
 
     public static Task<BuildStats> Build(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IDocumentSource documents,
         CancellationToken cancellationToken)
-        => Build(sift, documents, new BuildOptions(), cancellationToken);
+        => Build(index, documents, new BuildOptions(), cancellationToken);
 
     public static Task<BuildStats> Build(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IDocumentSource documents,
         BuildOptions options)
-        => Build(sift, documents, options, CancellationToken.None);
+        => Build(index, documents, options, CancellationToken.None);
 
     private static Task<BuildStats> Build(
-        ISiftIndex sift,
+        ISiftIndex index,
         IDocumentSource documents,
         BuildOptions options,
         CancellationToken cancellationToken)
     {
-        return sift.Build(documents, options, cancellationToken);
+        return index.Build(documents, options, cancellationToken);
     }
 
-    public static Task<BuildStats> Build(this ISiftIndex sift, IAsyncEnumerable<SubmittedDocument> documents)
-        => Build(sift, documents, new BuildOptions(), CancellationToken.None);
+    public static Task<BuildStats> Build(this ISiftIndex index, IAsyncEnumerable<SubmittedDocument> documents)
+        => Build(index, documents, new BuildOptions(), CancellationToken.None);
 
     public static Task<BuildStats> Build(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> documents,
         CancellationToken cancellationToken)
-        => Build(sift, documents, new BuildOptions(), cancellationToken);
+        => Build(index, documents, new BuildOptions(), cancellationToken);
 
     public static Task<BuildStats> Build(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options)
-        => Build(sift, documents, options, CancellationToken.None);
+        => Build(index, documents, options, CancellationToken.None);
 
     private static Task<BuildStats> Build(
-        ISiftIndex sift,
+        ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options,
         CancellationToken cancellationToken)
     {
-        return sift.Build(documents, options, cancellationToken);
+        return index.Build(documents, options, cancellationToken);
     }
 
     public static Task<UpdateStats> Update(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
-        return sift.Update(upserts, deletions, CancellationToken.None);
+        return index.Update(upserts, deletions, CancellationToken.None);
     }
 
     public static Task<UpdateStats> Update(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
     {
-        return sift.Update(upserts, deletions, options, CancellationToken.None);
+        return index.Update(upserts, deletions, options, CancellationToken.None);
     }
 
     public static Task<UpdateStats> Update(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions)
     {
-        return sift.Update(upserts, deletions, CancellationToken.None);
+        return index.Update(upserts, deletions, CancellationToken.None);
     }
 
     public static Task<UpdateStats> Update(
-        this ISiftIndex sift,
+        this ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> upserts,
         IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
     {
-        return sift.Update(upserts, deletions, options, CancellationToken.None);
+        return index.Update(upserts, deletions, options, CancellationToken.None);
     }
 
-    public static Task<CompactStats> Compact(this ISiftIndex sift, CompactOptions options)
+    public static Task<CompactStats> Compact(this ISiftIndex index, CompactOptions options)
     {
-        return sift.Compact(options, CancellationToken.None);
+        return index.Compact(options, CancellationToken.None);
     }
 
     public static DocumentVisitStats VisitDocuments(
