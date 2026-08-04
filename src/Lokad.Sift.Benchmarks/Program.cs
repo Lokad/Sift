@@ -3561,7 +3561,7 @@ internal sealed class BenchmarkSource : IDocumentSource
         _count = count;
     }
 
-    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+    public bool TryReadNext(out SubmittedDocument document)
     {
         if (_index >= _count)
         {
@@ -3605,7 +3605,7 @@ internal sealed class FileSystemDocumentSource : IDocumentSource
         _pendingDirectories.Enqueue(rootPath);
     }
 
-    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+    public bool TryReadNext(out SubmittedDocument document)
     {
         if (_maxFiles is int maxFiles && _emittedFiles >= maxFiles)
         {
@@ -3661,7 +3661,7 @@ internal sealed class MemoryDocumentSource : IDocumentSource
         _documents = documents;
     }
 
-    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+    public bool TryReadNext(out SubmittedDocument document)
     {
         if (_index >= _documents.Length)
         {
@@ -3669,10 +3669,12 @@ internal sealed class MemoryDocumentSource : IDocumentSource
             return false;
         }
 
-        document = _documents[_index++] with
-        {
-            ContentLifetime = DocumentContentLifetime.UntilOperationCompletes
-        };
+        var next = _documents[_index++];
+        document = new SubmittedDocument(
+            next.Path,
+            next.Content,
+            next.LastModifiedUtc,
+            DocumentContentLifetime.UntilOperationCompletes);
         return true;
     }
 }

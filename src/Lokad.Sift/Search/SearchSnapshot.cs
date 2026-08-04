@@ -884,7 +884,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private bool TryGetDocumentBytesCore(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
         using var operation = BeginOperation();
-        var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
+        var normalizedPath = key.Path;
         if (!TryFindLiveDocument(normalizedPath, out var cache, out var ordinal))
         {
             content = default;
@@ -903,7 +903,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
+            var normalizedPath = key.Path;
             return TryFindLiveDocument(normalizedPath, out _, out _);
         }
         catch (Exception exception) when (IsIndexCorruption(exception))

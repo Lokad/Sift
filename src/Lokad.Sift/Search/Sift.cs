@@ -538,7 +538,7 @@ public sealed class Sift : ISift
 
     public Task<UpdateStats> Update(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
         return Update(
@@ -550,7 +550,7 @@ public sealed class Sift : ISift
 
     public Task<UpdateStats> Update(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
@@ -574,7 +574,7 @@ public sealed class Sift : ISift
 
     public Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
         return Update(
@@ -586,7 +586,7 @@ public sealed class Sift : ISift
 
     public Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
@@ -610,14 +610,13 @@ public sealed class Sift : ISift
 
     private Task<UpdateStats> RunUpdate(
         UpdateDocumentStreamer streamDocuments,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         ValidateUpdateOptions(options);
-        var deletionArray = deletions.ToArray();
         return RunMutation(
             SiftActivity.Update,
             async operationCancellation =>
@@ -626,7 +625,7 @@ public sealed class Sift : ISift
                 {
                     return await UpdateCoreAsync(
                         streamDocuments,
-                        deletionArray,
+                        deletions,
                         options,
                         operationCancellation).ConfigureAwait(false);
                 }
@@ -698,8 +697,7 @@ public sealed class Sift : ISift
         foreach (var deletion in deletions)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ArgumentNullException.ThrowIfNull(deletion);
-            var normalized = IndexBuilder.CanonicalizePath(deletion.Path);
+            var normalized = deletion.Path;
             if (!deletionSet.Add(normalized))
             {
                 throw new InvalidOperationException($"Duplicate deletion path in update batch: '{normalized}'.");

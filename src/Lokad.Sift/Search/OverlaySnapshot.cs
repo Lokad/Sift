@@ -36,7 +36,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseSegmentIds = new HashSet<ulong>(_baseSnapshot.GetSegmentIds());
     }
 
-    public Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions)
+    public Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
     {
         return Apply(
             upserts,
@@ -47,7 +47,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public Task<UpdateStats> Apply(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken)
     {
         return Apply(
@@ -59,7 +59,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public Task<UpdateStats> Apply(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options)
     {
         return Apply(upserts, deletions, options, CancellationToken.None);
@@ -67,7 +67,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public Task<UpdateStats> Apply(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
@@ -77,13 +77,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
         }
 
-        var deletionArray = deletions.ToArray();
-        return ApplyCore(upserts, deletionArray, options, cancellationToken);
+        return ApplyCore(upserts, deletions, options, cancellationToken);
     }
 
     private async Task<UpdateStats> ApplyCore(
         IDocumentSource upserts,
-        IReadOnlyCollection<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
@@ -102,7 +101,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     private async Task<UpdateStats> ApplyCoreUnderLock(
         IDocumentSource upserts,
-        IReadOnlyCollection<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options,
         CancellationToken cancellationToken)
     {
@@ -116,8 +115,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
         {
-            ArgumentNullException.ThrowIfNull(deletion);
-            var normalized = IndexBuilder.CanonicalizePath(deletion.Path);
+            var normalized = deletion.Path;
             if (!deletionSet.Add(normalized))
             {
                 throw new InvalidOperationException($"Duplicate deletion path in overlay batch: '{normalized}'.");
@@ -388,10 +386,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
         using var state = BeginRead();
-        var normalizedPath = IndexBuilder.CanonicalizePath(key.Path);
+        var normalizedPath = key.Path;
         if (_overlayDocuments.ContainsKey(normalizedPath))
         {
-            return _overlaySnapshot.TryGetDocumentBytes(new DocumentKey(normalizedPath), out content);
+            return _overlaySnapshot.TryGetDocumentBytes(key, out content);
         }
 
         if (_deletedPaths.Contains(normalizedPath))
@@ -400,7 +398,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return false;
         }
 
-        return _baseSnapshot.TryGetDocumentBytes(new DocumentKey(normalizedPath), out content);
+        return _baseSnapshot.TryGetDocumentBytes(key, out content);
     }
 
     public void Dispose()
@@ -658,7 +656,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             _documents = documents;
         }
 
-        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+        public bool TryReadNext(out SubmittedDocument document)
         {
             if (_index >= _documents.Count)
             {
@@ -750,7 +748,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         private int _index;
 
-        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+        public bool TryReadNext(out SubmittedDocument document)
         {
             if (_index >= documents.Count)
             {

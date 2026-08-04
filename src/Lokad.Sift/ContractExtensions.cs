@@ -73,7 +73,7 @@ public static class SiftContractExtensions
     public static Task<UpdateStats> Update(
         this ISift sift,
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions)
+        IReadOnlyList<DocumentKey> deletions)
     {
         ArgumentNullException.ThrowIfNull(sift);
         return sift.Update(upserts, deletions, CancellationToken.None);
@@ -82,7 +82,7 @@ public static class SiftContractExtensions
     public static Task<UpdateStats> Update(
         this ISift sift,
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
     {
         ArgumentNullException.ThrowIfNull(sift);
@@ -92,7 +92,7 @@ public static class SiftContractExtensions
     public static Task<UpdateStats> Update(
         this ISift sift,
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions)
+        IReadOnlyList<DocumentKey> deletions)
     {
         ArgumentNullException.ThrowIfNull(sift);
         return sift.Update(upserts, deletions, CancellationToken.None);
@@ -101,7 +101,7 @@ public static class SiftContractExtensions
     public static Task<UpdateStats> Update(
         this ISift sift,
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options)
     {
         ArgumentNullException.ThrowIfNull(sift);
@@ -135,7 +135,7 @@ public static class SiftContractExtensions
     public static Task<UpdateStats> Apply(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions)
+        IReadOnlyList<DocumentKey> deletions)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         return snapshot.Apply(upserts, deletions, CancellationToken.None);
@@ -144,7 +144,7 @@ public static class SiftContractExtensions
     public static Task<UpdateStats> Apply(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options)
     {
         ArgumentNullException.ThrowIfNull(snapshot);

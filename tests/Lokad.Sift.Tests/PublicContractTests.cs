@@ -26,14 +26,22 @@ public sealed class PublicContractTests
     }
 
     [Fact]
-    public void RequiredInputContractsCannotBeDefaultValueTypes()
+    public void PerDocumentContractsAreValidatedValueTypes()
     {
         Assert.False(typeof(SearchQuery).IsValueType);
-        Assert.False(typeof(DocumentKey).IsValueType);
-        Assert.False(typeof(SubmittedDocument).IsValueType);
-        Assert.Throws<ArgumentNullException>(() => new SearchQuery(null!));
-        Assert.Throws<ArgumentNullException>(() => new DocumentKey(null!));
-        Assert.Throws<ArgumentNullException>(() => new SubmittedDocument(null!, ReadOnlyMemory<byte>.Empty));
+        Assert.True(typeof(DocumentKey).IsValueType);
+        Assert.True(typeof(SubmittedDocument).IsValueType);
+        Assert.Throws<InvalidOperationException>(() => _ = default(DocumentKey).Path);
+        Assert.Throws<InvalidOperationException>(() => _ = default(SubmittedDocument).Path);
+    }
+
+    [Fact]
+    public void QueryPatternIsConstructorOwned()
+    {
+        var pattern = typeof(SearchQuery).GetProperty(nameof(SearchQuery.Pattern));
+
+        Assert.NotNull(pattern);
+        Assert.False(pattern.CanWrite);
     }
 
     [Fact]

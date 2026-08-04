@@ -15,9 +15,9 @@ public sealed class BuildPipelineTests
     [InlineData("C:\\src\\a.txt")]
     [InlineData("C:src/a.txt")]
     [InlineData("c:src/a.txt")]
-    public void CanonicalizePathRejectsRootedAndDriveQualifiedPaths(string path)
+    public void DocumentKeyRejectsRootedAndDriveQualifiedPaths(string path)
     {
-        Assert.Throws<ArgumentException>(() => IndexBuilder.CanonicalizePath(path));
+        Assert.Throws<ArgumentException>(() => new DocumentKey(path));
     }
 
     [Fact]
@@ -280,7 +280,7 @@ public sealed class BuildPipelineTests
             _beforeThirdDocument = beforeThirdDocument;
         }
 
-        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+        public bool TryReadNext(out SubmittedDocument document)
         {
             if (_index == 2)
             {
@@ -303,7 +303,7 @@ public sealed class BuildPipelineTests
         private readonly byte[] _buffer = new byte[5];
         private int _index;
 
-        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+        public bool TryReadNext(out SubmittedDocument document)
         {
             if (_index >= 2)
             {

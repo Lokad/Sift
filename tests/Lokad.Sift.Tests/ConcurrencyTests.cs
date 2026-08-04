@@ -347,7 +347,7 @@ public sealed class ConcurrencyTests
             _document = new SubmittedDocument(path, System.Text.Encoding.UTF8.GetBytes(content));
         }
 
-        public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+        public bool TryReadNext(out SubmittedDocument document)
         {
             if (Interlocked.Exchange(ref _state, 1) == 0)
             {

@@ -95,7 +95,7 @@ internal sealed class InMemoryDocumentSource : IDocumentSource
         _documents = documents;
     }
 
-    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+    public bool TryReadNext(out SubmittedDocument document)
     {
         if (_index >= _documents.Count)
         {
@@ -144,7 +144,7 @@ internal sealed class SubmittedDocumentSource : IDocumentSource
 
     public int ConsumedDocuments => _index;
 
-    public bool TryReadNext([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SubmittedDocument? document)
+    public bool TryReadNext(out SubmittedDocument document)
     {
         if (_index >= _documents.Count)
         {

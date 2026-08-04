@@ -1,5 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace Lokad.Sift;
 
 public enum PatternMode
@@ -98,7 +96,6 @@ public sealed record SearchQuery
         int maxHitsPerDocument,
         long maxElapsedMilliseconds)
     {
-        ArgumentNullException.ThrowIfNull(pattern);
         Pattern = pattern;
         PatternMode = patternMode;
         CaseMode = caseMode;
@@ -114,7 +111,7 @@ public sealed record SearchQuery
         MaxElapsedMilliseconds = maxElapsedMilliseconds;
     }
 
-    public string Pattern { get; init; }
+    public string Pattern { get; }
     public PatternMode PatternMode { get; init; }
     public CaseMode CaseMode { get; init; }
     public bool WholeWord { get; init; }
@@ -181,19 +178,22 @@ public readonly record struct RawHit(
     int StartLine,
     int EndLine);
 
-public sealed record DocumentKey
+public readonly record struct DocumentKey
 {
+    private readonly string? _path;
+
     public DocumentKey(string path)
     {
-        ArgumentNullException.ThrowIfNull(path);
-        Path = path;
+        _path = DocumentPath.Normalize(path);
     }
 
-    public string Path { get; }
+    public string Path => _path ?? throw new InvalidOperationException("The document key is uninitialized.");
 }
 
-public sealed record SubmittedDocument
+public readonly record struct SubmittedDocument
 {
+    private readonly string? _path;
+
     public SubmittedDocument(
         string path,
         ReadOnlyMemory<byte> content)
@@ -219,17 +219,16 @@ public sealed record SubmittedDocument
         DateTimeOffset? lastModifiedUtc,
         DocumentContentLifetime contentLifetime)
     {
-        ArgumentNullException.ThrowIfNull(path);
-        Path = path;
+        _path = DocumentPath.Normalize(path);
         Content = content;
         LastModifiedUtc = lastModifiedUtc;
         ContentLifetime = contentLifetime;
     }
 
-    public string Path { get; init; }
-    public ReadOnlyMemory<byte> Content { get; init; }
-    public DateTimeOffset? LastModifiedUtc { get; init; }
-    public DocumentContentLifetime ContentLifetime { get; init; }
+    public string Path => _path ?? throw new InvalidOperationException("The submitted document is uninitialized.");
+    public ReadOnlyMemory<byte> Content { get; }
+    public DateTimeOffset? LastModifiedUtc { get; }
+    public DocumentContentLifetime ContentLifetime { get; }
 }
 
 public sealed class SiftOptions
@@ -886,7 +885,7 @@ public readonly record struct DocumentVisitStats(
 
 public interface IDocumentSource
 {
-    bool TryReadNext([NotNullWhen(true)] out SubmittedDocument? document);
+    bool TryReadNext(out SubmittedDocument document);
 }
 
 public interface IIndexSnapshot : IDisposable
@@ -900,10 +899,10 @@ public interface IIndexSnapshot : IDisposable
 
 public interface IOverlaySnapshot : IIndexSnapshot
 {
-    Task<UpdateStats> Apply(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Apply(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
     Task<UpdateStats> Apply(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         OverlayApplyOptions options,
         CancellationToken cancellationToken);
     Task<UpdateStats> ApplyTo(ISift target, UpdateOptions options, CancellationToken cancellationToken);
@@ -931,19 +930,19 @@ public interface ISift : IDisposable
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options,
         CancellationToken cancellationToken);
-    Task<UpdateStats> Update(IDocumentSource upserts, ReadOnlySpan<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
     Task<UpdateStats> Update(
         IDocumentSource upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken);
     Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken);
     Task<UpdateStats> Update(
         IAsyncEnumerable<SubmittedDocument> upserts,
-        ReadOnlySpan<DocumentKey> deletions,
+        IReadOnlyList<DocumentKey> deletions,
         UpdateOptions options,
         CancellationToken cancellationToken);
     Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken);
