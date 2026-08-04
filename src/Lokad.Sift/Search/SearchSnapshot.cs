@@ -61,6 +61,56 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         _segments = _storageSnapshot.Manifest.Segments;
     }
 
+    public DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector)
+    {
+        return VisitDocuments(collector, CancellationToken.None);
+    }
+
+    public DocumentVisitStats VisitDocuments(
+        IDocumentKeyCollector collector,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(collector);
+        var guardedCollector = new GuardedDocumentKeyCollector(collector);
+        try
+        {
+            using var operation = BeginOperation();
+            var visitedDocuments = 0;
+            foreach (var entry in _segments)
+            {
+                var cache = OpenSegment(entry);
+                for (uint ordinal = 0; ordinal < (uint)cache.Segment.DocumentCount; ordinal++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (IsDeadOrdinal(cache.DeadOrdinals, ordinal))
+                    {
+                        continue;
+                    }
+
+                    var document = cache.Segment.GetDocument(ordinal);
+                    var key = new DocumentKey(cache.Segment.GetPath(document));
+                    visitedDocuments++;
+                    if (!guardedCollector.OnDocument(key))
+                    {
+                        return new DocumentVisitStats(visitedDocuments, Completed: false);
+                    }
+                }
+            }
+
+            return new DocumentVisitStats(visitedDocuments, Completed: true);
+        }
+        catch (CollectorFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
         ValidateQuery(query);
@@ -2418,6 +2468,28 @@ internal sealed class GuardedHitCollector : IHitCollector
         try
         {
             return _inner.OnHit(hit);
+        }
+        catch (Exception exception)
+        {
+            throw new CollectorFailureException(ExceptionDispatchInfo.Capture(exception));
+        }
+    }
+}
+
+internal sealed class GuardedDocumentKeyCollector : IDocumentKeyCollector
+{
+    private readonly IDocumentKeyCollector _inner;
+
+    public GuardedDocumentKeyCollector(IDocumentKeyCollector inner)
+    {
+        _inner = inner;
+    }
+
+    public bool OnDocument(in DocumentKey key)
+    {
+        try
+        {
+            return _inner.OnDocument(key);
         }
         catch (Exception exception)
         {

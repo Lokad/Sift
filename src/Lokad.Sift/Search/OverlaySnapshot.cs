@@ -210,6 +210,32 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             cancellationToken);
     }
 
+    public DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector)
+    {
+        return VisitDocuments(collector, CancellationToken.None);
+    }
+
+    public DocumentVisitStats VisitDocuments(
+        IDocumentKeyCollector collector,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(collector);
+        using var state = BeginRead();
+        var hiddenPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
+        hiddenPaths.UnionWith(_overlayDocuments.Keys);
+        var visibleBaseCollector = new VisibleBaseDocumentCollector(hiddenPaths, collector);
+        var baseStats = _baseSnapshot.VisitDocuments(visibleBaseCollector, cancellationToken);
+        if (!baseStats.Completed)
+        {
+            return new DocumentVisitStats(visibleBaseCollector.VisitedDocuments, Completed: false);
+        }
+
+        var overlayStats = _overlaySnapshot.VisitDocuments(collector, cancellationToken);
+        return new DocumentVisitStats(
+            visibleBaseCollector.VisitedDocuments + overlayStats.VisitedDocuments,
+            overlayStats.Completed);
+    }
+
     public SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter)
     {
         using var state = BeginRead();
@@ -644,6 +670,24 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
 
             return true;
+        }
+    }
+
+    private sealed class VisibleBaseDocumentCollector(
+        IReadOnlySet<string> hiddenPaths,
+        IDocumentKeyCollector inner) : IDocumentKeyCollector
+    {
+        public int VisitedDocuments { get; private set; }
+
+        public bool OnDocument(in DocumentKey key)
+        {
+            if (hiddenPaths.Contains(key.Path))
+            {
+                return true;
+            }
+
+            VisitedDocuments++;
+            return inner.OnDocument(key);
         }
     }
 

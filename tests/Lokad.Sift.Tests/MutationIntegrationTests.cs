@@ -52,6 +52,63 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task SnapshotVisitsOnlyLiveDocumentKeysAndHonorsCollectorStop()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "alpha"),
+            ("src/b.txt", "beta")
+        ]));
+        await index.Update(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "omega"),
+                ("src/c.txt", "gamma")
+            ]),
+            [new DocumentKey("src/b.txt")]);
+
+        using var snapshot = index.OpenSnapshot();
+        var all = new DocumentKeyBuffer();
+        var completed = snapshot.VisitDocuments(all);
+        Assert.True(completed.Completed);
+        Assert.Equal(2, completed.VisitedDocuments);
+        Assert.Equal(
+            ["src/a.txt", "src/c.txt"],
+            all.Keys.Select(static key => key.Path).Order(StringComparer.Ordinal));
+
+        var first = new DocumentKeyBuffer(maximumDocuments: 1);
+        var stopped = snapshot.VisitDocuments(first);
+        Assert.False(stopped.Completed);
+        Assert.Equal(1, stopped.VisitedDocuments);
+        Assert.Single(first.Keys);
+    }
+
+    [Fact]
+    public async Task OverlayVisitsItsMergedLiveDocumentKeys()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", "alpha"),
+            ("src/b.txt", "beta")
+        ]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Apply(
+            new InMemoryDocumentSource([
+                ("src/a.txt", "omega"),
+                ("src/c.txt", "gamma")
+            ]),
+            [new DocumentKey("src/b.txt")]);
+
+        var collector = new DocumentKeyBuffer();
+        var stats = overlay.VisitDocuments(collector);
+
+        Assert.True(stats.Completed);
+        Assert.Equal(2, stats.VisitedDocuments);
+        Assert.Equal(
+            ["src/a.txt", "src/c.txt"],
+            collector.Keys.Select(static key => key.Path).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public async Task UpdateAppliesUpsertsAndDeletions()
     {
         using var fixture = new CorpusFixture(

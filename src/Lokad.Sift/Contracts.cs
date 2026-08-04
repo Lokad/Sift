@@ -605,6 +605,15 @@ public interface IHitCollector
     bool OnHit(in RawHit hit);
 }
 
+public interface IDocumentKeyCollector
+{
+    bool OnDocument(in DocumentKey key);
+}
+
+public readonly record struct DocumentVisitStats(
+    int VisitedDocuments,
+    bool Completed);
+
 public interface IDocumentSource
 {
     bool TryReadNext(out SubmittedDocument document);
@@ -612,6 +621,8 @@ public interface IDocumentSource
 
 public interface IIndexSnapshot : IDisposable
 {
+    DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector);
+    DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
     SearchPlan Explain(in SearchQuery query, in PathFilter pathFilter);
     SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector);
     SearchStats Search(in SearchQuery query, in PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);

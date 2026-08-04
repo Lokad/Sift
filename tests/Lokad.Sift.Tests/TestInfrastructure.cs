@@ -109,6 +109,29 @@ internal sealed class InMemoryDocumentSource : IDocumentSource
     }
 }
 
+internal sealed class DocumentKeyBuffer : IDocumentKeyCollector
+{
+    private readonly int _maximumDocuments;
+
+    public DocumentKeyBuffer()
+        : this(int.MaxValue)
+    {
+    }
+
+    public DocumentKeyBuffer(int maximumDocuments)
+    {
+        _maximumDocuments = maximumDocuments;
+    }
+
+    public List<DocumentKey> Keys { get; } = [];
+
+    public bool OnDocument(in DocumentKey key)
+    {
+        Keys.Add(key);
+        return Keys.Count < _maximumDocuments;
+    }
+}
+
 internal sealed class SubmittedDocumentSource : IDocumentSource
 {
     private readonly IReadOnlyList<SubmittedDocument> _documents;
