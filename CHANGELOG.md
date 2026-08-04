@@ -59,6 +59,16 @@
   default compaction pass.
 - Made compaction preserve logical content revisions and commit metadata while
   advancing only the physical storage generation.
+- Bounded overlay segments, tombstones, query preparation caches, path-filter
+  caches, segment parallelism, and retained diagnostic state.
+- Serialized all asynchronous mutation kinds through one coordinator while
+  keeping asynchronous document sources asynchronous end to end.
+- Reused parsed manifests and mutation-scoped capacity accounting, and stopped
+  reopening segments when checking byte-identical upserts.
+- Made native indexing workspace retention and managed-heap peak sampling
+  explicit opt-ins instead of permanent process overhead.
+- Added end-to-end snapshot lifecycle and sustained overlay-churn benchmark
+  scenarios alongside steady-state search measurements.
 
 ### Fixed
 
@@ -99,3 +109,11 @@
   revision, and physical storage generation.
 - Removed nullable `SiftOptions` entry points; callers either omit the options
   through the dedicated overload or provide a non-null instance.
+- Made `SearchQuery`, `DocumentKey`, and `SubmittedDocument` reference contracts
+  so required values cannot silently become invalid through `default`.
+- Made large search, mutation, maintenance, and storage result contracts
+  reference types to avoid copying oversized value types.
+- Moved convenience operation overloads to `SiftContractExtensions`; interfaces
+  now expose only the canonical cancellation- and options-aware operations.
+- Internalized storage formats, mapped segments, manifests, and codec helpers;
+  the supported package surface is the root `Lokad.Sift` integration contract.
