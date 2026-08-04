@@ -37,6 +37,22 @@ public sealed class PublicContractTests
     }
 
     [Fact]
+    public void IdentityAndHitCoordinatesUseDomainTypes()
+    {
+        Assert.Equal(typeof(CorpusId), GetPropertyType<IndexIdentity>(nameof(IndexIdentity.CorpusId)));
+        Assert.Equal(
+            typeof(ContentRevision),
+            GetPropertyType<IndexIdentity>(nameof(IndexIdentity.ContentRevision)));
+        Assert.Equal(
+            typeof(StorageGeneration),
+            GetPropertyType<IndexIdentity>(nameof(IndexIdentity.StorageGeneration)));
+        Assert.Equal(typeof(SegmentId), GetPropertyType<RawHit>(nameof(RawHit.SegmentId)));
+        Assert.Equal(
+            typeof(DocumentOrdinal),
+            GetPropertyType<RawHit>(nameof(RawHit.DocumentOrdinal)));
+    }
+
+    [Fact]
     public void QueryPatternIsConstructorOwned()
     {
         var pattern = typeof(SearchQuery).GetProperty(nameof(SearchQuery.Pattern));
@@ -136,5 +152,13 @@ public sealed class PublicContractTests
     {
         return typeof(T).GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Count(method => method.Name == name);
+    }
+
+    private static Type GetPropertyType<T>(string name)
+    {
+        var property = typeof(T).GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+        return property is null
+            ? throw new InvalidOperationException($"Property '{name}' was not found on {typeof(T)}.")
+            : property.PropertyType;
     }
 }

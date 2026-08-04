@@ -13,7 +13,7 @@ internal static class HitMaterializer
         int contextAfter,
         SiftOptions options)
     {
-        var document = segment.GetDocument(hit.DocumentOrdinal);
+        var document = segment.GetDocument(hit.DocumentOrdinal.Value);
         var path = segment.GetPath(document);
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);

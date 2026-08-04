@@ -166,8 +166,8 @@ public sealed class PathFilter
 }
 
 public readonly record struct RawHit(
-    ulong SegmentId,
-    uint DocumentOrdinal,
+    SegmentId SegmentId,
+    DocumentOrdinal DocumentOrdinal,
     int StartByte,
     int EndByte,
     int StartLine,

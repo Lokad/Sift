@@ -822,9 +822,9 @@ public sealed class SiftIndex : ISiftIndex
     private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)
     {
         return new IndexIdentity(
-            manifest.CorpusId,
-            manifest.ContentRevision,
-            manifest.Generation);
+            new CorpusId(manifest.CorpusId),
+            new ContentRevision(manifest.ContentRevision),
+            new StorageGeneration(manifest.Generation));
     }
 
     public Task<CompactStats> Compact(CompactOptions options, CancellationToken callerCancellationToken)

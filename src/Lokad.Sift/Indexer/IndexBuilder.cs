@@ -147,9 +147,9 @@ internal sealed class IndexBuilder
             peakManagedBytes: 0,
             rejectedDocumentDetails: load.RejectedDocuments,
             committedIdentity: new IndexIdentity(
-                corpusId,
-                ContentRevision: 1,
-                StorageGeneration: generation));
+                new CorpusId(corpusId),
+                new ContentRevision(1),
+                new StorageGeneration(generation)));
     }
 
     public static StreamedDocuments StreamDocuments(

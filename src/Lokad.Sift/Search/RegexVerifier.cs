@@ -88,7 +88,13 @@ internal static class RegexVerifier
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
                 var shouldContinue = collector.OnHit(
-                    new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine));
+                    new RawHit(
+                        new SegmentId(segment.SegmentId),
+                        new DocumentOrdinal(document.Ordinal),
+                        startByte,
+                        endByte,
+                        startLine,
+                        endLine));
                 hitsReturned++;
                 if (!shouldContinue)
                 {

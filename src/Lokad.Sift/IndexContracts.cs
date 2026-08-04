@@ -319,11 +319,11 @@ public readonly record struct WriteActivityStats(
 
 public readonly record struct IndexIdentity(
     // Changes whenever a full build replaces the logical corpus.
-    Guid CorpusId,
+    CorpusId CorpusId,
     // Changes only when the visible document set or content changes.
-    ulong ContentRevision,
+    ContentRevision ContentRevision,
     // Changes whenever a manifest is published, including compaction and metadata-only commits.
-    ulong StorageGeneration);
+    StorageGeneration StorageGeneration);
 
 public sealed class IndexState
 {

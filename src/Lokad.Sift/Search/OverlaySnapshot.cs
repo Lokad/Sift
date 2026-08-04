@@ -313,14 +313,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ulong overlaySegmentId;
         lock (_syntheticSync)
         {
-            if (!_syntheticToOverlaySegmentIds.TryGetValue(hit.SegmentId, out overlaySegmentId))
+            if (!_syntheticToOverlaySegmentIds.TryGetValue(hit.SegmentId.Value, out overlaySegmentId))
             {
                 return _baseSnapshot.Materialize(hit, contextBefore, contextAfter);
             }
         }
 
         return _overlaySnapshot.Materialize(
-            hit with { SegmentId = overlaySegmentId },
+            hit with { SegmentId = new SegmentId(overlaySegmentId) },
             contextBefore,
             contextAfter);
     }
@@ -383,13 +383,13 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
     }
 
-    private ulong GetSyntheticSegmentId(ulong overlaySegmentId)
+    private SegmentId GetSyntheticSegmentId(SegmentId overlaySegmentId)
     {
         lock (_syntheticSync)
         {
-            if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId, out var syntheticSegmentId))
+            if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId.Value, out var syntheticSegmentId))
             {
-                return syntheticSegmentId;
+                return new SegmentId(syntheticSegmentId);
             }
 
             while (_baseSegmentIds.Contains(_nextSyntheticSegmentId) || _syntheticToOverlaySegmentIds.ContainsKey(_nextSyntheticSegmentId))
@@ -398,9 +398,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
 
             syntheticSegmentId = _nextSyntheticSegmentId--;
-            _overlayToSyntheticSegmentIds.Add(overlaySegmentId, syntheticSegmentId);
-            _syntheticToOverlaySegmentIds.Add(syntheticSegmentId, overlaySegmentId);
-            return syntheticSegmentId;
+            _overlayToSyntheticSegmentIds.Add(overlaySegmentId.Value, syntheticSegmentId);
+            _syntheticToOverlaySegmentIds.Add(syntheticSegmentId, overlaySegmentId.Value);
+            return new SegmentId(syntheticSegmentId);
         }
     }
 
@@ -666,7 +666,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private sealed class TrackingCollector : IHitCollector
     {
         private readonly IHitCollector _inner;
-        private readonly HashSet<(ulong SegmentId, uint DocumentOrdinal)> _documentsWithHits = [];
+        private readonly HashSet<(SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)> _documentsWithHits = [];
 
         public TrackingCollector(IHitCollector inner)
         {
@@ -686,7 +686,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         private readonly OverlaySnapshot _owner;
         private readonly IHitCollector _inner;
-        private readonly HashSet<(ulong SegmentId, uint DocumentOrdinal)> _documentsWithHits = [];
+        private readonly HashSet<(SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)> _documentsWithHits = [];
 
         public OverlayHitCollector(OverlaySnapshot owner, IHitCollector inner)
         {

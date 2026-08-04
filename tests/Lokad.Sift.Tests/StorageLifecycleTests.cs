@@ -14,20 +14,26 @@ public sealed class StorageLifecycleTests
         IndexIdentity updatedIdentity;
         using (var index = new SiftIndex(fixture.CorpusPath))
         {
-            Assert.Equal(new IndexIdentity(Guid.Empty, 0, 0), index.GetIndexIdentity());
+            Assert.Equal(
+                new IndexIdentity(CorpusId.Empty, new ContentRevision(0), new StorageGeneration(0)),
+                index.GetIndexIdentity());
             await index.Build(fixture.CreateSource());
             var builtIdentity = index.GetIndexIdentity();
-            Assert.NotEqual(Guid.Empty, builtIdentity.CorpusId);
-            Assert.Equal(1ul, builtIdentity.ContentRevision);
-            Assert.Equal(1ul, builtIdentity.StorageGeneration);
+            Assert.NotEqual(CorpusId.Empty, builtIdentity.CorpusId);
+            Assert.Equal(new ContentRevision(1), builtIdentity.ContentRevision);
+            Assert.Equal(new StorageGeneration(1), builtIdentity.StorageGeneration);
 
             await index.Update(
                 new InMemoryDocumentSource([("src/b.txt", "beta\n")]),
                 []);
             updatedIdentity = index.GetIndexIdentity();
             Assert.Equal(builtIdentity.CorpusId, updatedIdentity.CorpusId);
-            Assert.Equal(builtIdentity.ContentRevision + 1, updatedIdentity.ContentRevision);
-            Assert.True(updatedIdentity.StorageGeneration > builtIdentity.StorageGeneration);
+            Assert.Equal(
+                builtIdentity.ContentRevision.Value + 1,
+                updatedIdentity.ContentRevision.Value);
+            Assert.True(
+                updatedIdentity.StorageGeneration.Value >
+                builtIdentity.StorageGeneration.Value);
         }
 
         using var reopened = new SiftIndex(fixture.CorpusPath);
@@ -46,8 +52,8 @@ public sealed class StorageLifecycleTests
         var rebuilt = index.GetIndexIdentity();
 
         Assert.NotEqual(first.CorpusId, rebuilt.CorpusId);
-        Assert.Equal(1UL, rebuilt.ContentRevision);
-        Assert.True(rebuilt.StorageGeneration > first.StorageGeneration);
+        Assert.Equal(new ContentRevision(1), rebuilt.ContentRevision);
+        Assert.True(rebuilt.StorageGeneration.Value > first.StorageGeneration.Value);
     }
 
     [Fact]
@@ -83,19 +89,25 @@ public sealed class StorageLifecycleTests
                 });
             var metadataOnlyState = index.GetIndexState();
             Assert.Equal(builtState.Identity.ContentRevision, metadataOnlyState.Identity.ContentRevision);
-            Assert.True(metadataOnlyState.Identity.StorageGeneration > builtState.Identity.StorageGeneration);
+            Assert.True(
+                metadataOnlyState.Identity.StorageGeneration.Value >
+                builtState.Identity.StorageGeneration.Value);
             Assert.Equal("advanced"u8.ToArray(), metadataOnlyState.CommitMetadata.ToArray());
 
             await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
             var updatedState = index.GetIndexState();
-            Assert.Equal(metadataOnlyState.Identity.ContentRevision + 1, updatedState.Identity.ContentRevision);
+            Assert.Equal(
+                metadataOnlyState.Identity.ContentRevision.Value + 1,
+                updatedState.Identity.ContentRevision.Value);
             Assert.Equal("advanced"u8.ToArray(), updatedState.CommitMetadata.ToArray());
 
             var compact = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
             Assert.True(compact.InputSegments > 0);
             compactedState = index.GetIndexState();
             Assert.Equal(updatedState.Identity.ContentRevision, compactedState.Identity.ContentRevision);
-            Assert.True(compactedState.Identity.StorageGeneration > updatedState.Identity.StorageGeneration);
+            Assert.True(
+                compactedState.Identity.StorageGeneration.Value >
+                updatedState.Identity.StorageGeneration.Value);
             Assert.Equal("advanced"u8.ToArray(), compactedState.CommitMetadata.ToArray());
         }
 

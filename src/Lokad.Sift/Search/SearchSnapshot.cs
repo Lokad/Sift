@@ -35,9 +35,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly Action<Exception>? _onIndexFailure;
     private int _disposed;
     internal IndexIdentity Identity => new(
-        _storageSnapshot.Manifest.CorpusId,
-        _storageSnapshot.Manifest.ContentRevision,
-        _storageSnapshot.Manifest.Generation);
+        new CorpusId(_storageSnapshot.Manifest.CorpusId),
+        new ContentRevision(_storageSnapshot.Manifest.ContentRevision),
+        new StorageGeneration(_storageSnapshot.Manifest.Generation));
 
     public SearchSnapshot(
         ISiftStorage storage,
@@ -443,7 +443,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId);
+            var cache = OpenSegment(hit.SegmentId.Value);
             return HitMaterializer.Materialize(
                 cache.Segment,
                 hit,
@@ -521,8 +521,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId);
-            var document = cache.Segment.GetDocument(hit.DocumentOrdinal);
+            var cache = OpenSegment(hit.SegmentId.Value);
+            var document = cache.Segment.GetDocument(hit.DocumentOrdinal.Value);
             return cache.Segment.GetPath(document);
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
@@ -907,7 +907,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 if (string.IsNullOrEmpty(query.Pattern))
                 {
                     var shouldContinue = collector.OnHit(
-                        new RawHit(cache.Segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
+                        new RawHit(
+                            new SegmentId(cache.Segment.SegmentId),
+                            new DocumentOrdinal(document.Ordinal),
+                            0,
+                            0,
+                            1,
+                            1));
                     metrics.CandidateDocumentsAfterPrecheck++;
                     metrics.VerifiedDocuments++;
                     hitsReturned++;
@@ -1087,7 +1093,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var pattern = literalOverride ?? query.Pattern;
         if (string.IsNullOrEmpty(pattern))
         {
-            var shouldContinue = collector.OnHit(new RawHit(segment.SegmentId, document.Ordinal, 0, 0, 1, 1));
+            var shouldContinue = collector.OnHit(new RawHit(
+                new SegmentId(segment.SegmentId),
+                new DocumentOrdinal(document.Ordinal),
+                0,
+                0,
+                1,
+                1));
             hitsReturned++;
             if (!shouldContinue)
             {
@@ -1160,7 +1172,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
             var shouldContinue = collector.OnHit(
-                new RawHit(segment.SegmentId, document.Ordinal, startByte, endByte, startLine, endLine));
+                new RawHit(
+                    new SegmentId(segment.SegmentId),
+                    new DocumentOrdinal(document.Ordinal),
+                    startByte,
+                    endByte,
+                    startLine,
+                    endLine));
             hitsReturned++;
             if (!shouldContinue)
             {
@@ -1212,7 +1230,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, start);
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(start, end - 1));
             var shouldContinue = collector.OnHit(
-                new RawHit(segment.SegmentId, document.Ordinal, start, end, startLine, endLine));
+                new RawHit(
+                    new SegmentId(segment.SegmentId),
+                    new DocumentOrdinal(document.Ordinal),
+                    start,
+                    end,
+                    startLine,
+                    endLine));
             hitsReturned++;
             if (!shouldContinue)
             {
