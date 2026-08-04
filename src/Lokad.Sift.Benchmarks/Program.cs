@@ -60,10 +60,18 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
     {
         using var index = new Sift(corpusPath, new SiftOptions
         {
-            TargetSegmentDocumentCount = 1024
+            TargetSegmentDocumentCount = 1024,
+            OverlayCompactionSegmentThreshold = 4
         });
         index.Build(new BenchmarkSource(options.DocumentCount)).GetAwaiter().GetResult();
         using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
+        using var overlay = index.OpenOverlaySnapshot(new SearchOptions(BenchmarkSearchParallelism));
+        var overlayChurnIteration = 0;
+        var overlayBodies = new[]
+        {
+            Encoding.UTF8.GetBytes("alpha needle overlay generation zero\n"),
+            Encoding.UTF8.GetBytes("alpha needle overlay generation one\n")
+        };
 
         var trigramAsciiPayload = BuildInsensitiveTrigramPayload(includeNonAscii: false);
         var trigramMixedPayload = BuildInsensitiveTrigramPayload(includeNonAscii: true);
@@ -73,6 +81,33 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
             {
                 var collector = new NullCollector();
                 snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), collector);
+            }),
+            Run("snapshot-open-search-dispose", options, () =>
+            {
+                using var operationSnapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
+                operationSnapshot.Search(
+                    new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+                    new PathFilter(),
+                    new NullCollector());
+            }),
+            Run("overlay-apply-search-churn", options, () =>
+            {
+                var iteration = overlayChurnIteration++;
+                var pathSlot = iteration % 8;
+                var bodyGeneration = iteration / 8 % overlayBodies.Length;
+                overlay.Apply(
+                    new MemoryDocumentSource(
+                    [
+                        new SubmittedDocument(
+                            $"overlay/churn-{pathSlot:D2}.txt",
+                            overlayBodies[bodyGeneration],
+                            DateTimeOffset.UnixEpoch.AddSeconds(iteration))
+                    ]),
+                    []).GetAwaiter().GetResult();
+                overlay.Search(
+                    new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+                    new PathFilter(),
+                    new NullCollector());
             }),
             Run("ascii-insensitive-literal", options, () =>
             {
