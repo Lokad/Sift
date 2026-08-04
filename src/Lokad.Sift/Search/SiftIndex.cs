@@ -901,7 +901,7 @@ public sealed class SiftIndex : ISiftIndex
             manifest.Generation);
     }
 
-    public Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken)
+    public Task<CompactStats> Compact(CompactOptions options, CancellationToken callerCancellationToken)
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -914,11 +914,11 @@ public sealed class SiftIndex : ISiftIndex
                 {
                     if (!_options.MeasurePeakManagedMemory)
                     {
-                        return CompactCore(options, operationCancellation);
+                        return CompactIndex(operationCancellation);
                     }
 
                     using var measurement = ManagedMemoryPeakMeasurement.Start();
-                    var stats = CompactCore(options, operationCancellation);
+                    var stats = CompactIndex(operationCancellation);
                     var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
                     return stats.WithPeakManagedBytes(peakManagedBytes);
                 }
@@ -928,93 +928,93 @@ public sealed class SiftIndex : ISiftIndex
                     throw;
                 }
             },
-            cancellationToken);
-    }
+            callerCancellationToken);
 
-    private CompactStats CompactCore(CompactOptions options, CancellationToken cancellationToken)
-    {
-        var watch = Stopwatch.StartNew();
-        using var writeSession = _storage.AcquireWriteSession(cancellationToken);
-        ThrowIfRebuildRequired();
-        var manifest = _storage.HasManifest
-            ? _storage.ReadManifest()
-            : new CorpusManifest(Guid.NewGuid(), 0, []);
-        var selectedSegmentIds = SelectSegmentsForCompaction(
-            manifest,
-            options,
-            cancellationToken);
-        if (selectedSegmentIds.Count == 0)
+        CompactStats CompactIndex(CancellationToken cancellationToken)
         {
-            watch.Stop();
-            return new CompactStats(
-                inputSegments: 0,
-                outputSegments: 0,
-                mergedDocuments: 0,
-                contentBytes: 0,
-                elapsedMilliseconds: watch.ElapsedMilliseconds,
-                peakManagedBytes: 0,
-                hasMoreWork: false);
-        }
-
-        writeSession.EnsureReplacementAllowed();
-
-        var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        var attemptedSegmentIds = new List<ulong>();
-        var newSegments = new List<SegmentManifestEntry>();
-        CompactionPublication publication;
-        try
-        {
-            publication = PublishCompactedSegments(
-                writeSession,
+            var watch = Stopwatch.StartNew();
+            using var writeSession = _storage.AcquireWriteSession(cancellationToken);
+            ThrowIfRebuildRequired();
+            var manifest = _storage.HasManifest
+                ? _storage.ReadManifest()
+                : new CorpusManifest(Guid.NewGuid(), 0, []);
+            var selectedSegmentIds = SelectSegmentsForCompaction(
                 manifest,
-                selectedSegmentIds,
-                segmentSeed,
-                attemptedSegmentIds,
-                newSegments,
                 options,
                 cancellationToken);
-
-            var retainedSegments = manifest.Segments
-                .Where(entry => !selectedSegmentIds.Contains(entry.SegmentId))
-                .ToArray();
-            var mergedSegments = new SegmentManifestEntry[retainedSegments.Length + newSegments.Count];
-            Array.Copy(retainedSegments, mergedSegments, retainedSegments.Length);
-            for (var i = 0; i < newSegments.Count; i++)
+            if (selectedSegmentIds.Count == 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                mergedSegments[retainedSegments.Length + i] = newSegments[i];
+                watch.Stop();
+                return new CompactStats(
+                    inputSegments: 0,
+                    outputSegments: 0,
+                    mergedDocuments: 0,
+                    contentBytes: 0,
+                    elapsedMilliseconds: watch.ElapsedMilliseconds,
+                    peakManagedBytes: 0,
+                    hasMoreWork: false);
             }
 
-            var newManifest = new CorpusManifest(
-                manifest.CorpusId,
-                manifest.ContentRevision,
-                manifest.Generation + 1UL,
-                [.. manifest.CommitMetadata],
-                mergedSegments);
-            ResetValidationStats();
-            writeSession.PublishManifest(newManifest);
-            ResetValidationStats();
-            manifest = newManifest;
-        }
-        catch
-        {
-            writeSession.CleanupFailedMutation(attemptedSegmentIds);
-            throw;
-        }
+            writeSession.EnsureReplacementAllowed();
 
-        watch.Stop();
-        return new CompactStats(
-            inputSegments: selectedSegmentIds.Count,
-            outputSegments: newSegments.Count,
-            mergedDocuments: publication.MergedDocuments,
-            contentBytes: publication.ContentBytes,
-            elapsedMilliseconds: watch.ElapsedMilliseconds,
-            peakManagedBytes: 0,
-            hasMoreWork: writeSession.CanReplaceSegments() &&
-                HasActionableCompactionWorkUnderWriterLock(
+            var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+            var attemptedSegmentIds = new List<ulong>();
+            var newSegments = new List<SegmentManifestEntry>();
+            CompactionPublication publication;
+            try
+            {
+                publication = PublishCompactedSegments(
+                    writeSession,
                     manifest,
+                    selectedSegmentIds,
+                    segmentSeed,
+                    attemptedSegmentIds,
+                    newSegments,
                     options,
-                    CancellationToken.None));
+                    cancellationToken);
+
+                var retainedSegments = manifest.Segments
+                    .Where(entry => !selectedSegmentIds.Contains(entry.SegmentId))
+                    .ToArray();
+                var mergedSegments = new SegmentManifestEntry[retainedSegments.Length + newSegments.Count];
+                Array.Copy(retainedSegments, mergedSegments, retainedSegments.Length);
+                for (var i = 0; i < newSegments.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    mergedSegments[retainedSegments.Length + i] = newSegments[i];
+                }
+
+                var newManifest = new CorpusManifest(
+                    manifest.CorpusId,
+                    manifest.ContentRevision,
+                    manifest.Generation + 1UL,
+                    [.. manifest.CommitMetadata],
+                    mergedSegments);
+                ResetValidationStats();
+                writeSession.PublishManifest(newManifest);
+                ResetValidationStats();
+                manifest = newManifest;
+            }
+            catch
+            {
+                writeSession.CleanupFailedMutation(attemptedSegmentIds);
+                throw;
+            }
+
+            watch.Stop();
+            return new CompactStats(
+                inputSegments: selectedSegmentIds.Count,
+                outputSegments: newSegments.Count,
+                mergedDocuments: publication.MergedDocuments,
+                contentBytes: publication.ContentBytes,
+                elapsedMilliseconds: watch.ElapsedMilliseconds,
+                peakManagedBytes: 0,
+                hasMoreWork: writeSession.CanReplaceSegments() &&
+                    HasActionableCompactionWorkUnderWriterLock(
+                        manifest,
+                        options,
+                        CancellationToken.None));
+        }
     }
 
     private bool HasActionableCompactionWorkUnderWriterLock(
