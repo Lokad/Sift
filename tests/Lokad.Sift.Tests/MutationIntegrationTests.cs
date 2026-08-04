@@ -109,6 +109,57 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task ExpectedIdentityRejectsAStaleUpdateBeforeConsumingItsSource()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        var staleIdentity = index.GetIndexIdentity();
+        var committed = await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        Assert.Equal(index.GetIndexIdentity(), committed.CommittedIdentity);
+        Assert.NotEqual(staleIdentity, committed.CommittedIdentity);
+        var source = new SubmittedDocumentSource([
+            new SubmittedDocument("src/c.txt", "gamma"u8.ToArray())
+        ]);
+
+        var exception = await Assert.ThrowsAsync<StaleIndexStateException>(() => index.Update(
+            source,
+            [],
+            new UpdateOptions
+            {
+                ExpectedIdentity = staleIdentity
+            }));
+
+        Assert.Equal(staleIdentity, exception.ExpectedIdentity);
+        Assert.Equal(index.GetIndexIdentity(), exception.ActualIdentity);
+        Assert.Equal(0, source.ConsumedDocuments);
+        using var snapshot = index.OpenSnapshot();
+        Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/c.txt"), out _));
+    }
+
+    [Fact]
+    public async Task ExpectedIdentityRemainsValidAcrossCompaction()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        var expectedIdentity = index.GetIndexIdentity();
+
+        var compaction = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+        var compactedIdentity = index.GetIndexIdentity();
+        Assert.True(compaction.InputSegments > 0);
+        Assert.Equal(expectedIdentity.CorpusId, compactedIdentity.CorpusId);
+        Assert.Equal(expectedIdentity.ContentRevision, compactedIdentity.ContentRevision);
+        Assert.NotEqual(expectedIdentity.StorageGeneration, compactedIdentity.StorageGeneration);
+
+        var update = await index.Update(
+            new InMemoryDocumentSource([]),
+            [],
+            new UpdateOptions { ExpectedIdentity = expectedIdentity });
+
+        Assert.Equal(compactedIdentity, update.CommittedIdentity);
+    }
+
+    [Fact]
     public async Task UpdateAppliesUpsertsAndDeletions()
     {
         using var fixture = new CorpusFixture(

@@ -305,10 +305,7 @@ public sealed class Sift : ISift
         {
             using var snapshot = _storage.OpenReadSnapshot();
             return new IndexState(
-                new IndexIdentity(
-                    snapshot.Manifest.CorpusId,
-                    snapshot.Manifest.ContentRevision,
-                    snapshot.Manifest.Generation),
+                CreateIndexIdentity(snapshot.Manifest),
                 snapshot.Manifest.CommitMetadata.ToArray());
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
@@ -776,14 +773,22 @@ public sealed class Sift : ISift
         using var _ = _storage.AcquireWriterLock(cancellationToken);
         ThrowIfRebuildRequired();
         var hadManifest = _storage.HasManifest;
-        var existingManifest = hadManifest
-            ? _storage.ReadManifest()
-            : new CorpusManifest(
-                Guid.NewGuid(),
-                ContentRevision: 0,
-                Generation: 0,
-                CommitMetadata: [],
-                Segments: []);
+        var currentManifest = hadManifest ? _storage.ReadManifest() : null;
+        var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
+        var committedIdentity = actualIdentity;
+        if (options.ExpectedIdentity is { } expectedIdentity &&
+            (expectedIdentity.CorpusId != actualIdentity.CorpusId ||
+             expectedIdentity.ContentRevision != actualIdentity.ContentRevision))
+        {
+            throw new StaleIndexStateException(expectedIdentity, actualIdentity);
+        }
+
+        var existingManifest = currentManifest ?? new CorpusManifest(
+            Guid.NewGuid(),
+            ContentRevision: 0,
+            Generation: 0,
+            CommitMetadata: [],
+            Segments: []);
 
         var deletionSet = new HashSet<string>(StringComparer.Ordinal);
         foreach (var deletion in deletions)
@@ -943,6 +948,7 @@ public sealed class Sift : ISift
                 ResetValidationStats();
                 _storage.PublishManifest(manifest);
                 ResetValidationStats();
+                committedIdentity = CreateIndexIdentity(manifest);
             }
         }
         catch
@@ -964,7 +970,10 @@ public sealed class Sift : ISift
             SkippedBytes: upsertLoad.SkippedBytes,
             RejectedBytes: upsertLoad.RejectedBytes,
             RejectedDocuments: upsertLoad.RejectedDocuments,
-            ElapsedMilliseconds: watch.ElapsedMilliseconds);
+            ElapsedMilliseconds: watch.ElapsedMilliseconds)
+        {
+            CommittedIdentity = committedIdentity
+        };
     }
 
     private static void ValidateUpdateOptions(UpdateOptions options)
@@ -975,6 +984,14 @@ public sealed class Sift : ISift
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
         }
 
+    }
+
+    private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)
+    {
+        return new IndexIdentity(
+            manifest.CorpusId,
+            manifest.ContentRevision,
+            manifest.Generation);
     }
 
     public Task<CompactStats> Compact(CompactOptions options)

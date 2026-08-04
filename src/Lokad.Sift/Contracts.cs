@@ -269,9 +269,25 @@ public sealed record UpdateOptions
     }
 
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
+    // When present, the update is rejected unless this logical corpus revision is still current.
+    // Physical generation changes caused by compaction do not invalidate the expectation.
+    public IndexIdentity? ExpectedIdentity { get; init; }
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest.
     public Func<UpdateStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
+}
+
+public sealed class StaleIndexStateException : Exception
+{
+    public StaleIndexStateException(IndexIdentity expectedIdentity, IndexIdentity actualIdentity)
+        : base("The Sift index changed after the caller read its state.")
+    {
+        ExpectedIdentity = expectedIdentity;
+        ActualIdentity = actualIdentity;
+    }
+
+    public IndexIdentity ExpectedIdentity { get; }
+    public IndexIdentity ActualIdentity { get; }
 }
 
 public sealed class RejectedUpsertException : Exception
@@ -404,7 +420,16 @@ public readonly record struct UpdateStats(
     long SkippedBytes,
     long RejectedBytes,
     IReadOnlyList<RejectedDocument> RejectedDocuments,
-    long ElapsedMilliseconds);
+    long ElapsedMilliseconds)
+{
+    /// <summary>Identity of the index state returned by the completed update.</summary>
+    /// <remarks>
+    ///     This is set on the final result returned by <c>Update</c>. The provisional
+    ///     statistics passed to <see cref="UpdateOptions.CommitMetadataProvider"/>
+    ///     have the default identity because the manifest has not yet been committed.
+    /// </remarks>
+    public IndexIdentity CommittedIdentity { get; init; }
+}
 
 public sealed record CompactOptions
 {
