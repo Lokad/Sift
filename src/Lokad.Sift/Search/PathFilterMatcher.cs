@@ -132,15 +132,7 @@ internal sealed class PathFilterMatcher
         return _pathRegex is null;
     }
 
-    public int[] GetPathTrigrams()
-    {
-        if (_pathTrigrams.Length == 0)
-        {
-            return [];
-        }
-
-        return _pathTrigrams;
-    }
+    public int[] GetPathTrigrams() => _pathTrigrams;
 
     private static int[] BuildPathTrigrams(string[] accelerationFragments)
     {
@@ -149,7 +141,7 @@ internal sealed class PathFilterMatcher
             return [];
         }
 
-        var grams = new List<int>(8);
+        var grams = new HashSet<int>();
         foreach (var fragment in accelerationFragments)
         {
             if (fragment.Length < 3)
@@ -161,20 +153,7 @@ internal sealed class PathFilterMatcher
             for (var i = 0; i <= bytes.Length - 3; i++)
             {
                 var gram = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-                var seen = false;
-                for (var j = 0; j < grams.Count; j++)
-                {
-                    if (grams[j] == gram)
-                    {
-                        seen = true;
-                        break;
-                    }
-                }
-
-                if (!seen)
-                {
-                    grams.Add(gram);
-                }
+                grams.Add(gram);
             }
         }
 

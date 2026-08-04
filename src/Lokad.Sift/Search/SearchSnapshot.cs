@@ -143,8 +143,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matcher = PathFilterMatcher.Prepare(pathFilter);
         var regexPlan = preparedQuery.RegexPlan;
         var anchors = preparedQuery.Anchors;
-        var mandatoryFragments = preparedQuery.MandatoryFragments;
-        var advisorySeeds = preparedQuery.AdvisorySeeds;
+        // Explanation results are caller-owned. Do not expose arrays retained by the
+        // process-wide prepared-query cache.
+        var mandatoryFragments = preparedQuery.MandatoryFragments.ToArray();
+        var advisorySeeds = preparedQuery.AdvisorySeeds.ToArray();
         var scopeDocuments = 0;
         long scopeBytes = 0;
         var selected = new List<SelectedNGram>(4);

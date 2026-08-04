@@ -18,6 +18,7 @@ internal static class SearchPlanner
         var scope = BuildScope(
             cache,
             matcher,
+            options.MaxSelectedNgrams,
             cancellationToken,
             out var prefixDocuments,
             out var pathIndexCandidates,
@@ -197,6 +198,7 @@ internal static class SearchPlanner
     private static SegmentScope BuildScope(
         SegmentCache cache,
         PathFilterMatcher matcher,
+        int maxSelectedNgrams,
         CancellationToken cancellationToken,
         out int prefixDocuments,
         out int pathIndexCandidates,
@@ -210,11 +212,19 @@ internal static class SearchPlanner
         OrdinalSet scopedOrdinals;
         if (matcher.UsesPathIndex)
         {
+            var indexPair = new IndexRegionPair(
+                SegmentRegionId.PathTriCsLex,
+                SegmentRegionId.PathTriCsPost);
+            var selectedPathTrigrams = SelectPathTrigrams(
+                cache.Segment,
+                indexPair,
+                matcher.GetPathTrigrams(),
+                maxSelectedNgrams);
             scopedOrdinals = CandidateGenerator.Generate(
                 cache.Segment,
                 OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, []),
-                new IndexRegionPair(SegmentRegionId.PathTriCsLex, SegmentRegionId.PathTriCsPost),
-                matcher.GetPathTrigrams()).Ordinals;
+                indexPair,
+                selectedPathTrigrams).Ordinals;
         }
         else
         {
@@ -298,6 +308,51 @@ internal static class SearchPlanner
             bytes,
             nonAsciiDocuments,
             nonAsciiBytes);
+
+        static int[] SelectPathTrigrams(
+            MappedSegment segment,
+            IndexRegionPair indexPair,
+            ReadOnlySpan<int> pathTrigrams,
+            int selectionLimit)
+        {
+            var selected = new List<(int Gram, int DocumentFrequency)>(
+                Math.Min(pathTrigrams.Length, selectionLimit));
+            for (var i = 0; i < pathTrigrams.Length; i++)
+            {
+                var gram = pathTrigrams[i];
+                if (!segment.TryGetPostings(indexPair, gram, out _, out var documentFrequency))
+                {
+                    // One absent mandatory gram proves that the path scope is empty.
+                    return [gram];
+                }
+
+                var insertionIndex = 0;
+                while (insertionIndex < selected.Count &&
+                    selected[insertionIndex].DocumentFrequency <= documentFrequency)
+                {
+                    insertionIndex++;
+                }
+
+                if (insertionIndex >= selectionLimit)
+                {
+                    continue;
+                }
+
+                selected.Insert(insertionIndex, (gram, documentFrequency));
+                if (selected.Count > selectionLimit)
+                {
+                    selected.RemoveAt(selectionLimit);
+                }
+            }
+
+            var result = new int[selected.Count];
+            for (var i = 0; i < selected.Count; i++)
+            {
+                result[i] = selected[i].Gram;
+            }
+
+            return result;
+        }
 
         static ScopeMetrics GetScopeMetrics(
             SegmentCache cache,

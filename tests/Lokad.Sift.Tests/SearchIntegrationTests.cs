@@ -442,6 +442,52 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task ExplainDoesNotExposePreparedQueryCacheArrays()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "needle and marker\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery("needle.*marker", PatternMode.Regex, CaseMode.Sensitive);
+
+        var first = snapshot.Explain(query, new PathFilter());
+        Assert.NotEmpty(first.MandatoryFragments);
+        var expected = first.MandatoryFragments[0];
+        first.MandatoryFragments[0] = "corrupted";
+
+        var second = snapshot.Explain(query, new PathFilter());
+        Assert.Equal(expected, second.MandatoryFragments[0]);
+        Assert.NotSame(first.MandatoryFragments, second.MandatoryFragments);
+    }
+
+    [Fact]
+    public async Task LongPathRegexRemainsSoundWithBoundedNgramSelection()
+    {
+        var distinguishingPath = string.Concat(Enumerable.Repeat("abcdefghij", 100));
+        using var fixture = new CorpusFixture(
+            ($"src/{distinguishingPath}/match.txt", "alpha"),
+            ("src/unrelated/miss.txt", "alpha"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            MaxSelectedNgrams = 1
+        });
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var filter = new PathFilter { PathRegex = Regex.Escape(distinguishingPath) };
+        var collector = new HitBuffer();
+
+        snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            filter,
+            collector);
+
+        Assert.Single(collector.Hits);
+        Assert.Equal(
+            $"src/{distinguishingPath}/match.txt",
+            snapshot.Materialize(collector.Hits[0], 0, 0).Path);
+    }
+
+    [Fact]
     public async Task BackslashIncludeGlobUsesCanonicalPathAcceleration()
     {
         using var fixture = new CorpusFixture(
