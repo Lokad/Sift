@@ -212,7 +212,7 @@ public enum SearchVerifierKind
 
 public sealed class PlannerAlternative
 {
-    internal PlannerAlternative(PlannerAlternativeData data)
+    internal PlannerAlternative(in PlannerAlternativeData data)
     {
         CandidateKind = data.CandidateKind;
         CandidateCombination = data.CandidateCombination;
@@ -240,7 +240,7 @@ public sealed class PlannerAlternative
     public long ScopeByteCount { get; }
 }
 
-internal sealed class PlannerAlternativeData
+internal readonly struct PlannerAlternativeData
 {
     public required SearchCandidateKind CandidateKind { get; init; }
     public required SearchCandidateCombination CandidateCombination { get; init; }
@@ -257,7 +257,7 @@ internal sealed class PlannerAlternativeData
 
 public sealed class SearchPlan
 {
-    internal SearchPlan(SearchPlanData data)
+    internal SearchPlan(in SearchPlanData data)
     {
         PatternKind = data.PatternKind;
         ResolvedCaseMode = data.ResolvedCaseMode;
@@ -323,7 +323,7 @@ public sealed class SearchPlan
     public IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; }
 }
 
-internal sealed class SearchPlanData
+internal readonly struct SearchPlanData
 {
     public required SearchPatternKind PatternKind { get; init; }
     public required CaseMode ResolvedCaseMode { get; init; }
@@ -359,7 +359,7 @@ internal sealed class SearchPlanData
 
 public sealed class SearchStats
 {
-    internal SearchStats(SearchStatsData data)
+    internal SearchStats(in SearchStatsData data)
     {
         ElapsedMilliseconds = data.ElapsedMilliseconds;
         ScopeDocuments = data.ScopeDocuments;
@@ -429,7 +429,7 @@ public sealed class SearchStats
     }
 }
 
-internal sealed class SearchStatsData
+internal readonly struct SearchStatsData
 {
     public required long ElapsedMilliseconds { get; init; }
     public required int ScopeDocuments { get; init; }
@@ -454,7 +454,7 @@ internal sealed class SearchStatsData
 
 public sealed class MaterializedHit
 {
-    internal MaterializedHit(MaterializedHitData data)
+    internal MaterializedHit(in MaterializedHitData data)
     {
         Path = data.Path;
         StartLine = data.StartLine;
@@ -480,7 +480,7 @@ public sealed class MaterializedHit
     public bool IsContextTruncated { get; }
 }
 
-internal sealed class MaterializedHitData
+internal readonly struct MaterializedHitData
 {
     public required string Path { get; init; }
     public required int StartLine { get; init; }

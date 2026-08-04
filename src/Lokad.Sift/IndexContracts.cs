@@ -99,7 +99,7 @@ public sealed class StaleIndexStateException : Exception
 
 public sealed class BuildStats
 {
-    internal BuildStats(BuildStatsData data)
+    internal BuildStats(in BuildStatsData data)
     {
         SubmittedDocuments = data.SubmittedDocuments;
         IndexedDocuments = data.IndexedDocuments;
@@ -152,7 +152,7 @@ public sealed class BuildStats
     });
 }
 
-internal sealed class BuildStatsData
+internal readonly struct BuildStatsData
 {
     public required int SubmittedDocuments { get; init; }
     public required int IndexedDocuments { get; init; }
@@ -169,7 +169,7 @@ internal sealed class BuildStatsData
 
 public sealed class UpdateStats
 {
-    internal UpdateStats(UpdateStatsData data)
+    internal UpdateStats(in UpdateStatsData data)
     {
         SubmittedUpserts = data.SubmittedUpserts;
         UpsertedDocuments = data.UpsertedDocuments;
@@ -211,7 +211,7 @@ public sealed class UpdateStats
     public IndexIdentity CommittedIdentity { get; }
 }
 
-internal sealed class UpdateStatsData
+internal readonly struct UpdateStatsData
 {
     public required int SubmittedUpserts { get; init; }
     public required int UpsertedDocuments { get; init; }
@@ -276,7 +276,7 @@ public sealed record CompactOptions
 
 public sealed class CompactStats
 {
-    internal CompactStats(CompactStatsData data)
+    internal CompactStats(in CompactStatsData data)
     {
         InputSegments = data.InputSegments;
         OutputSegments = data.OutputSegments;
@@ -309,7 +309,7 @@ public sealed class CompactStats
     });
 }
 
-internal sealed class CompactStatsData
+internal readonly struct CompactStatsData
 {
     public required int InputSegments { get; init; }
     public required int OutputSegments { get; init; }
@@ -384,7 +384,7 @@ public readonly record struct IndexValidationStats(
 
 public sealed class MaintenanceStats
 {
-    internal MaintenanceStats(MaintenanceStatsData data)
+    internal MaintenanceStats(in MaintenanceStatsData data)
     {
         Generation = data.Generation;
         SegmentCount = data.SegmentCount;
@@ -429,7 +429,7 @@ public sealed class MaintenanceStats
     public int SmallSegmentCount { get; }
 }
 
-internal sealed class MaintenanceStatsData
+internal readonly struct MaintenanceStatsData
 {
     public required ulong Generation { get; init; }
     public required int SegmentCount { get; init; }
@@ -448,7 +448,7 @@ internal sealed class MaintenanceStatsData
 
 public sealed class StorageStats
 {
-    internal StorageStats(StorageStatsData data)
+    internal StorageStats(in StorageStatsData data)
     {
         ManifestSegmentCount = data.ManifestSegmentCount;
         ManifestSegmentBytes = data.ManifestSegmentBytes;
@@ -517,7 +517,7 @@ public sealed class StorageStats
     public string? LastReclamationFailure { get; }
 }
 
-internal sealed class StorageStatsData
+internal readonly struct StorageStatsData
 {
     public required int ManifestSegmentCount { get; init; }
     public required long ManifestSegmentBytes { get; init; }
