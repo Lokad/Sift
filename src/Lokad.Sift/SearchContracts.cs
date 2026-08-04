@@ -252,68 +252,38 @@ public sealed class PlannerAlternative
 
 public sealed class SearchPlan
 {
-    internal SearchPlan(
-        SearchPatternKind patternKind,
-        CaseMode resolvedCaseMode,
-        int scopeDocumentCount,
-        long scopeByteCount,
-        int segmentCount,
-        IReadOnlyList<string> mandatoryFragments,
-        IReadOnlyList<string> advisorySeeds,
-        IReadOnlyList<SelectedNgram> selectedNgrams,
-        bool usesPathPrefixFilter,
-        bool usesPathRegexFilter,
-        bool usesIncludeGlobs,
-        bool usesExcludeGlobs,
-        bool usesPathIndex,
-        bool usesIndex,
-        bool canUseLiteralVerifier,
-        bool canUseNonBacktracking,
-        bool needsUnicodeDecode,
-        bool mayRequireWholeDocumentVerification,
-        double estimatedPathFilterCost,
-        double estimatedDirectScanCost,
-        double? estimatedIndexedCost,
-        double estimatedCandidateDocuments,
-        double estimatedCost,
-        SearchCandidateKind candidateKind,
-        SearchCandidateCombination candidateCombination,
-        SearchVerifierKind verifierKind,
-        PlannerAlternative? runnerUp,
-        double? runnerUpEstimatedCostDelta,
-        TimeoutPolicy timeoutPolicy,
-        IReadOnlyList<PlannerAlternative> plannerAlternatives)
+    internal SearchPlan(SearchPlanData data)
     {
-        PatternKind = patternKind;
-        ResolvedCaseMode = resolvedCaseMode;
-        ScopeDocumentCount = scopeDocumentCount;
-        ScopeByteCount = scopeByteCount;
-        SegmentCount = segmentCount;
-        MandatoryFragments = PublicResultCollection.Freeze(mandatoryFragments);
-        AdvisorySeeds = PublicResultCollection.Freeze(advisorySeeds);
-        SelectedNgrams = PublicResultCollection.Freeze(selectedNgrams);
-        UsesPathPrefixFilter = usesPathPrefixFilter;
-        UsesPathRegexFilter = usesPathRegexFilter;
-        UsesIncludeGlobs = usesIncludeGlobs;
-        UsesExcludeGlobs = usesExcludeGlobs;
-        UsesPathIndex = usesPathIndex;
-        UsesIndex = usesIndex;
-        CanUseLiteralVerifier = canUseLiteralVerifier;
-        CanUseNonBacktracking = canUseNonBacktracking;
-        NeedsUnicodeDecode = needsUnicodeDecode;
-        MayRequireWholeDocumentVerification = mayRequireWholeDocumentVerification;
-        EstimatedPathFilterCost = estimatedPathFilterCost;
-        EstimatedDirectScanCost = estimatedDirectScanCost;
-        EstimatedIndexedCost = estimatedIndexedCost;
-        EstimatedCandidateDocuments = estimatedCandidateDocuments;
-        EstimatedCost = estimatedCost;
-        CandidateKind = candidateKind;
-        CandidateCombination = candidateCombination;
-        VerifierKind = verifierKind;
-        RunnerUp = runnerUp;
-        RunnerUpEstimatedCostDelta = runnerUpEstimatedCostDelta;
-        TimeoutPolicy = timeoutPolicy;
-        PlannerAlternatives = PublicResultCollection.Freeze(plannerAlternatives);
+        PatternKind = data.PatternKind;
+        ResolvedCaseMode = data.ResolvedCaseMode;
+        ScopeDocumentCount = data.ScopeDocumentCount;
+        ScopeByteCount = data.ScopeByteCount;
+        SegmentCount = data.SegmentCount;
+        MandatoryFragments = PublicResultCollection.Freeze(data.MandatoryFragments);
+        AdvisorySeeds = PublicResultCollection.Freeze(data.AdvisorySeeds);
+        SelectedNgrams = PublicResultCollection.Freeze(data.SelectedNgrams);
+        UsesPathPrefixFilter = data.UsesPathPrefixFilter;
+        UsesPathRegexFilter = data.UsesPathRegexFilter;
+        UsesIncludeGlobs = data.UsesIncludeGlobs;
+        UsesExcludeGlobs = data.UsesExcludeGlobs;
+        UsesPathIndex = data.UsesPathIndex;
+        UsesIndex = data.UsesIndex;
+        CanUseLiteralVerifier = data.CanUseLiteralVerifier;
+        CanUseNonBacktracking = data.CanUseNonBacktracking;
+        NeedsUnicodeDecode = data.NeedsUnicodeDecode;
+        MayRequireWholeDocumentVerification = data.MayRequireWholeDocumentVerification;
+        EstimatedPathFilterCost = data.EstimatedPathFilterCost;
+        EstimatedDirectScanCost = data.EstimatedDirectScanCost;
+        EstimatedIndexedCost = data.EstimatedIndexedCost;
+        EstimatedCandidateDocuments = data.EstimatedCandidateDocuments;
+        EstimatedCost = data.EstimatedCost;
+        CandidateKind = data.CandidateKind;
+        CandidateCombination = data.CandidateCombination;
+        VerifierKind = data.VerifierKind;
+        RunnerUp = data.RunnerUp;
+        RunnerUpEstimatedCostDelta = data.RunnerUpEstimatedCostDelta;
+        TimeoutPolicy = data.TimeoutPolicy;
+        PlannerAlternatives = PublicResultCollection.Freeze(data.PlannerAlternatives);
     }
 
     public SearchPatternKind PatternKind { get; }
@@ -346,6 +316,40 @@ public sealed class SearchPlan
     public double? RunnerUpEstimatedCostDelta { get; }
     public TimeoutPolicy TimeoutPolicy { get; }
     public IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; }
+}
+
+internal sealed class SearchPlanData
+{
+    public required SearchPatternKind PatternKind { get; init; }
+    public required CaseMode ResolvedCaseMode { get; init; }
+    public required int ScopeDocumentCount { get; init; }
+    public required long ScopeByteCount { get; init; }
+    public required int SegmentCount { get; init; }
+    public required IReadOnlyList<string> MandatoryFragments { get; init; }
+    public required IReadOnlyList<string> AdvisorySeeds { get; init; }
+    public required IReadOnlyList<SelectedNgram> SelectedNgrams { get; init; }
+    public required bool UsesPathPrefixFilter { get; init; }
+    public required bool UsesPathRegexFilter { get; init; }
+    public required bool UsesIncludeGlobs { get; init; }
+    public required bool UsesExcludeGlobs { get; init; }
+    public required bool UsesPathIndex { get; init; }
+    public required bool UsesIndex { get; init; }
+    public required bool CanUseLiteralVerifier { get; init; }
+    public required bool CanUseNonBacktracking { get; init; }
+    public required bool NeedsUnicodeDecode { get; init; }
+    public required bool MayRequireWholeDocumentVerification { get; init; }
+    public required double EstimatedPathFilterCost { get; init; }
+    public required double EstimatedDirectScanCost { get; init; }
+    public required double? EstimatedIndexedCost { get; init; }
+    public required double EstimatedCandidateDocuments { get; init; }
+    public required double EstimatedCost { get; init; }
+    public required SearchCandidateKind CandidateKind { get; init; }
+    public required SearchCandidateCombination CandidateCombination { get; init; }
+    public required SearchVerifierKind VerifierKind { get; init; }
+    public required PlannerAlternative? RunnerUp { get; init; }
+    public required double? RunnerUpEstimatedCostDelta { get; init; }
+    public required TimeoutPolicy TimeoutPolicy { get; init; }
+    public required IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; init; }
 }
 
 public sealed class SearchStats

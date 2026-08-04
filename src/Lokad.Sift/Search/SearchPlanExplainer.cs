@@ -140,39 +140,43 @@ internal sealed class SearchPlanExplainer(
                  alternative.CandidateCombination != resolvedCandidateCombination ||
                  alternative.VerifierKind != resolvedVerifierKind));
 
-        return new SearchPlan(
-            patternKind,
-            resolvedCaseMode,
-            scopeDocuments,
-            scopeBytes,
-            segmentCount,
-            mandatoryFragments,
-            advisorySeeds,
-            selectedNgrams,
-            matcher.PathPrefix is not null,
-            !string.IsNullOrWhiteSpace(pathFilter.PathRegex),
-            pathFilter.IncludeGlobs.Count > 0,
-            pathFilter.ExcludeGlobs.Count > 0,
-            matcher.UsesPathIndex,
-            usesIndex,
-            canUseLiteralVerifier,
-            canUseNonBacktracking,
-            needsUnicodeDecode,
-            mayRequireWholeDocumentVerification,
-            estimatedPathFilterCost,
-            estimatedDirectScanCost,
-            estimatedIndexedCost,
-            estimatedCandidateDocuments,
-            estimatedCost,
-            resolvedCandidateKind,
-            resolvedCandidateCombination,
-            resolvedVerifierKind,
-            runnerUp,
-            runnerUp is null ? null : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
-            query.PatternMode == PatternMode.Regex
+        return new SearchPlan(new SearchPlanData
+        {
+            PatternKind = patternKind,
+            ResolvedCaseMode = resolvedCaseMode,
+            ScopeDocumentCount = scopeDocuments,
+            ScopeByteCount = scopeBytes,
+            SegmentCount = segmentCount,
+            MandatoryFragments = mandatoryFragments,
+            AdvisorySeeds = advisorySeeds,
+            SelectedNgrams = selectedNgrams,
+            UsesPathPrefixFilter = matcher.PathPrefix is not null,
+            UsesPathRegexFilter = !string.IsNullOrWhiteSpace(pathFilter.PathRegex),
+            UsesIncludeGlobs = pathFilter.IncludeGlobs.Count > 0,
+            UsesExcludeGlobs = pathFilter.ExcludeGlobs.Count > 0,
+            UsesPathIndex = matcher.UsesPathIndex,
+            UsesIndex = usesIndex,
+            CanUseLiteralVerifier = canUseLiteralVerifier,
+            CanUseNonBacktracking = canUseNonBacktracking,
+            NeedsUnicodeDecode = needsUnicodeDecode,
+            MayRequireWholeDocumentVerification = mayRequireWholeDocumentVerification,
+            EstimatedPathFilterCost = estimatedPathFilterCost,
+            EstimatedDirectScanCost = estimatedDirectScanCost,
+            EstimatedIndexedCost = estimatedIndexedCost,
+            EstimatedCandidateDocuments = estimatedCandidateDocuments,
+            EstimatedCost = estimatedCost,
+            CandidateKind = resolvedCandidateKind,
+            CandidateCombination = resolvedCandidateCombination,
+            VerifierKind = resolvedVerifierKind,
+            RunnerUp = runnerUp,
+            RunnerUpEstimatedCostDelta = runnerUp is null
+                ? null
+                : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
+            TimeoutPolicy = query.PatternMode == PatternMode.Regex
                 ? query.TimeoutPolicy
                 : TimeoutPolicy.StopSearch,
-            plannerAlternatives);
+            PlannerAlternatives = plannerAlternatives
+        });
 
         static T Merge<T>(T? aggregate, T value, T mixed)
             where T : struct, Enum
