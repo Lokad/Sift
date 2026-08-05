@@ -103,12 +103,12 @@ internal static class PostingsCodec
 
     public static uint[] IntersectSorted(ReadOnlySpan<uint> left, ReadOnlySpan<byte> payload, int docFreq)
     {
-        if (left.Length == 0 || payload.Length == 0 || docFreq == 0)
+        if (left.Length == 0)
         {
             return [];
         }
 
-        var result = GC.AllocateUninitializedArray<uint>(Math.Min(left.Length, docFreq));
+        var result = GC.AllocateUninitializedArray<uint>(Math.Min(left.Length, Math.Max(docFreq, 0)));
         var count = IntersectSorted(left, payload, docFreq, result);
         Array.Resize(ref result, count);
         return result;
@@ -120,8 +120,36 @@ internal static class PostingsCodec
         int docFreq,
         Span<uint> destination)
     {
-        if (left.Length == 0 || payload.Length == 0 || docFreq == 0)
+        static void ValidateDocumentFrequency(ReadOnlySpan<byte> data, int expectedCount)
         {
+            var count = 0;
+            var offset = 0;
+            while (offset < data.Length)
+            {
+                _ = VarInt.ReadUInt32(data, ref offset);
+                count++;
+            }
+
+            if (count != expectedCount)
+            {
+                throw new InvalidDataException("Sift postings do not match their document frequency.");
+            }
+        }
+
+        if (left.Length == 0)
+        {
+            return 0;
+        }
+
+        if (docFreq < 0)
+        {
+            throw new InvalidDataException("Sift postings contain a negative document frequency.");
+        }
+
+        var view = Parse(payload);
+        if (docFreq == 0)
+        {
+            ValidateDocumentFrequency(view.Data, docFreq);
             return 0;
         }
 
@@ -130,12 +158,13 @@ internal static class PostingsCodec
             throw new ArgumentException("The intersection destination is too short.", nameof(destination));
         }
 
-        var view = Parse(payload);
         var smaller = Math.Min(left.Length, docFreq);
         if (smaller >= SimdBlockIntersectionThreshold)
         {
             return IntersectSortedAdaptive(left, view, docFreq, destination, useSimd: true);
         }
+
+        ValidateDocumentFrequency(view.Data, docFreq);
 
         return view.IsCheckpointed
             ? IntersectSortedWithCheckpointed(left, view, destination)

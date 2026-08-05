@@ -54,6 +54,32 @@ public sealed class CandidateGenerationTests
     }
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(32)]
+    [InlineData(96)]
+    public void PostingsCodecSequentialIntersectionRejectsMismatchedDocumentFrequency(int documentFrequency)
+    {
+        var ordinals = CreateRange(0, 64, 1);
+        var payload = PostingsCodec.Encode(ordinals);
+
+        Assert.Throws<InvalidDataException>(() =>
+            PostingsCodec.IntersectSorted(ordinals, payload, documentFrequency));
+    }
+
+    [Theory]
+    [InlineData(4000)]
+    [InlineData(6000)]
+    public void PostingsCodecCheckpointedIntersectionRejectsMismatchedDocumentFrequency(int documentFrequency)
+    {
+        var ordinals = CreateRange(0, 5000, 1);
+        var payload = PostingsCodec.Encode(ordinals);
+        var probes = new uint[] { 0, 100, 1000, 4999 };
+
+        Assert.Throws<InvalidDataException>(() =>
+            PostingsCodec.IntersectSorted(probes, payload, documentFrequency));
+    }
+
+    [Theory]
     [InlineData(new byte[] { 0x80 })]
     [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x10 })]
     [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x80, 0x00 })]
