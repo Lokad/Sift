@@ -212,19 +212,30 @@ public enum SearchVerifierKind
 
 public sealed class PlannerAlternative
 {
-    internal PlannerAlternative(in PlannerAlternativeData data)
+    internal PlannerAlternative(
+        SearchCandidateKind candidateKind,
+        SearchCandidateCombination candidateCombination,
+        SearchVerifierKind verifierKind,
+        bool usesIndex,
+        double estimatedDirectScanCost,
+        double? estimatedIndexedCost,
+        double estimatedCandidateDocuments,
+        double estimatedCost,
+        int segmentCount,
+        int scopeDocumentCount,
+        long scopeByteCount)
     {
-        CandidateKind = data.CandidateKind;
-        CandidateCombination = data.CandidateCombination;
-        VerifierKind = data.VerifierKind;
-        UsesIndex = data.UsesIndex;
-        EstimatedDirectScanCost = data.EstimatedDirectScanCost;
-        EstimatedIndexedCost = data.EstimatedIndexedCost;
-        EstimatedCandidateDocuments = data.EstimatedCandidateDocuments;
-        EstimatedCost = data.EstimatedCost;
-        SegmentCount = data.SegmentCount;
-        ScopeDocumentCount = data.ScopeDocumentCount;
-        ScopeByteCount = data.ScopeByteCount;
+        CandidateKind = candidateKind;
+        CandidateCombination = candidateCombination;
+        VerifierKind = verifierKind;
+        UsesIndex = usesIndex;
+        EstimatedDirectScanCost = estimatedDirectScanCost;
+        EstimatedIndexedCost = estimatedIndexedCost;
+        EstimatedCandidateDocuments = estimatedCandidateDocuments;
+        EstimatedCost = estimatedCost;
+        SegmentCount = segmentCount;
+        ScopeDocumentCount = scopeDocumentCount;
+        ScopeByteCount = scopeByteCount;
     }
 
     public SearchCandidateKind CandidateKind { get; }
@@ -240,55 +251,70 @@ public sealed class PlannerAlternative
     public long ScopeByteCount { get; }
 }
 
-internal readonly struct PlannerAlternativeData
-{
-    public required SearchCandidateKind CandidateKind { get; init; }
-    public required SearchCandidateCombination CandidateCombination { get; init; }
-    public required SearchVerifierKind VerifierKind { get; init; }
-    public required bool UsesIndex { get; init; }
-    public required double EstimatedDirectScanCost { get; init; }
-    public required double? EstimatedIndexedCost { get; init; }
-    public required double EstimatedCandidateDocuments { get; init; }
-    public required double EstimatedCost { get; init; }
-    public required int SegmentCount { get; init; }
-    public required int ScopeDocumentCount { get; init; }
-    public required long ScopeByteCount { get; init; }
-}
-
 public sealed class SearchPlan
 {
-    internal SearchPlan(in SearchPlanData data)
+    internal SearchPlan(
+        SearchPatternKind patternKind,
+        CaseMode resolvedCaseMode,
+        int scopeDocumentCount,
+        long scopeByteCount,
+        int segmentCount,
+        string[] mandatoryFragments,
+        string[] advisorySeeds,
+        SelectedNgram[] selectedNgrams,
+        bool usesPathPrefixFilter,
+        bool usesPathRegexFilter,
+        bool usesIncludeGlobs,
+        bool usesExcludeGlobs,
+        bool usesPathIndex,
+        bool usesIndex,
+        bool canUseLiteralVerifier,
+        bool canUseNonBacktracking,
+        bool needsUnicodeDecode,
+        bool mayRequireWholeDocumentVerification,
+        double estimatedPathFilterCost,
+        double estimatedDirectScanCost,
+        double? estimatedIndexedCost,
+        double estimatedCandidateDocuments,
+        double estimatedCost,
+        SearchCandidateKind candidateKind,
+        SearchCandidateCombination candidateCombination,
+        SearchVerifierKind verifierKind,
+        PlannerAlternative? runnerUp,
+        double? runnerUpEstimatedCostDelta,
+        TimeoutPolicy timeoutPolicy,
+        PlannerAlternative[] plannerAlternatives)
     {
-        PatternKind = data.PatternKind;
-        ResolvedCaseMode = data.ResolvedCaseMode;
-        ScopeDocumentCount = data.ScopeDocumentCount;
-        ScopeByteCount = data.ScopeByteCount;
-        SegmentCount = data.SegmentCount;
-        MandatoryFragments = PublicResultCollection.CopyOf(data.MandatoryFragments);
-        AdvisorySeeds = PublicResultCollection.CopyOf(data.AdvisorySeeds);
-        SelectedNgrams = PublicResultCollection.CopyOf(data.SelectedNgrams);
-        UsesPathPrefixFilter = data.UsesPathPrefixFilter;
-        UsesPathRegexFilter = data.UsesPathRegexFilter;
-        UsesIncludeGlobs = data.UsesIncludeGlobs;
-        UsesExcludeGlobs = data.UsesExcludeGlobs;
-        UsesPathIndex = data.UsesPathIndex;
-        UsesIndex = data.UsesIndex;
-        CanUseLiteralVerifier = data.CanUseLiteralVerifier;
-        CanUseNonBacktracking = data.CanUseNonBacktracking;
-        NeedsUnicodeDecode = data.NeedsUnicodeDecode;
-        MayRequireWholeDocumentVerification = data.MayRequireWholeDocumentVerification;
-        EstimatedPathFilterCost = data.EstimatedPathFilterCost;
-        EstimatedDirectScanCost = data.EstimatedDirectScanCost;
-        EstimatedIndexedCost = data.EstimatedIndexedCost;
-        EstimatedCandidateDocuments = data.EstimatedCandidateDocuments;
-        EstimatedCost = data.EstimatedCost;
-        CandidateKind = data.CandidateKind;
-        CandidateCombination = data.CandidateCombination;
-        VerifierKind = data.VerifierKind;
-        RunnerUp = data.RunnerUp;
-        RunnerUpEstimatedCostDelta = data.RunnerUpEstimatedCostDelta;
-        TimeoutPolicy = data.TimeoutPolicy;
-        PlannerAlternatives = PublicResultCollection.CopyOf(data.PlannerAlternatives);
+        PatternKind = patternKind;
+        ResolvedCaseMode = resolvedCaseMode;
+        ScopeDocumentCount = scopeDocumentCount;
+        ScopeByteCount = scopeByteCount;
+        SegmentCount = segmentCount;
+        MandatoryFragments = PublicResultCollection.Own(mandatoryFragments);
+        AdvisorySeeds = PublicResultCollection.Own(advisorySeeds);
+        SelectedNgrams = PublicResultCollection.Own(selectedNgrams);
+        UsesPathPrefixFilter = usesPathPrefixFilter;
+        UsesPathRegexFilter = usesPathRegexFilter;
+        UsesIncludeGlobs = usesIncludeGlobs;
+        UsesExcludeGlobs = usesExcludeGlobs;
+        UsesPathIndex = usesPathIndex;
+        UsesIndex = usesIndex;
+        CanUseLiteralVerifier = canUseLiteralVerifier;
+        CanUseNonBacktracking = canUseNonBacktracking;
+        NeedsUnicodeDecode = needsUnicodeDecode;
+        MayRequireWholeDocumentVerification = mayRequireWholeDocumentVerification;
+        EstimatedPathFilterCost = estimatedPathFilterCost;
+        EstimatedDirectScanCost = estimatedDirectScanCost;
+        EstimatedIndexedCost = estimatedIndexedCost;
+        EstimatedCandidateDocuments = estimatedCandidateDocuments;
+        EstimatedCost = estimatedCost;
+        CandidateKind = candidateKind;
+        CandidateCombination = candidateCombination;
+        VerifierKind = verifierKind;
+        RunnerUp = runnerUp;
+        RunnerUpEstimatedCostDelta = runnerUpEstimatedCostDelta;
+        TimeoutPolicy = timeoutPolicy;
+        PlannerAlternatives = PublicResultCollection.Own(plannerAlternatives);
     }
 
     public SearchPatternKind PatternKind { get; }
@@ -323,63 +349,48 @@ public sealed class SearchPlan
     public IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; }
 }
 
-internal readonly struct SearchPlanData
-{
-    public required SearchPatternKind PatternKind { get; init; }
-    public required CaseMode ResolvedCaseMode { get; init; }
-    public required int ScopeDocumentCount { get; init; }
-    public required long ScopeByteCount { get; init; }
-    public required int SegmentCount { get; init; }
-    public required IReadOnlyList<string> MandatoryFragments { get; init; }
-    public required IReadOnlyList<string> AdvisorySeeds { get; init; }
-    public required IReadOnlyList<SelectedNgram> SelectedNgrams { get; init; }
-    public required bool UsesPathPrefixFilter { get; init; }
-    public required bool UsesPathRegexFilter { get; init; }
-    public required bool UsesIncludeGlobs { get; init; }
-    public required bool UsesExcludeGlobs { get; init; }
-    public required bool UsesPathIndex { get; init; }
-    public required bool UsesIndex { get; init; }
-    public required bool CanUseLiteralVerifier { get; init; }
-    public required bool CanUseNonBacktracking { get; init; }
-    public required bool NeedsUnicodeDecode { get; init; }
-    public required bool MayRequireWholeDocumentVerification { get; init; }
-    public required double EstimatedPathFilterCost { get; init; }
-    public required double EstimatedDirectScanCost { get; init; }
-    public required double? EstimatedIndexedCost { get; init; }
-    public required double EstimatedCandidateDocuments { get; init; }
-    public required double EstimatedCost { get; init; }
-    public required SearchCandidateKind CandidateKind { get; init; }
-    public required SearchCandidateCombination CandidateCombination { get; init; }
-    public required SearchVerifierKind VerifierKind { get; init; }
-    public required PlannerAlternative? RunnerUp { get; init; }
-    public required double? RunnerUpEstimatedCostDelta { get; init; }
-    public required TimeoutPolicy TimeoutPolicy { get; init; }
-    public required IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; init; }
-}
-
 public sealed class SearchStats
 {
-    internal SearchStats(in SearchStatsData data)
+    internal SearchStats(
+        long elapsedMilliseconds,
+        int scopeDocuments,
+        long scopeBytes,
+        long postingsBytesRead,
+        int candidateDocumentsAfterIndex,
+        int candidateDocumentsAfterPrecheck,
+        int verifiedDocuments,
+        long bytesScanned,
+        long decodedChars,
+        int regexInvocations,
+        int utf8RegexInvocations,
+        int fallbackRegexInvocations,
+        int nonBacktrackingRegexInvocations,
+        int utf8RegexMatchedDocuments,
+        long utf8RegexMatchesEnumerated,
+        long utf8RegexCacheHits,
+        long utf8RegexCacheMisses,
+        int hitsReturned,
+        SearchStopReason stopReason)
     {
-        ElapsedMilliseconds = data.ElapsedMilliseconds;
-        ScopeDocuments = data.ScopeDocuments;
-        ScopeBytes = data.ScopeBytes;
-        PostingsBytesRead = data.PostingsBytesRead;
-        CandidateDocumentsAfterIndex = data.CandidateDocumentsAfterIndex;
-        CandidateDocumentsAfterPrecheck = data.CandidateDocumentsAfterPrecheck;
-        VerifiedDocuments = data.VerifiedDocuments;
-        BytesScanned = data.BytesScanned;
-        DecodedChars = data.DecodedChars;
-        RegexInvocations = data.RegexInvocations;
-        Utf8RegexInvocations = data.Utf8RegexInvocations;
-        FallbackRegexInvocations = data.FallbackRegexInvocations;
-        NonBacktrackingRegexInvocations = data.NonBacktrackingRegexInvocations;
-        Utf8RegexMatchedDocuments = data.Utf8RegexMatchedDocuments;
-        Utf8RegexMatchesEnumerated = data.Utf8RegexMatchesEnumerated;
-        Utf8RegexCacheHits = data.Utf8RegexCacheHits;
-        Utf8RegexCacheMisses = data.Utf8RegexCacheMisses;
-        HitsReturned = data.HitsReturned;
-        StopReason = data.StopReason;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        ScopeDocuments = scopeDocuments;
+        ScopeBytes = scopeBytes;
+        PostingsBytesRead = postingsBytesRead;
+        CandidateDocumentsAfterIndex = candidateDocumentsAfterIndex;
+        CandidateDocumentsAfterPrecheck = candidateDocumentsAfterPrecheck;
+        VerifiedDocuments = verifiedDocuments;
+        BytesScanned = bytesScanned;
+        DecodedChars = decodedChars;
+        RegexInvocations = regexInvocations;
+        Utf8RegexInvocations = utf8RegexInvocations;
+        FallbackRegexInvocations = fallbackRegexInvocations;
+        NonBacktrackingRegexInvocations = nonBacktrackingRegexInvocations;
+        Utf8RegexMatchedDocuments = utf8RegexMatchedDocuments;
+        Utf8RegexMatchesEnumerated = utf8RegexMatchesEnumerated;
+        Utf8RegexCacheHits = utf8RegexCacheHits;
+        Utf8RegexCacheMisses = utf8RegexCacheMisses;
+        HitsReturned = hitsReturned;
+        StopReason = stopReason;
     }
 
     public long ElapsedMilliseconds { get; }
@@ -404,68 +415,53 @@ public sealed class SearchStats
 
     internal SearchStats WithStopReason(SearchStopReason stopReason)
     {
-        return new SearchStats(new SearchStatsData
-        {
-            ElapsedMilliseconds = ElapsedMilliseconds,
-            ScopeDocuments = ScopeDocuments,
-            ScopeBytes = ScopeBytes,
-            PostingsBytesRead = PostingsBytesRead,
-            CandidateDocumentsAfterIndex = CandidateDocumentsAfterIndex,
-            CandidateDocumentsAfterPrecheck = CandidateDocumentsAfterPrecheck,
-            VerifiedDocuments = VerifiedDocuments,
-            BytesScanned = BytesScanned,
-            DecodedChars = DecodedChars,
-            RegexInvocations = RegexInvocations,
-            Utf8RegexInvocations = Utf8RegexInvocations,
-            FallbackRegexInvocations = FallbackRegexInvocations,
-            NonBacktrackingRegexInvocations = NonBacktrackingRegexInvocations,
-            Utf8RegexMatchedDocuments = Utf8RegexMatchedDocuments,
-            Utf8RegexMatchesEnumerated = Utf8RegexMatchesEnumerated,
-            Utf8RegexCacheHits = Utf8RegexCacheHits,
-            Utf8RegexCacheMisses = Utf8RegexCacheMisses,
-            HitsReturned = HitsReturned,
-            StopReason = stopReason
-        });
+        return new SearchStats(
+            ElapsedMilliseconds,
+            ScopeDocuments,
+            ScopeBytes,
+            PostingsBytesRead,
+            CandidateDocumentsAfterIndex,
+            CandidateDocumentsAfterPrecheck,
+            VerifiedDocuments,
+            BytesScanned,
+            DecodedChars,
+            RegexInvocations,
+            Utf8RegexInvocations,
+            FallbackRegexInvocations,
+            NonBacktrackingRegexInvocations,
+            Utf8RegexMatchedDocuments,
+            Utf8RegexMatchesEnumerated,
+            Utf8RegexCacheHits,
+            Utf8RegexCacheMisses,
+            HitsReturned,
+            stopReason);
     }
-}
-
-internal readonly struct SearchStatsData
-{
-    public required long ElapsedMilliseconds { get; init; }
-    public required int ScopeDocuments { get; init; }
-    public required long ScopeBytes { get; init; }
-    public required long PostingsBytesRead { get; init; }
-    public required int CandidateDocumentsAfterIndex { get; init; }
-    public required int CandidateDocumentsAfterPrecheck { get; init; }
-    public required int VerifiedDocuments { get; init; }
-    public required long BytesScanned { get; init; }
-    public required long DecodedChars { get; init; }
-    public required int RegexInvocations { get; init; }
-    public required int Utf8RegexInvocations { get; init; }
-    public required int FallbackRegexInvocations { get; init; }
-    public required int NonBacktrackingRegexInvocations { get; init; }
-    public required int Utf8RegexMatchedDocuments { get; init; }
-    public required long Utf8RegexMatchesEnumerated { get; init; }
-    public required long Utf8RegexCacheHits { get; init; }
-    public required long Utf8RegexCacheMisses { get; init; }
-    public required int HitsReturned { get; init; }
-    public required SearchStopReason StopReason { get; init; }
 }
 
 public sealed class MaterializedHit
 {
-    internal MaterializedHit(in MaterializedHitData data)
+    internal MaterializedHit(
+        string path,
+        int startLine,
+        int startColumn,
+        int endLine,
+        int endColumn,
+        string matchText,
+        string[] beforeContext,
+        string[] afterContext,
+        bool isMatchTruncated,
+        bool isContextTruncated)
     {
-        Path = data.Path;
-        StartLine = data.StartLine;
-        StartColumn = data.StartColumn;
-        EndLine = data.EndLine;
-        EndColumn = data.EndColumn;
-        MatchText = data.MatchText;
-        BeforeContext = PublicResultCollection.CopyOf(data.BeforeContext);
-        AfterContext = PublicResultCollection.CopyOf(data.AfterContext);
-        IsMatchTruncated = data.IsMatchTruncated;
-        IsContextTruncated = data.IsContextTruncated;
+        Path = path;
+        StartLine = startLine;
+        StartColumn = startColumn;
+        EndLine = endLine;
+        EndColumn = endColumn;
+        MatchText = matchText;
+        BeforeContext = PublicResultCollection.Own(beforeContext);
+        AfterContext = PublicResultCollection.Own(afterContext);
+        IsMatchTruncated = isMatchTruncated;
+        IsContextTruncated = isContextTruncated;
     }
 
     public string Path { get; }
@@ -478,20 +474,6 @@ public sealed class MaterializedHit
     public IReadOnlyList<string> AfterContext { get; }
     public bool IsMatchTruncated { get; }
     public bool IsContextTruncated { get; }
-}
-
-internal readonly struct MaterializedHitData
-{
-    public required string Path { get; init; }
-    public required int StartLine { get; init; }
-    public required int StartColumn { get; init; }
-    public required int EndLine { get; init; }
-    public required int EndColumn { get; init; }
-    public required string MatchText { get; init; }
-    public required IReadOnlyList<string> BeforeContext { get; init; }
-    public required IReadOnlyList<string> AfterContext { get; init; }
-    public required bool IsMatchTruncated { get; init; }
-    public required bool IsContextTruncated { get; init; }
 }
 
 public interface IHitCollector

@@ -1746,28 +1746,26 @@ internal struct SearchMetrics
         int hitsReturned,
         SearchStopReason stopReason)
     {
-        return new SearchStats(new SearchStatsData
-        {
-            ElapsedMilliseconds = elapsedMilliseconds,
-            ScopeDocuments = ScopeDocuments,
-            ScopeBytes = ScopeBytes,
-            PostingsBytesRead = PostingsBytesRead,
-            CandidateDocumentsAfterIndex = CandidateDocumentsAfterIndex,
-            CandidateDocumentsAfterPrecheck = CandidateDocumentsAfterPrecheck,
-            VerifiedDocuments = VerifiedDocuments,
-            BytesScanned = BytesScanned,
-            DecodedChars = DecodedChars,
-            RegexInvocations = RegexInvocations,
-            Utf8RegexInvocations = Utf8RegexInvocations,
-            FallbackRegexInvocations = FallbackRegexInvocations,
-            NonBacktrackingRegexInvocations = NonBacktrackingRegexInvocations,
-            Utf8RegexMatchedDocuments = Utf8RegexMatchedDocuments,
-            Utf8RegexMatchesEnumerated = Utf8RegexMatchesEnumerated,
-            Utf8RegexCacheHits = Utf8RegexCacheHits,
-            Utf8RegexCacheMisses = Utf8RegexCacheMisses,
-            HitsReturned = hitsReturned,
-            StopReason = stopReason
-        });
+        return new SearchStats(
+            elapsedMilliseconds: elapsedMilliseconds,
+            scopeDocuments: ScopeDocuments,
+            scopeBytes: ScopeBytes,
+            postingsBytesRead: PostingsBytesRead,
+            candidateDocumentsAfterIndex: CandidateDocumentsAfterIndex,
+            candidateDocumentsAfterPrecheck: CandidateDocumentsAfterPrecheck,
+            verifiedDocuments: VerifiedDocuments,
+            bytesScanned: BytesScanned,
+            decodedChars: DecodedChars,
+            regexInvocations: RegexInvocations,
+            utf8RegexInvocations: Utf8RegexInvocations,
+            fallbackRegexInvocations: FallbackRegexInvocations,
+            nonBacktrackingRegexInvocations: NonBacktrackingRegexInvocations,
+            utf8RegexMatchedDocuments: Utf8RegexMatchedDocuments,
+            utf8RegexMatchesEnumerated: Utf8RegexMatchesEnumerated,
+            utf8RegexCacheHits: Utf8RegexCacheHits,
+            utf8RegexCacheMisses: Utf8RegexCacheMisses,
+            hitsReturned: hitsReturned,
+            stopReason: stopReason);
     }
 }
 

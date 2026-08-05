@@ -35,51 +35,49 @@ internal static class SearchPlanCombiner
              alternative.CandidateCombination != candidateCombination ||
              alternative.VerifierKind != verifierKind));
 
-        return new SearchPlan(new SearchPlanData
-        {
-            PatternKind = basePlan.PatternKind,
-            ResolvedCaseMode = basePlan.ResolvedCaseMode,
-            ScopeDocumentCount = basePlan.ScopeDocumentCount + overlayPlan.ScopeDocumentCount,
-            ScopeByteCount = basePlan.ScopeByteCount + overlayPlan.ScopeByteCount,
-            SegmentCount = segmentCount,
-            MandatoryFragments = MergeStrings(basePlan.MandatoryFragments, overlayPlan.MandatoryFragments),
-            AdvisorySeeds = MergeStrings(basePlan.AdvisorySeeds, overlayPlan.AdvisorySeeds),
-            SelectedNgrams = MergeSelectedNgrams(basePlan.SelectedNgrams, overlayPlan.SelectedNgrams),
-            UsesPathPrefixFilter = basePlan.UsesPathPrefixFilter,
-            UsesPathRegexFilter = basePlan.UsesPathRegexFilter,
-            UsesIncludeGlobs = basePlan.UsesIncludeGlobs,
-            UsesExcludeGlobs = basePlan.UsesExcludeGlobs,
-            UsesPathIndex = basePlan.UsesPathIndex || overlayPlan.UsesPathIndex,
-            UsesIndex = basePlan.UsesIndex || overlayPlan.UsesIndex,
-            CanUseLiteralVerifier = basePlan.CanUseLiteralVerifier && overlayPlan.CanUseLiteralVerifier,
-            CanUseNonBacktracking = basePlan.CanUseNonBacktracking && overlayPlan.CanUseNonBacktracking,
-            NeedsUnicodeDecode = basePlan.NeedsUnicodeDecode || overlayPlan.NeedsUnicodeDecode,
-            MayRequireWholeDocumentVerification =
+        return new SearchPlan(
+            patternKind: basePlan.PatternKind,
+            resolvedCaseMode: basePlan.ResolvedCaseMode,
+            scopeDocumentCount: basePlan.ScopeDocumentCount + overlayPlan.ScopeDocumentCount,
+            scopeByteCount: basePlan.ScopeByteCount + overlayPlan.ScopeByteCount,
+            segmentCount: segmentCount,
+            mandatoryFragments: MergeStrings(basePlan.MandatoryFragments, overlayPlan.MandatoryFragments),
+            advisorySeeds: MergeStrings(basePlan.AdvisorySeeds, overlayPlan.AdvisorySeeds),
+            selectedNgrams: MergeSelectedNgrams(basePlan.SelectedNgrams, overlayPlan.SelectedNgrams),
+            usesPathPrefixFilter: basePlan.UsesPathPrefixFilter,
+            usesPathRegexFilter: basePlan.UsesPathRegexFilter,
+            usesIncludeGlobs: basePlan.UsesIncludeGlobs,
+            usesExcludeGlobs: basePlan.UsesExcludeGlobs,
+            usesPathIndex: basePlan.UsesPathIndex || overlayPlan.UsesPathIndex,
+            usesIndex: basePlan.UsesIndex || overlayPlan.UsesIndex,
+            canUseLiteralVerifier: basePlan.CanUseLiteralVerifier && overlayPlan.CanUseLiteralVerifier,
+            canUseNonBacktracking: basePlan.CanUseNonBacktracking && overlayPlan.CanUseNonBacktracking,
+            needsUnicodeDecode: basePlan.NeedsUnicodeDecode || overlayPlan.NeedsUnicodeDecode,
+            mayRequireWholeDocumentVerification:
                 basePlan.MayRequireWholeDocumentVerification ||
                 overlayPlan.MayRequireWholeDocumentVerification,
-            EstimatedPathFilterCost =
+            estimatedPathFilterCost:
                 basePlan.EstimatedPathFilterCost +
                 overlayPlan.EstimatedPathFilterCost,
-            EstimatedDirectScanCost =
+            estimatedDirectScanCost:
                 basePlan.EstimatedDirectScanCost +
                 overlayPlan.EstimatedDirectScanCost,
-            EstimatedIndexedCost = SumNullable(
+            estimatedIndexedCost: SumNullable(
                 basePlan.EstimatedIndexedCost,
                 overlayPlan.EstimatedIndexedCost),
-            EstimatedCandidateDocuments =
+            estimatedCandidateDocuments:
                 basePlan.EstimatedCandidateDocuments +
                 overlayPlan.EstimatedCandidateDocuments,
-            EstimatedCost = estimatedCost,
-            CandidateKind = candidateKind,
-            CandidateCombination = candidateCombination,
-            VerifierKind = verifierKind,
-            RunnerUp = runnerUp,
-            RunnerUpEstimatedCostDelta = runnerUp is null
+            estimatedCost: estimatedCost,
+            candidateKind: candidateKind,
+            candidateCombination: candidateCombination,
+            verifierKind: verifierKind,
+            runnerUp: runnerUp,
+            runnerUpEstimatedCostDelta: runnerUp is null
                 ? null
                 : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
-            TimeoutPolicy = basePlan.TimeoutPolicy,
-            PlannerAlternatives = plannerAlternatives
-        });
+            timeoutPolicy: basePlan.TimeoutPolicy,
+            plannerAlternatives: plannerAlternatives);
     }
 
     private static T MergeStrategy<T>(

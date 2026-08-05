@@ -85,19 +85,17 @@ internal static class HitMaterializer
             ref contextByteBudget,
             out var afterContextTruncated);
 
-        return new MaterializedHit(new MaterializedHitData
-        {
-            Path = path,
-            StartLine = startLine,
-            StartColumn = startColumn,
-            EndLine = endLine,
-            EndColumn = endColumn,
-            MatchText = matchText,
-            BeforeContext = beforeContext,
-            AfterContext = afterContext,
-            IsMatchTruncated = isMatchTruncated,
-            IsContextTruncated = beforeContextTruncated || afterContextTruncated
-        });
+        return new MaterializedHit(
+            path: path,
+            startLine: startLine,
+            startColumn: startColumn,
+            endLine: endLine,
+            endColumn: endColumn,
+            matchText: matchText,
+            beforeContext: beforeContext,
+            afterContext: afterContext,
+            isMatchTruncated: isMatchTruncated,
+            isContextTruncated: beforeContextTruncated || afterContextTruncated);
     }
 
     private static int GetUtf16Column(

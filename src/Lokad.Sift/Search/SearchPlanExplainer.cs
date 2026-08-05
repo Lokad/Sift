@@ -140,43 +140,41 @@ internal sealed class SearchPlanExplainer(
                  alternative.CandidateCombination != resolvedCandidateCombination ||
                  alternative.VerifierKind != resolvedVerifierKind));
 
-        return new SearchPlan(new SearchPlanData
-        {
-            PatternKind = patternKind,
-            ResolvedCaseMode = resolvedCaseMode,
-            ScopeDocumentCount = scopeDocuments,
-            ScopeByteCount = scopeBytes,
-            SegmentCount = segmentCount,
-            MandatoryFragments = mandatoryFragments,
-            AdvisorySeeds = advisorySeeds,
-            SelectedNgrams = selectedNgrams,
-            UsesPathPrefixFilter = matcher.PathPrefix is not null,
-            UsesPathRegexFilter = !string.IsNullOrWhiteSpace(pathFilter.PathRegex),
-            UsesIncludeGlobs = pathFilter.IncludeGlobs.Count > 0,
-            UsesExcludeGlobs = pathFilter.ExcludeGlobs.Count > 0,
-            UsesPathIndex = matcher.UsesPathIndex,
-            UsesIndex = usesIndex,
-            CanUseLiteralVerifier = canUseLiteralVerifier,
-            CanUseNonBacktracking = canUseNonBacktracking,
-            NeedsUnicodeDecode = needsUnicodeDecode,
-            MayRequireWholeDocumentVerification = mayRequireWholeDocumentVerification,
-            EstimatedPathFilterCost = estimatedPathFilterCost,
-            EstimatedDirectScanCost = estimatedDirectScanCost,
-            EstimatedIndexedCost = estimatedIndexedCost,
-            EstimatedCandidateDocuments = estimatedCandidateDocuments,
-            EstimatedCost = estimatedCost,
-            CandidateKind = resolvedCandidateKind,
-            CandidateCombination = resolvedCandidateCombination,
-            VerifierKind = resolvedVerifierKind,
-            RunnerUp = runnerUp,
-            RunnerUpEstimatedCostDelta = runnerUp is null
+        return new SearchPlan(
+            patternKind: patternKind,
+            resolvedCaseMode: resolvedCaseMode,
+            scopeDocumentCount: scopeDocuments,
+            scopeByteCount: scopeBytes,
+            segmentCount: segmentCount,
+            mandatoryFragments: mandatoryFragments,
+            advisorySeeds: advisorySeeds,
+            selectedNgrams: selectedNgrams,
+            usesPathPrefixFilter: matcher.PathPrefix is not null,
+            usesPathRegexFilter: !string.IsNullOrWhiteSpace(pathFilter.PathRegex),
+            usesIncludeGlobs: pathFilter.IncludeGlobs.Count > 0,
+            usesExcludeGlobs: pathFilter.ExcludeGlobs.Count > 0,
+            usesPathIndex: matcher.UsesPathIndex,
+            usesIndex: usesIndex,
+            canUseLiteralVerifier: canUseLiteralVerifier,
+            canUseNonBacktracking: canUseNonBacktracking,
+            needsUnicodeDecode: needsUnicodeDecode,
+            mayRequireWholeDocumentVerification: mayRequireWholeDocumentVerification,
+            estimatedPathFilterCost: estimatedPathFilterCost,
+            estimatedDirectScanCost: estimatedDirectScanCost,
+            estimatedIndexedCost: estimatedIndexedCost,
+            estimatedCandidateDocuments: estimatedCandidateDocuments,
+            estimatedCost: estimatedCost,
+            candidateKind: resolvedCandidateKind,
+            candidateCombination: resolvedCandidateCombination,
+            verifierKind: resolvedVerifierKind,
+            runnerUp: runnerUp,
+            runnerUpEstimatedCostDelta: runnerUp is null
                 ? null
                 : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
-            TimeoutPolicy = query.PatternMode == PatternMode.Regex
+            timeoutPolicy: query.PatternMode == PatternMode.Regex
                 ? query.TimeoutPolicy
                 : TimeoutPolicy.StopSearch,
-            PlannerAlternatives = plannerAlternatives
-        });
+            plannerAlternatives: plannerAlternatives);
 
         static T Merge<T>(T? aggregate, T value, T mixed)
             where T : struct, Enum
@@ -234,19 +232,17 @@ internal struct PlannerAlternativeAccumulator
         SearchVerifierKind verifierKind,
         bool usesIndex)
     {
-        return new PlannerAlternative(new PlannerAlternativeData
-        {
-            CandidateKind = candidateKind,
-            CandidateCombination = candidateCombination,
-            VerifierKind = verifierKind,
-            UsesIndex = usesIndex,
-            EstimatedDirectScanCost = EstimatedDirectScanCost,
-            EstimatedIndexedCost = EstimatedIndexedCost,
-            EstimatedCandidateDocuments = EstimatedCandidateDocuments,
-            EstimatedCost = EstimatedCost,
-            SegmentCount = SegmentCount,
-            ScopeDocumentCount = ScopeDocumentCount,
-            ScopeByteCount = ScopeByteCount
-        });
+        return new PlannerAlternative(
+            candidateKind: candidateKind,
+            candidateCombination: candidateCombination,
+            verifierKind: verifierKind,
+            usesIndex: usesIndex,
+            estimatedDirectScanCost: EstimatedDirectScanCost,
+            estimatedIndexedCost: EstimatedIndexedCost,
+            estimatedCandidateDocuments: EstimatedCandidateDocuments,
+            estimatedCost: EstimatedCost,
+            segmentCount: SegmentCount,
+            scopeDocumentCount: ScopeDocumentCount,
+            scopeByteCount: ScopeByteCount);
     }
 }
