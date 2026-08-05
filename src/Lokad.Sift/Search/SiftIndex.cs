@@ -34,13 +34,13 @@ public sealed class SiftIndex : ISiftIndex
     private readonly object _validationStatsSync = new();
     private IndexValidationStats _validationStats = new(
         IndexValidationState.NotStarted,
-        Generation: null,
-        TotalSegments: 0,
-        ValidatedSegments: 0,
-        TotalBytes: 0,
-        ValidatedBytes: 0,
-        ElapsedMilliseconds: 0,
-        Failure: null);
+        generation: null,
+        totalSegments: 0,
+        validatedSegments: 0,
+        totalBytes: 0,
+        validatedBytes: 0,
+        elapsedMilliseconds: 0,
+        failure: null);
     private int _activeValidations;
     private int _reclamationRequests;
     private int _reclamationWorkerActive;
@@ -366,11 +366,11 @@ public sealed class SiftIndex : ISiftIndex
                 IndexValidationState.Running,
                 manifest.Generation,
                 manifest.Segments.Count,
-                ValidatedSegments: 0,
+                validatedSegments: 0,
                 totalBytes,
-                ValidatedBytes: 0,
-                ElapsedMilliseconds: 0,
-                Failure: null)))
+                validatedBytes: 0,
+                elapsedMilliseconds: 0,
+                failure: null)))
             {
                 return GetValidationStats();
             }
@@ -389,7 +389,7 @@ public sealed class SiftIndex : ISiftIndex
                     totalBytes,
                     validatedBytes,
                     watch.ElapsedMilliseconds,
-                    Failure: null)))
+                    failure: null)))
                 {
                     return GetValidationStats();
                 }
@@ -404,7 +404,7 @@ public sealed class SiftIndex : ISiftIndex
                 totalBytes,
                 totalBytes,
                 watch.ElapsedMilliseconds,
-                Failure: null);
+                failure: null);
             return TrySetValidationStats(validationRevision, completed)
                 ? completed
                 : GetValidationStats();
@@ -998,13 +998,13 @@ public sealed class SiftIndex : ISiftIndex
             _validationStatsRevision++;
             _validationStats = new IndexValidationStats(
                 IndexValidationState.NotStarted,
-                Generation: null,
-                TotalSegments: 0,
-                ValidatedSegments: 0,
-                TotalBytes: 0,
-                ValidatedBytes: 0,
-                ElapsedMilliseconds: 0,
-                Failure: null);
+                generation: null,
+                totalSegments: 0,
+                validatedSegments: 0,
+                totalBytes: 0,
+                validatedBytes: 0,
+                elapsedMilliseconds: 0,
+                failure: null);
         }
     }
 
@@ -1013,11 +1013,7 @@ public sealed class SiftIndex : ISiftIndex
         lock (_validationStatsSync)
         {
             var revision = ++_validationStatsRevision;
-            _validationStats = _validationStats with
-            {
-                State = IndexValidationState.Running,
-                Failure = null
-            };
+            _validationStats = _validationStats.WithState(IndexValidationState.Running, failure: null);
             return revision;
         }
     }
@@ -1034,11 +1030,7 @@ public sealed class SiftIndex : ISiftIndex
                 return false;
             }
 
-            _validationStats = _validationStats with
-            {
-                State = state,
-                Failure = failure
-            };
+            _validationStats = _validationStats.WithState(state, failure);
             return true;
         }
     }
@@ -1071,11 +1063,7 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             MarkRequiresRebuild(exception);
-            _validationStats = _validationStats with
-            {
-                State = IndexValidationState.Failed,
-                Failure = exception.Message
-            };
+            _validationStats = _validationStats.WithState(IndexValidationState.Failed, exception.Message);
             return true;
         }
     }
@@ -1111,11 +1099,7 @@ public sealed class SiftIndex : ISiftIndex
             MarkRequiresRebuild(exception);
             lock (_validationStatsSync)
             {
-                _validationStats = _validationStats with
-                {
-                    State = IndexValidationState.Failed,
-                    Failure = exception.Message
-                };
+                _validationStats = _validationStats.WithState(IndexValidationState.Failed, exception.Message);
             }
 
             throw;
@@ -1141,11 +1125,7 @@ public sealed class SiftIndex : ISiftIndex
         MarkRequiresRebuild(currentFailure);
         lock (_validationStatsSync)
         {
-            _validationStats = _validationStats with
-            {
-                State = IndexValidationState.Failed,
-                Failure = currentFailure.Message
-            };
+            _validationStats = _validationStats.WithState(IndexValidationState.Failed, currentFailure.Message);
         }
     }
 

@@ -381,25 +381,56 @@ public enum IndexValidationState
     Cancelled
 }
 
-public readonly record struct IndexValidationStats(
-    // Lifecycle state of the latest explicit integrity-validation attempt.
-    IndexValidationState State,
-    // Manifest generation being validated, or null before a manifest is opened.
-    StorageGeneration? Generation,
-    // Immutable packs referenced by that generation.
-    int TotalSegments,
-    // Packs whose full checksums have been verified in this attempt.
-    int ValidatedSegments,
-    // Physical bytes across all packs in the generation.
-    long TotalBytes,
-    // Physical bytes whose packs have completed validation.
-    long ValidatedBytes,
-    // Wall-clock time spent by the current or latest attempt.
-    long ElapsedMilliseconds,
-    // Latest exceptional failure message, or null outside Failed state.
-    string? Failure)
+public sealed class IndexValidationStats
 {
+    internal IndexValidationStats(
+        IndexValidationState state,
+        StorageGeneration? generation,
+        int totalSegments,
+        int validatedSegments,
+        long totalBytes,
+        long validatedBytes,
+        long elapsedMilliseconds,
+        string? failure)
+    {
+        State = state;
+        Generation = generation;
+        TotalSegments = totalSegments;
+        ValidatedSegments = validatedSegments;
+        TotalBytes = totalBytes;
+        ValidatedBytes = validatedBytes;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        Failure = failure;
+    }
+
+    // Lifecycle state of the latest explicit integrity-validation attempt.
+    public IndexValidationState State { get; }
+    // Manifest generation being validated, or null before a manifest is opened.
+    public StorageGeneration? Generation { get; }
+    // Immutable packs referenced by that generation.
+    public int TotalSegments { get; }
+    // Packs whose full checksums have been verified in this attempt.
+    public int ValidatedSegments { get; }
+    // Physical bytes across all packs in the generation.
+    public long TotalBytes { get; }
+    // Physical bytes whose packs have completed validation.
+    public long ValidatedBytes { get; }
+    // Wall-clock time spent by the current or latest attempt.
+    public long ElapsedMilliseconds { get; }
+    // Latest exceptional failure message, or null outside Failed state.
+    public string? Failure { get; }
+
     public bool IsReady => State == IndexValidationState.Ready;
+
+    internal IndexValidationStats WithState(IndexValidationState state, string? failure) => new(
+        state,
+        Generation,
+        TotalSegments,
+        ValidatedSegments,
+        TotalBytes,
+        ValidatedBytes,
+        ElapsedMilliseconds,
+        failure);
 }
 
 public sealed class MaintenanceStats

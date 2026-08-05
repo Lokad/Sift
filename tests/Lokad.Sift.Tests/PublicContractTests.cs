@@ -85,6 +85,7 @@ public sealed class PublicContractTests
         Assert.False(typeof(CompactStats).IsValueType);
         Assert.False(typeof(MaintenanceStats).IsValueType);
         Assert.False(typeof(StorageStats).IsValueType);
+        Assert.False(typeof(IndexValidationStats).IsValueType);
         Assert.False(typeof(IndexState).IsValueType);
         Assert.False(typeof(MaterializedHit).IsValueType);
     }
@@ -101,6 +102,7 @@ public sealed class PublicContractTests
             typeof(CompactStats),
             typeof(MaintenanceStats),
             typeof(StorageStats),
+            typeof(IndexValidationStats),
             typeof(IndexState),
             typeof(MaterializedHit)
         ];
