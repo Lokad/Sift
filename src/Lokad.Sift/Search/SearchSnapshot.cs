@@ -863,9 +863,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             candidates = CandidateGenerator.IncludeNonAsciiDocuments(cache.Segment, scope.Ordinals, candidates);
         }
-        var utf8RegexStartPrecheckGroups = segmentPlan.ContentPlan.ChosenPlan.CandidateKind == SearchCandidateKind.DirectScan
-            ? preparedQuery.OrderedAnchorGroups
-            : [];
+        var usesLiteralVerifier = query.PatternMode == PatternMode.Literal || preparedQuery.RegexPlan.IsExactLiteral;
         var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(
             preparedQuery.OrderedAnchorGroups,
             candidates.Ordinals.Count);
@@ -952,7 +950,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     preparedQuery.ResolvedCaseMode == CaseMode.Insensitive &&
                     !CanUseUtf8RegexForDocument(document);
                 string? predecodedText = null;
-                if (!needsUnicodeCaseFoldVerification &&
+                if (!usesLiteralVerifier &&
+                    !needsUnicodeCaseFoldVerification &&
                     !PassesMandatoryPrecheck(
                         contentBytes,
                         preparedQuery.MandatoryFragments,
@@ -983,7 +982,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     limits.MaximumHits,
                     query.MaxHitsPerDocument);
                 var documentStopReason = SearchStopReason.None;
-                if (query.PatternMode == PatternMode.Literal || preparedQuery.RegexPlan.IsExactLiteral)
+                if (usesLiteralVerifier)
                 {
                     SearchLiteralDocument(
                         cache.Segment,
@@ -1006,7 +1005,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         cache.Segment,
                         document,
                         utf8Regex,
-                        utf8RegexStartPrecheckGroups,
                         documentHitLimit,
                         collector,
                         ref hitsReturned,

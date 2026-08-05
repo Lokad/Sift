@@ -70,7 +70,6 @@ internal static class Utf8RegexEngine
         MappedSegment segment,
         SegmentDocument document,
         PreparedUtf8Regex prepared,
-        PreparedOrderedAnchor[][]? preparedOrderedAnchorGroups,
         int hitLimit,
         IHitCollector collector,
         ref int hitsReturned,
@@ -79,7 +78,6 @@ internal static class Utf8RegexEngine
         ref long utf8RegexMatchesEnumerated,
         ref SearchStopReason stopReason)
     {
-        _ = preparedOrderedAnchorGroups;
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         utf8RegexInvocations++;

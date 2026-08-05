@@ -6,6 +6,20 @@ namespace Lokad.Sift.Tests;
 public sealed class CacheTests
 {
     [Fact]
+    public void LiteralVerifiersDoNotPrepareRedundantMandatoryPrechecks()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+
+        var literal = SearchQueryPreparer.Prepare(
+            new SearchQuery($"literal-{suffix}", PatternMode.Literal, CaseMode.Sensitive));
+        var exactRegex = SearchQueryPreparer.Prepare(
+            new SearchQuery($"exact-{suffix}", PatternMode.Regex, CaseMode.Sensitive));
+
+        Assert.Empty(literal.MandatoryFragmentsForPrecheck);
+        Assert.Empty(exactRegex.MandatoryFragmentsForPrecheck);
+    }
+
+    [Fact]
     public async Task Utf8RegexSearchDoesNotPrepareUnusedUnicodeFallback()
     {
         var suffix = Guid.NewGuid().ToString("N");
