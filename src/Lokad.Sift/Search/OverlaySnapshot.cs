@@ -453,7 +453,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return overlayStats.WithStopReason(SearchStopReason.MaxElapsedTime);
         }
 
-        var baseCollector = new TrackingCollector(collector);
         var baseStats = _baseSnapshot.Search(
             query with
             {
@@ -463,7 +462,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 MaxElapsedMilliseconds = remainingElapsedMilliseconds
             },
             pathFilter,
-            baseCollector,
+            collector,
             _hiddenPathVisibility,
             cancellationToken);
 
@@ -816,25 +815,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         using var state = BeginRead();
         return _deletedPaths.Count;
-    }
-
-    private sealed class TrackingCollector : IHitCollector
-    {
-        private readonly IHitCollector _inner;
-        private readonly HashSet<(SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)> _documentsWithHits = [];
-
-        public TrackingCollector(IHitCollector inner)
-        {
-            _inner = inner;
-        }
-
-        public int HitDocuments => _documentsWithHits.Count;
-
-        public bool OnHit(in RawHit hit)
-        {
-            _documentsWithHits.Add((hit.SegmentId, hit.DocumentOrdinal));
-            return _inner.OnHit(hit);
-        }
     }
 
     private sealed class OverlayHitCollector : IHitCollector
