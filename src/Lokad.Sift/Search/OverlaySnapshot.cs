@@ -8,6 +8,8 @@ namespace Lokad.Sift.Search;
 
 internal sealed class OverlaySnapshot : IOverlaySnapshot
 {
+    private const int BaseExistenceCacheCapacity = 4096;
+    private const int BaseExistenceCacheCharacterCapacity = 256 * 1024;
     private static readonly IComparer<byte[]> Utf8PathOrder =
         Comparer<byte[]>.Create(static (left, right) =>
             left.AsSpan().SequenceCompareTo(right));
@@ -19,7 +21,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly SearchOptions _searchOptions;
     private SortedDictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
     private HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, bool> _baseDocumentExistence = new(StringComparer.Ordinal);
+    private readonly BoundedLruCache<string, bool> _baseDocumentExistence = new(
+        BaseExistenceCacheCapacity,
+        BaseExistenceCacheCharacterCapacity,
+        static path => path.Length);
     private readonly Dictionary<string, byte[]> _hiddenPathBytes = new(StringComparer.Ordinal);
     private readonly List<byte[]> _sortedHiddenPaths = [];
     private readonly HashSet<SegmentId> _baseSegmentIds;
@@ -175,12 +180,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             var baseDocuments = new Dictionary<string, bool>(deletionSet.Count, StringComparer.Ordinal);
             foreach (var path in deletionSet)
             {
-                if (!_baseDocumentExistence.TryGetValue(path, out var exists))
-                {
-                    exists = _baseSnapshot.ContainsDocument(new DocumentKey(path));
-                    _baseDocumentExistence.Add(path, exists);
-                }
-
+                var exists = _baseDocumentExistence.GetOrAdd(
+                    path,
+                    key => _baseSnapshot.ContainsDocument(new DocumentKey(key)),
+                    out _);
                 baseDocuments.Add(path, exists);
             }
 
