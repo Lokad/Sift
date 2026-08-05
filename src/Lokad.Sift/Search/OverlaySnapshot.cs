@@ -26,6 +26,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private OverlayGeneration _overlayGeneration;
     private HiddenPathVisibility _hiddenPathVisibility = HiddenPathVisibility.Empty;
     private ulong _nextSyntheticSegmentId = ulong.MaxValue;
+    private ulong _revision;
     private int _disposed;
 
     internal OverlaySnapshot(SearchSnapshot baseSnapshot, SiftOptions options, SearchOptions searchOptions)
@@ -39,7 +40,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseSegmentIds = new HashSet<SegmentId>(_baseSnapshot.GetSegmentIds());
     }
 
-    public Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
+    public Task<OverlayUpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
     {
         return Update(
             upserts,
@@ -48,7 +49,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             CancellationToken.None);
     }
 
-    public Task<UpdateStats> Update(
+    public Task<OverlayUpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         CancellationToken cancellationToken)
@@ -60,7 +61,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             cancellationToken);
     }
 
-    public Task<UpdateStats> Update(
+    public Task<OverlayUpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         OverlayUpdateOptions options)
@@ -68,7 +69,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return Update(upserts, deletions, options, CancellationToken.None);
     }
 
-    public Task<UpdateStats> Update(
+    public Task<OverlayUpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         OverlayUpdateOptions options,
@@ -81,7 +82,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         return UpdateAsync();
 
-        async Task<UpdateStats> UpdateAsync()
+        async Task<OverlayUpdateStats> UpdateAsync()
         {
             await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -96,7 +97,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
         }
 
-        async Task<UpdateStats> ApplyUpdateUnderLock()
+        async Task<OverlayUpdateStats> ApplyUpdateUnderLock()
         {
             var watch = Stopwatch.StartNew();
             var load = IndexBuilder.LoadDocuments(
@@ -127,6 +128,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 cancellationToken);
 
             var deletedDocuments = 0;
+            OverlayRevision committedRevision;
             _stateLock.EnterWriteLock();
             try
             {
@@ -155,6 +157,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
                 RefreshOverlaySnapshot();
                 RefreshHiddenPathVisibility();
+                if (overlayUpdate.UpsertedDocuments > 0 || deletedDocuments > 0)
+                {
+                    _revision = checked(_revision + 1);
+                }
+
+                committedRevision = new OverlayRevision(_revision);
             }
             finally
             {
@@ -163,7 +171,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
             watch.Stop();
 
-            return new UpdateStats(
+            var pendingStats = new PendingOverlayUpdateStats(
                 submittedUpserts: load.Submitted,
                 upsertedDocuments: overlayUpdate.UpsertedDocuments,
                 skippedUpserts: overlayUpdate.SkippedUpserts,
@@ -174,11 +182,38 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 contentBytes: overlayUpdate.ContentBytes,
                 skippedBytes: overlayUpdate.SkippedBytes,
                 rejectedBytes: load.RejectedBytes,
-                rejectedDocumentDetails: load.RejectedDocuments.ToArray(),
-                elapsedMilliseconds: watch.ElapsedMilliseconds,
-                committedIdentity: overlayUpdate.CommittedIdentity);
+                rejectedDocumentDetails: load.RejectedDocuments.ToArray());
+            return new OverlayUpdateStats(
+                pendingStats,
+                watch.ElapsedMilliseconds,
+                committedRevision);
         }
     }
+
+    private sealed class PendingOverlayUpdateStats(
+        int submittedUpserts,
+        int upsertedDocuments,
+        int skippedUpserts,
+        int rejectedUpserts,
+        int deletedDocuments,
+        int publishedSegments,
+        long submittedBytes,
+        long contentBytes,
+        long skippedBytes,
+        long rejectedBytes,
+        RejectedDocument[] rejectedDocumentDetails)
+        : UpdateCommitStats(
+            submittedUpserts,
+            upsertedDocuments,
+            skippedUpserts,
+            rejectedUpserts,
+            deletedDocuments,
+            publishedSegments,
+            submittedBytes,
+            contentBytes,
+            skippedBytes,
+            rejectedBytes,
+            rejectedDocumentDetails);
 
     public Task<UpdateStats> CommitToBase(
         ISiftIndex baseIndex,

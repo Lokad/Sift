@@ -86,7 +86,7 @@ internal sealed class IndexBuilder
         var entries = new List<SegmentManifestEntry>();
         var attemptedSegmentIds = new List<SegmentId>();
         StreamedDocuments load;
-        BuildStats pendingStats;
+        BuildCommitStats pendingStats;
         try
         {
             load = await streamDocuments(
@@ -103,7 +103,7 @@ internal sealed class IndexBuilder
                 }).ConfigureAwait(false);
 
             var rejectedDocuments = load.RejectedDocuments.ToArray();
-            pendingStats = new BuildStats(
+            pendingStats = new PendingBuildStats(
                 submittedDocuments: load.Submitted,
                 indexedDocuments: load.Accepted,
                 rejectedDocuments: load.Rejected,
@@ -111,10 +111,7 @@ internal sealed class IndexBuilder
                 submittedBytes: load.SubmittedBytes,
                 contentBytes: load.AcceptedBytes,
                 rejectedBytes: load.RejectedBytes,
-                elapsedMilliseconds: watch.ElapsedMilliseconds,
-                peakManagedBytes: 0,
-                rejectedDocumentDetails: rejectedDocuments,
-                committedIdentity: default);
+                rejectedDocumentDetails: rejectedDocuments);
             var commitMetadata = options.CommitMetadataProvider?.Invoke(pendingStats).ToArray() ?? [];
             if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
             {
@@ -137,13 +134,34 @@ internal sealed class IndexBuilder
 
         watch.Stop();
 
-        return pendingStats.Complete(
+        return new BuildStats(
+            pendingStats,
             watch.ElapsedMilliseconds,
+            peakManagedBytes: 0,
             new IndexIdentity(
                 corpusId,
                 new ContentRevision(1),
                 generation));
     }
+
+    private sealed class PendingBuildStats(
+        int submittedDocuments,
+        int indexedDocuments,
+        int rejectedDocuments,
+        int segmentCount,
+        long submittedBytes,
+        long contentBytes,
+        long rejectedBytes,
+        RejectedDocument[] rejectedDocumentDetails)
+        : BuildCommitStats(
+            submittedDocuments,
+            indexedDocuments,
+            rejectedDocuments,
+            segmentCount,
+            submittedBytes,
+            contentBytes,
+            rejectedBytes,
+            rejectedDocumentDetails);
 
     public static StreamedDocuments StreamDocuments(
         IDocumentSource source,

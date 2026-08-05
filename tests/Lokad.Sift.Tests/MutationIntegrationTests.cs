@@ -363,6 +363,28 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayUpdatesReportLogicalRevisions()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+
+        var added = await overlay.Update(
+            new InMemoryDocumentSource([("src/a.txt", "alpha")]),
+            []);
+        var unchanged = await overlay.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/missing.txt")]);
+        var deleted = await overlay.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/a.txt")]);
+
+        Assert.Equal(new OverlayRevision(1), added.CommittedRevision);
+        Assert.Equal(added.CommittedRevision, unchanged.CommittedRevision);
+        Assert.Equal(new OverlayRevision(2), deleted.CommittedRevision);
+    }
+
+    [Fact]
     public async Task OverlaySnapshotMaterializesOverlayHitsAndCanCommitToBase()
     {
         using var fixture = new CorpusFixture(

@@ -63,6 +63,20 @@ public sealed class PublicContractTests
     }
 
     [Fact]
+    public void ProvisionalMutationStatsDoNotExposeCommittedState()
+    {
+        Assert.Null(typeof(BuildCommitStats).GetProperty(nameof(BuildStats.CommittedIdentity)));
+        Assert.Null(typeof(UpdateCommitStats).GetProperty(nameof(UpdateStats.CommittedIdentity)));
+        Assert.Null(typeof(OverlayUpdateStats).GetProperty(nameof(UpdateStats.CommittedIdentity)));
+        Assert.Equal(
+            typeof(Func<BuildCommitStats, ReadOnlyMemory<byte>>),
+            GetPropertyType<BuildOptions>(nameof(BuildOptions.CommitMetadataProvider)));
+        Assert.Equal(
+            typeof(Func<UpdateCommitStats, ReadOnlyMemory<byte>>),
+            GetPropertyType<UpdateOptions>(nameof(UpdateOptions.CommitMetadataProvider)));
+    }
+
+    [Fact]
     public void PathFilterOwnsImmutablePatternCollections()
     {
         var includes = new[] { "src/**" };
@@ -82,7 +96,10 @@ public sealed class PublicContractTests
         Assert.False(typeof(SearchPlan).IsValueType);
         Assert.False(typeof(SearchStats).IsValueType);
         Assert.False(typeof(BuildStats).IsValueType);
+        Assert.False(typeof(BuildCommitStats).IsValueType);
         Assert.False(typeof(UpdateStats).IsValueType);
+        Assert.False(typeof(UpdateCommitStats).IsValueType);
+        Assert.False(typeof(OverlayUpdateStats).IsValueType);
         Assert.False(typeof(CompactStats).IsValueType);
         Assert.False(typeof(MaintenanceStats).IsValueType);
         Assert.False(typeof(StorageStats).IsValueType);
@@ -99,7 +116,10 @@ public sealed class PublicContractTests
             typeof(SearchPlan),
             typeof(SearchStats),
             typeof(BuildStats),
+            typeof(BuildCommitStats),
             typeof(UpdateStats),
+            typeof(UpdateCommitStats),
+            typeof(OverlayUpdateStats),
             typeof(CompactStats),
             typeof(MaintenanceStats),
             typeof(StorageStats),

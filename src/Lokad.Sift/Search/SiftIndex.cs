@@ -649,7 +649,7 @@ public sealed class SiftIndex : ISiftIndex
             var existingUpsertKeys = new Dictionary<string, LiveDocumentKey>(StringComparer.Ordinal);
             var deletedDocuments = 0;
             StreamedDocuments upsertLoad;
-            UpdateStats pendingStats;
+            UpdateCommitStats pendingStats;
             try
             {
                 var segmentSeed = existingManifest.Generation.Next().Value ^ ((ulong)DateTime.UtcNow.Ticks << 1);
@@ -707,7 +707,7 @@ public sealed class SiftIndex : ISiftIndex
                 var requiresManifestMigration = existingManifest.Segments.Any(
                     static segment => segment.DeadContentBytes < 0);
                 var rejectedDocuments = upsertLoad.RejectedDocuments.ToArray();
-                pendingStats = new UpdateStats(
+                pendingStats = new PendingUpdateStats(
                     submittedUpserts: upsertLoad.Submitted,
                     upsertedDocuments: upsertLoad.Accepted,
                     skippedUpserts: upsertLoad.Skipped,
@@ -718,9 +718,7 @@ public sealed class SiftIndex : ISiftIndex
                     contentBytes: upsertLoad.AcceptedBytes,
                     skippedBytes: upsertLoad.SkippedBytes,
                     rejectedBytes: upsertLoad.RejectedBytes,
-                    rejectedDocumentDetails: rejectedDocuments,
-                    elapsedMilliseconds: watch.ElapsedMilliseconds,
-                    committedIdentity: default);
+                    rejectedDocumentDetails: rejectedDocuments);
                 var commitMetadata = options.CommitMetadataProvider is null
                     ? existingManifest.CommitMetadata
                     : options.CommitMetadataProvider(pendingStats).ToArray();
@@ -806,9 +804,34 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             watch.Stop();
-            return pendingStats.Complete(watch.ElapsedMilliseconds, committedIdentity);
+            return new UpdateStats(pendingStats, watch.ElapsedMilliseconds, committedIdentity);
         }
     }
+
+    private sealed class PendingUpdateStats(
+        int submittedUpserts,
+        int upsertedDocuments,
+        int skippedUpserts,
+        int rejectedUpserts,
+        int deletedDocuments,
+        int publishedSegments,
+        long submittedBytes,
+        long contentBytes,
+        long skippedBytes,
+        long rejectedBytes,
+        RejectedDocument[] rejectedDocumentDetails)
+        : UpdateCommitStats(
+            submittedUpserts,
+            upsertedDocuments,
+            skippedUpserts,
+            rejectedUpserts,
+            deletedDocuments,
+            publishedSegments,
+            submittedBytes,
+            contentBytes,
+            skippedBytes,
+            rejectedBytes,
+            rejectedDocumentDetails);
 
     private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)
     {

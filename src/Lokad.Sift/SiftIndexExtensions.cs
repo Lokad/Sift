@@ -120,7 +120,7 @@ public static class SiftIndexExtensions
         return snapshot.Search(query, pathFilter, collector, CancellationToken.None);
     }
 
-    public static Task<UpdateStats> Update(
+    public static Task<OverlayUpdateStats> Update(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions)
@@ -128,7 +128,7 @@ public static class SiftIndexExtensions
         return snapshot.Update(upserts, deletions, CancellationToken.None);
     }
 
-    public static Task<UpdateStats> Update(
+    public static Task<OverlayUpdateStats> Update(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,

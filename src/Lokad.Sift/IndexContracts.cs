@@ -45,7 +45,7 @@ public sealed record BuildOptions
 {
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest.
-    public Func<BuildStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
+    public Func<BuildCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
 public sealed record UpdateOptions
@@ -66,7 +66,7 @@ public sealed record UpdateOptions
     public IndexIdentity? ExpectedIdentity { get; init; }
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest.
-    public Func<UpdateStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
+    public Func<UpdateCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
 public sealed record OverlayUpdateOptions
@@ -97,11 +97,11 @@ public sealed class StaleIndexStateException : Exception
     public IndexIdentity ActualIdentity { get; }
 }
 
-public sealed class BuildStats
+public abstract class BuildCommitStats
 {
     private readonly RejectedDocument[] _rejectedDocumentDetails;
 
-    internal BuildStats(
+    internal BuildCommitStats(
         int submittedDocuments,
         int indexedDocuments,
         int rejectedDocuments,
@@ -109,10 +109,7 @@ public sealed class BuildStats
         long submittedBytes,
         long contentBytes,
         long rejectedBytes,
-        long elapsedMilliseconds,
-        long peakManagedBytes,
-        RejectedDocument[] rejectedDocumentDetails,
-        IndexIdentity committedIdentity)
+        RejectedDocument[] rejectedDocumentDetails)
     {
         SubmittedDocuments = submittedDocuments;
         IndexedDocuments = indexedDocuments;
@@ -121,11 +118,21 @@ public sealed class BuildStats
         SubmittedBytes = submittedBytes;
         ContentBytes = contentBytes;
         RejectedBytes = rejectedBytes;
-        ElapsedMilliseconds = elapsedMilliseconds;
-        PeakManagedBytes = peakManagedBytes;
         _rejectedDocumentDetails = rejectedDocumentDetails;
         RejectedDocumentDetails = PublicResultCollection.Own(rejectedDocumentDetails);
-        CommittedIdentity = committedIdentity;
+    }
+
+    internal BuildCommitStats(BuildCommitStats stats)
+        : this(
+            stats.SubmittedDocuments,
+            stats.IndexedDocuments,
+            stats.RejectedDocuments,
+            stats.SegmentCount,
+            stats.SubmittedBytes,
+            stats.ContentBytes,
+            stats.RejectedBytes,
+            stats._rejectedDocumentDetails)
+    {
     }
 
     public int SubmittedDocuments { get; }
@@ -135,53 +142,43 @@ public sealed class BuildStats
     public long SubmittedBytes { get; }
     public long ContentBytes { get; }
     public long RejectedBytes { get; }
+    /// <summary>Documents omitted from the pending build, with their rejection reasons.</summary>
+    public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; }
+}
+
+public sealed class BuildStats : BuildCommitStats
+{
+    internal BuildStats(
+        BuildCommitStats pending,
+        long elapsedMilliseconds,
+        long peakManagedBytes,
+        IndexIdentity committedIdentity)
+        : base(pending)
+    {
+        ElapsedMilliseconds = elapsedMilliseconds;
+        PeakManagedBytes = peakManagedBytes;
+        CommittedIdentity = committedIdentity;
+    }
+
     public long ElapsedMilliseconds { get; }
     // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
     public long PeakManagedBytes { get; }
 
-    /// <summary>Documents omitted from the completed build, with their rejection reasons.</summary>
-    public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; }
-
     /// <summary>Identity of the index state committed by the completed build.</summary>
-    /// <remarks>
-    ///     The provisional statistics passed to
-    ///     <see cref="BuildOptions.CommitMetadataProvider"/> have the default identity
-    ///     because the manifest has not yet been committed.
-    /// </remarks>
     public IndexIdentity CommittedIdentity { get; }
 
     internal BuildStats WithPeakManagedBytes(long peakManagedBytes) => new(
-        SubmittedDocuments,
-        IndexedDocuments,
-        RejectedDocuments,
-        SegmentCount,
-        SubmittedBytes,
-        ContentBytes,
-        RejectedBytes,
+        this,
         ElapsedMilliseconds,
         peakManagedBytes,
-        _rejectedDocumentDetails,
         CommittedIdentity);
-
-    internal BuildStats Complete(long elapsedMilliseconds, IndexIdentity committedIdentity) => new(
-        SubmittedDocuments,
-        IndexedDocuments,
-        RejectedDocuments,
-        SegmentCount,
-        SubmittedBytes,
-        ContentBytes,
-        RejectedBytes,
-        elapsedMilliseconds,
-        PeakManagedBytes,
-        _rejectedDocumentDetails,
-        committedIdentity);
 }
 
-public sealed class UpdateStats
+public abstract class UpdateCommitStats
 {
     private readonly RejectedDocument[] _rejectedDocumentDetails;
 
-    internal UpdateStats(
+    internal UpdateCommitStats(
         int submittedUpserts,
         int upsertedDocuments,
         int skippedUpserts,
@@ -192,9 +189,7 @@ public sealed class UpdateStats
         long contentBytes,
         long skippedBytes,
         long rejectedBytes,
-        RejectedDocument[] rejectedDocumentDetails,
-        long elapsedMilliseconds,
-        IndexIdentity committedIdentity)
+        RejectedDocument[] rejectedDocumentDetails)
     {
         SubmittedUpserts = submittedUpserts;
         UpsertedDocuments = upsertedDocuments;
@@ -208,8 +203,22 @@ public sealed class UpdateStats
         RejectedBytes = rejectedBytes;
         _rejectedDocumentDetails = rejectedDocumentDetails;
         RejectedDocumentDetails = PublicResultCollection.Own(rejectedDocumentDetails);
-        ElapsedMilliseconds = elapsedMilliseconds;
-        CommittedIdentity = committedIdentity;
+    }
+
+    internal UpdateCommitStats(UpdateCommitStats stats)
+        : this(
+            stats.SubmittedUpserts,
+            stats.UpsertedDocuments,
+            stats.SkippedUpserts,
+            stats.RejectedUpserts,
+            stats.DeletedDocuments,
+            stats.PublishedSegments,
+            stats.SubmittedBytes,
+            stats.ContentBytes,
+            stats.SkippedBytes,
+            stats.RejectedBytes,
+            stats._rejectedDocumentDetails)
+    {
     }
 
     public int SubmittedUpserts { get; }
@@ -226,30 +235,42 @@ public sealed class UpdateStats
     public long SkippedBytes { get; }
     public long RejectedBytes { get; }
     public IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; }
+}
+
+public sealed class UpdateStats : UpdateCommitStats
+{
+    internal UpdateStats(
+        UpdateCommitStats pending,
+        long elapsedMilliseconds,
+        IndexIdentity committedIdentity)
+        : base(pending)
+    {
+        ElapsedMilliseconds = elapsedMilliseconds;
+        CommittedIdentity = committedIdentity;
+    }
+
     public long ElapsedMilliseconds { get; }
 
     /// <summary>Identity of the index state returned by the completed update.</summary>
-    /// <remarks>
-    ///     This is set on the final result returned by <c>Update</c>. The provisional
-    ///     statistics passed to <see cref="UpdateOptions.CommitMetadataProvider"/>
-    ///     have the default identity because the manifest has not yet been committed.
-    /// </remarks>
     public IndexIdentity CommittedIdentity { get; }
+}
 
-    internal UpdateStats Complete(long elapsedMilliseconds, IndexIdentity committedIdentity) => new(
-        SubmittedUpserts,
-        UpsertedDocuments,
-        SkippedUpserts,
-        RejectedUpserts,
-        DeletedDocuments,
-        PublishedSegments,
-        SubmittedBytes,
-        ContentBytes,
-        SkippedBytes,
-        RejectedBytes,
-        _rejectedDocumentDetails,
-        elapsedMilliseconds,
-        committedIdentity);
+public readonly record struct OverlayRevision(ulong Value);
+
+public sealed class OverlayUpdateStats : UpdateCommitStats
+{
+    internal OverlayUpdateStats(
+        UpdateCommitStats pending,
+        long elapsedMilliseconds,
+        OverlayRevision committedRevision)
+        : base(pending)
+    {
+        ElapsedMilliseconds = elapsedMilliseconds;
+        CommittedRevision = committedRevision;
+    }
+
+    public long ElapsedMilliseconds { get; }
+    public OverlayRevision CommittedRevision { get; }
 }
 
 public sealed record CompactOptions
@@ -600,10 +621,10 @@ public interface IIndexSnapshot : IDisposable
 public interface IOverlaySnapshot : IIndexSnapshot
 {
     /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
-    Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
+    Task<OverlayUpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
 
     /// <remarks><paramref name="deletions"/> must remain unchanged until the returned task completes.</remarks>
-    Task<UpdateStats> Update(
+    Task<OverlayUpdateStats> Update(
         IDocumentSource upserts,
         IReadOnlyList<DocumentKey> deletions,
         OverlayUpdateOptions options,
