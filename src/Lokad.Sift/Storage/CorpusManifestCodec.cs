@@ -156,7 +156,7 @@ internal static class CorpusManifestCodec
                 segmentId,
                 documentCount,
                 contentBytes,
-                deadOrdinals,
+                DeadOrdinalSet.FromOwned(deadOrdinals),
                 deadContentBytes);
         }
 
@@ -191,7 +191,7 @@ internal static class CorpusManifestCodec
             {
                 foreach (var segment in manifest.Segments)
                 {
-                    segmentTableLength += SegmentFormat.ManifestEntryHeaderSize + GetDeadOrdinalPayloadLength(segment.DeadOrdinals);
+                    segmentTableLength += SegmentFormat.ManifestEntryHeaderSize + GetDeadOrdinalPayloadLength(segment.DeadOrdinals.Span);
                 }
 
                 metadataOffset = SegmentFormat.ManifestHeaderSize + segmentTableLength;
@@ -229,7 +229,7 @@ internal static class CorpusManifestCodec
             LittleEndianCodec.WriteInt32(span[(offset + 8)..], segment.DocumentCount);
             LittleEndianCodec.WriteInt64(span[(offset + 12)..], segment.ContentBytes);
             LittleEndianCodec.WriteInt32(span[(offset + 20)..], segment.DeadOrdinals.Length);
-            var deadBytes = GetDeadOrdinalPayloadLength(segment.DeadOrdinals);
+            var deadBytes = GetDeadOrdinalPayloadLength(segment.DeadOrdinals.Span);
             LittleEndianCodec.WriteInt32(span[(offset + 24)..], deadBytes);
             LittleEndianCodec.WriteInt64(span[(offset + 28)..], segment.DeadContentBytes);
             offset += SegmentFormat.ManifestEntryHeaderSize;

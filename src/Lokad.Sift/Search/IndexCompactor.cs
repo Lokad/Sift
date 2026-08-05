@@ -539,12 +539,12 @@ internal sealed class IndexCompactor
 
     private sealed class CompactionCursor : IDisposable
     {
-        private readonly uint[] _deadOrdinals;
+        private readonly DeadOrdinalSet _deadOrdinals;
         private CompactionDocument? _current;
         private int _deadIndex;
         private uint _nextOrdinal;
 
-        public CompactionCursor(MappedSegment segment, uint[] deadOrdinals)
+        public CompactionCursor(MappedSegment segment, DeadOrdinalSet deadOrdinals)
         {
             Segment = segment;
             _deadOrdinals = deadOrdinals;

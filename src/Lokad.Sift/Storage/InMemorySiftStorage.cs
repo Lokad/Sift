@@ -58,7 +58,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             }
         }
 
-        return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, [], DeadContentBytes: 0);
+        return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, DeadOrdinalSet.Empty, DeadContentBytes: 0);
     }
 
     private void PublishManifest(CorpusManifest manifest)

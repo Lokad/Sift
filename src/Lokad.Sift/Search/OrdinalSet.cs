@@ -1,4 +1,5 @@
 using Lokad.Sift.LowLevel;
+using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Search;
 
@@ -7,7 +8,7 @@ namespace Lokad.Sift.Search;
 internal sealed class OrdinalSet
 {
     private readonly uint[] _ordinals;
-    private readonly uint[] _excludedOrdinals;
+    private readonly DeadOrdinalSet _excludedOrdinals;
     private readonly int _excludedStart;
     private readonly int _excludedEnd;
     private readonly uint _startInclusive;
@@ -17,19 +18,19 @@ internal sealed class OrdinalSet
     private OrdinalSet(uint[] ordinals)
     {
         _ordinals = ordinals;
-        _excludedOrdinals = [];
+        _excludedOrdinals = DeadOrdinalSet.Empty;
         Count = ordinals.Length;
     }
 
-    private OrdinalSet(uint startInclusive, uint endExclusive, uint[] excludedOrdinals)
+    private OrdinalSet(uint startInclusive, uint endExclusive, DeadOrdinalSet excludedOrdinals)
     {
         _ordinals = [];
         _excludedOrdinals = excludedOrdinals;
         _startInclusive = startInclusive;
         _endExclusive = endExclusive;
         _isRange = true;
-        _excludedStart = LowerBound(excludedOrdinals, startInclusive);
-        _excludedEnd = LowerBound(excludedOrdinals, endExclusive);
+        _excludedStart = LowerBound(excludedOrdinals.Span, startInclusive);
+        _excludedEnd = LowerBound(excludedOrdinals.Span, endExclusive);
         Count = checked((int)(endExclusive - startInclusive) - (_excludedEnd - _excludedStart));
     }
 
@@ -46,7 +47,7 @@ internal sealed class OrdinalSet
     public static OrdinalSet FromSorted(uint[] ordinals) =>
         ordinals.Length == 0 ? Empty : new OrdinalSet(ordinals);
 
-    public static OrdinalSet FromRange(uint startInclusive, uint endExclusive, uint[] excludedOrdinals)
+    public static OrdinalSet FromRange(uint startInclusive, uint endExclusive, DeadOrdinalSet excludedOrdinals)
     {
         if (endExclusive < startInclusive)
         {

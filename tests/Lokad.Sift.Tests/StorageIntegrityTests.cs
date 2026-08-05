@@ -40,7 +40,7 @@ public sealed class StorageIntegrityTests
             var deadOrdinals = new uint[] { 3 };
             var segments = new[]
             {
-                new SegmentManifestEntry(new SegmentId(1), 4, 10, deadOrdinals, DeadContentBytes: 2)
+                new SegmentManifestEntry(new SegmentId(1), 4, 10, DeadOrdinalSet.Create(deadOrdinals), DeadContentBytes: 2)
             };
             using (var session = storage.AcquireWriteSession(CancellationToken.None))
             {
@@ -549,7 +549,7 @@ public sealed class StorageIntegrityTests
             Generation: new StorageGeneration(3),
             CommitMetadata: "checkpoint"u8.ToArray(),
             Segments: [
-                new SegmentManifestEntry(new SegmentId(42), 6000, 100, [1, 2, 3, 1000, 5000], DeadContentBytes: 5)
+                new SegmentManifestEntry(new SegmentId(42), 6000, 100, DeadOrdinalSet.Create([1, 2, 3, 1000, 5000]), DeadContentBytes: 5)
             ]);
 
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))

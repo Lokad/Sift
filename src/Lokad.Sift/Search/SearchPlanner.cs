@@ -215,13 +215,13 @@ internal static class SearchPlanner
                 maxSelectedNgrams);
             scopedOrdinals = CandidateGenerator.Generate(
                 cache.Segment,
-                OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, []),
+                OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, DeadOrdinalSet.Empty),
                 indexPair,
                 selectedPathTrigrams).Ordinals;
         }
         else
         {
-            scopedOrdinals = OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, []);
+            scopedOrdinals = OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, DeadOrdinalSet.Empty);
         }
 
         pathIndexCandidates = scopedOrdinals.Count;

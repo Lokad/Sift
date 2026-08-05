@@ -816,9 +816,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return deadline;
     }
 
-    private static bool IsDeadOrdinal(uint[] deadOrdinals, uint ordinal)
+    private static bool IsDeadOrdinal(DeadOrdinalSet deadOrdinals, uint ordinal)
     {
-        return Array.BinarySearch(deadOrdinals, ordinal) >= 0;
+        return deadOrdinals.Contains(ordinal);
     }
 
     private SegmentSearchResult ExecuteSegmentSearch(
@@ -1609,7 +1609,7 @@ internal readonly struct SegmentCache
 {
     public SegmentCache(
         MappedSegment segment,
-        uint[] deadOrdinals,
+        DeadOrdinalSet deadOrdinals,
         long liveContentBytes,
         int liveNonAsciiDocuments,
         long liveNonAsciiBytes)
@@ -1622,7 +1622,7 @@ internal readonly struct SegmentCache
     }
 
     public MappedSegment Segment { get; }
-    public uint[] DeadOrdinals { get; }
+    public DeadOrdinalSet DeadOrdinals { get; }
 
     public long LiveContentBytes { get; }
     public int LiveNonAsciiDocuments { get; }

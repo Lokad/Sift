@@ -584,7 +584,7 @@ public sealed class SiftIndex : ISiftIndex
 
         async ValueTask<UpdateStats> ApplyUpdate(CancellationToken cancellationToken)
         {
-            static uint[] MergeDeadOrdinals(uint[] existing, List<LiveDocumentKey> added)
+            static DeadOrdinalSet MergeDeadOrdinals(DeadOrdinalSet existing, List<LiveDocumentKey> added)
             {
                 var merged = new uint[existing.Length + added.Count];
                 var existingIndex = 0;
@@ -602,14 +602,14 @@ public sealed class SiftIndex : ISiftIndex
                     }
                 }
 
-                existing.AsSpan(existingIndex).CopyTo(merged.AsSpan(mergedIndex));
+                existing.Span[existingIndex..].CopyTo(merged.AsSpan(mergedIndex));
                 mergedIndex += existing.Length - existingIndex;
                 while (addedIndex < added.Count)
                 {
                     merged[mergedIndex++] = added[addedIndex++].Ordinal;
                 }
 
-                return merged;
+                return DeadOrdinalSet.FromOwned(merged);
             }
 
             var watch = Stopwatch.StartNew();
@@ -1279,7 +1279,7 @@ public sealed class SiftIndex : ISiftIndex
                     }
 
                     unresolvedPaths.Remove(path);
-                    if (Array.BinarySearch(entry.DeadOrdinals, foundOrdinal) < 0)
+                    if (!entry.DeadOrdinals.Contains(foundOrdinal))
                     {
                         var document = segment.GetDocument(foundOrdinal);
                         var key = new LiveDocumentKey(
