@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Numerics;
 
@@ -107,16 +108,38 @@ internal static class PostingsCodec
             return [];
         }
 
+        var result = GC.AllocateUninitializedArray<uint>(Math.Min(left.Length, docFreq));
+        var count = IntersectSorted(left, payload, docFreq, result);
+        Array.Resize(ref result, count);
+        return result;
+    }
+
+    internal static int IntersectSorted(
+        ReadOnlySpan<uint> left,
+        ReadOnlySpan<byte> payload,
+        int docFreq,
+        Span<uint> destination)
+    {
+        if (left.Length == 0 || payload.Length == 0 || docFreq == 0)
+        {
+            return 0;
+        }
+
+        if (destination.Length < Math.Min(left.Length, docFreq))
+        {
+            throw new ArgumentException("The intersection destination is too short.", nameof(destination));
+        }
+
         var view = Parse(payload);
         var smaller = Math.Min(left.Length, docFreq);
         if (smaller >= SimdBlockIntersectionThreshold)
         {
-            return IntersectSortedAdaptive(left, view, docFreq, useSimd: true);
+            return IntersectSortedAdaptive(left, view, docFreq, destination, useSimd: true);
         }
 
         return view.IsCheckpointed
-            ? IntersectSortedWithCheckpointed(left, view)
-            : IntersectSortedSequential(left, view.Data, docFreq);
+            ? IntersectSortedWithCheckpointed(left, view, destination)
+            : IntersectSortedSequential(left, view.Data, destination);
     }
 
     private static void EncodePlain(ReadOnlySpan<uint> ordinals, Span<byte> payload)
@@ -200,9 +223,8 @@ internal static class PostingsCodec
         return new PostingsView(IsCheckpointed: true, payload[dataOffset..], checkpoints);
     }
 
-    private static uint[] IntersectSortedSequential(ReadOnlySpan<uint> left, ReadOnlySpan<byte> data, int docFreq)
+    private static int IntersectSortedSequential(ReadOnlySpan<uint> left, ReadOnlySpan<byte> data, Span<uint> result)
     {
-        var result = new uint[Math.Min(left.Length, docFreq)];
         var count = 0;
         var leftIndex = 0;
         uint current = 0;
@@ -228,43 +250,50 @@ internal static class PostingsCodec
             }
         }
 
-        Array.Resize(ref result, count);
-        return result;
+        return count;
     }
 
-    private static uint[] IntersectSortedAdaptive(ReadOnlySpan<uint> left, PostingsView view, int docFreq, bool useSimd)
+    private static int IntersectSortedAdaptive(ReadOnlySpan<uint> left, PostingsView view, int docFreq, Span<uint> result, bool useSimd)
     {
         if (TryGetApproximateRange(view, out var rightFirst, out var rightLast) &&
             (left[0] > rightLast || left[^1] < rightFirst))
         {
-            return [];
+            return 0;
         }
 
-        var right = DecodeOrdinals(view, docFreq);
-        if (right.Length == 0)
+        var rentedRight = ArrayPool<uint>.Shared.Rent(docFreq);
+        try
         {
-            return [];
-        }
+            var rightLength = DecodeOrdinals(view, rentedRight);
+            var right = rentedRight.AsSpan(0, rightLength);
+            if (right.Length == 0)
+            {
+                return 0;
+            }
 
-        if (left[0] > right[^1] || right[0] > left[^1])
+            if (left[0] > right[^1] || right[0] > left[^1])
+            {
+                return 0;
+            }
+
+            var smaller = Math.Min(left.Length, right.Length);
+            if (smaller <= TinyIntersectionThreshold)
+            {
+                return IntersectSortedScalar(left, right, result);
+            }
+
+            return useSimd
+                ? IntersectSortedBlockMergeSimd(left, right, result)
+                : IntersectSortedBlockMerge(left, right, result);
+        }
+        finally
         {
-            return [];
+            ArrayPool<uint>.Shared.Return(rentedRight);
         }
-
-        var smaller = Math.Min(left.Length, right.Length);
-        if (smaller <= TinyIntersectionThreshold)
-        {
-            return IntersectSortedScalar(left, right);
-        }
-
-        return useSimd
-            ? IntersectSortedBlockMergeSimd(left, right)
-            : IntersectSortedBlockMerge(left, right);
     }
 
-    private static uint[] IntersectSortedWithCheckpointed(ReadOnlySpan<uint> left, PostingsView view)
+    private static int IntersectSortedWithCheckpointed(ReadOnlySpan<uint> left, PostingsView view, Span<uint> result)
     {
-        var result = new uint[left.Length];
         var count = 0;
         var leftIndex = 0;
         var dataOffset = 0;
@@ -305,13 +334,11 @@ internal static class PostingsCodec
             leftIndex++;
         }
 
-        Array.Resize(ref result, count);
-        return result;
+        return count;
     }
 
-    private static uint[] DecodeOrdinals(PostingsView view, int docFreq)
+    private static int DecodeOrdinals(PostingsView view, Span<uint> values)
     {
-        var values = GC.AllocateUninitializedArray<uint>(docFreq);
         var count = 0;
         uint current = 0;
         var offset = 0;
@@ -321,12 +348,7 @@ internal static class PostingsCodec
             values[count++] = current;
         }
 
-        if (count != values.Length)
-        {
-            Array.Resize(ref values, count);
-        }
-
-        return values;
+        return count;
     }
 
     private static bool TryGetApproximateRange(PostingsView view, out uint first, out uint last)
@@ -350,9 +372,8 @@ internal static class PostingsCodec
         return true;
     }
 
-    private static uint[] IntersectSortedScalar(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    private static int IntersectSortedScalar(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right, Span<uint> result)
     {
-        var result = new uint[Math.Min(left.Length, right.Length)];
         var count = 0;
         var i = 0;
         var j = 0;
@@ -376,13 +397,11 @@ internal static class PostingsCodec
             }
         }
 
-        Array.Resize(ref result, count);
-        return result;
+        return count;
     }
 
-    private static uint[] IntersectSortedBlockMerge(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    private static int IntersectSortedBlockMerge(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right, Span<uint> result)
     {
-        var result = new uint[Math.Min(left.Length, right.Length)];
         var count = 0;
         var ai = 0;
         var bi = 0;
@@ -417,19 +436,17 @@ internal static class PostingsCodec
             }
         }
 
-        Array.Resize(ref result, count);
-        return result;
+        return count;
     }
 
-    private static uint[] IntersectSortedBlockMergeSimd(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right)
+    private static int IntersectSortedBlockMergeSimd(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right, Span<uint> result)
     {
         if (!Vector.IsHardwareAccelerated || Vector<uint>.Count < 4)
         {
-            return IntersectSortedBlockMerge(left, right);
+            return IntersectSortedBlockMerge(left, right, result);
         }
 
         var blockSize = Vector<uint>.Count;
-        var result = new uint[Math.Min(left.Length, right.Length)];
         var count = 0;
         var ai = 0;
         var bi = 0;
@@ -481,8 +498,7 @@ internal static class PostingsCodec
             }
         }
 
-        Array.Resize(ref result, count);
-        return result;
+        return count;
     }
 
     private static int FindCheckpoint(ReadOnlySpan<byte> checkpoints, uint target)

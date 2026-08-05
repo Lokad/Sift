@@ -35,6 +35,19 @@ internal sealed class PooledBitSet : IDisposable
         }
     }
 
+    public void Or(PooledBitSet other)
+    {
+        for (var i = 0; i < _count; i++)
+        {
+            _words[i] |= other._words[i];
+        }
+    }
+
+    public void Clear()
+    {
+        Array.Clear(_words, 0, _count);
+    }
+
     public int Count()
     {
         var total = 0;

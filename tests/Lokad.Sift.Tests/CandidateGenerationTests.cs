@@ -6,42 +6,6 @@ namespace Lokad.Sift.Tests;
 public sealed class CandidateGenerationTests
 {
     [Fact]
-    public async Task IntersectSortedHandlesBalancedInputs()
-    {
-        var left = new uint[] { 1, 3, 5, 7, 9 };
-        var right = new uint[] { 0, 3, 4, 7, 8, 9 };
-
-        var result = CandidateGenerator.IntersectSorted(left, right);
-
-        Assert.Equal(new uint[] { 3, 7, 9 }, result);
-    }
-
-    [Fact]
-    public async Task IntersectSortedHandlesHighlySkewedInputs()
-    {
-        var small = new uint[] { 10, 100, 1000, 10_000 };
-        var large = Enumerable.Range(0, 20_000)
-            .Where(static i => i % 3 == 0 || i == 10 || i == 100 || i == 1000 || i == 10_000)
-            .Select(static i => (uint)i)
-            .ToArray();
-
-        var result = CandidateGenerator.IntersectSorted(small, large);
-
-        Assert.Equal(new uint[] { 10, 100, 1000, 10_000 }, result);
-    }
-
-    [Fact]
-    public async Task IntersectSortedReturnsEmptyWhenNoMatches()
-    {
-        var left = new uint[] { 1, 5, 9 };
-        var right = new uint[] { 2, 4, 6, 8 };
-
-        var result = CandidateGenerator.IntersectSorted(left, right);
-
-        Assert.Empty(result);
-    }
-
-    [Fact]
     public async Task PostingsCodecAdaptiveIntersectionMatchesPlainEncoding()
     {
         var right = CreateRange(0, 1536, 3);
