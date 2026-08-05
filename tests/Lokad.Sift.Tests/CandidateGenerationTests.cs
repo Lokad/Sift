@@ -42,6 +42,18 @@ public sealed class CandidateGenerationTests
     }
 
     [Theory]
+    [InlineData(2500)]
+    [InlineData(3500)]
+    public void PostingsCodecAdaptiveIntersectionRejectsMismatchedDocumentFrequency(int documentFrequency)
+    {
+        var ordinals = CreateRange(0, 3000, 1);
+        var payload = PostingsCodec.Encode(ordinals);
+
+        Assert.Throws<InvalidDataException>(() =>
+            PostingsCodec.IntersectSorted(ordinals, payload, documentFrequency));
+    }
+
+    [Theory]
     [InlineData(new byte[] { 0x80 })]
     [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x10 })]
     [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x80, 0x00 })]

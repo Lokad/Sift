@@ -264,7 +264,7 @@ internal static class PostingsCodec
         var rentedRight = ArrayPool<uint>.Shared.Rent(docFreq);
         try
         {
-            var rightLength = DecodeOrdinals(view, rentedRight);
+            var rightLength = DecodeOrdinals(view, rentedRight.AsSpan(0, docFreq));
             var right = rentedRight.AsSpan(0, rightLength);
             if (right.Length == 0)
             {
@@ -346,6 +346,11 @@ internal static class PostingsCodec
         {
             current += VarInt.ReadUInt32(view.Data, ref offset);
             values[count++] = current;
+        }
+
+        if (offset != view.Data.Length || count != values.Length)
+        {
+            throw new InvalidDataException("Sift postings do not match their document frequency.");
         }
 
         return count;
