@@ -332,6 +332,12 @@ public enum SearchVerifierKind
     Mixed
 }
 
+/// <summary>Describes one planner strategy observed across one or more segments.</summary>
+/// <remarks>
+///     An entry may cover fewer segments than the containing plan and is therefore
+///     not necessarily an executable whole-snapshot alternative. Planner costs are
+///     unitless heuristics comparable only within the same explanation.
+/// </remarks>
 public sealed class PlannerAlternative
 {
     internal PlannerAlternative(
@@ -364,9 +370,13 @@ public sealed class PlannerAlternative
     public SearchCandidateCombination CandidateCombination { get; }
     public SearchVerifierKind VerifierKind { get; }
     public bool UsesIndex { get; }
+    /// <summary>Gets the unitless estimated cost of direct scanning.</summary>
     public double EstimatedDirectScanCost { get; }
+    /// <summary>Gets the unitless estimated indexed cost, when this strategy uses an index.</summary>
     public double? EstimatedIndexedCost { get; }
+    /// <summary>Gets the estimated number of documents passed to this strategy's verifier.</summary>
     public double EstimatedCandidateDocuments { get; }
+    /// <summary>Gets the selected unitless planner cost.</summary>
     public double EstimatedCost { get; }
     public int SegmentCount { get; }
 
@@ -379,6 +389,11 @@ public sealed class PlannerAlternative
     public long ScopeByteCount { get; }
 }
 
+/// <summary>Describes the diagnostic planner decision for one snapshot and query.</summary>
+/// <remarks>
+///     Cost values are implementation diagnostics, not elapsed-time predictions or
+///     stable values across Sift versions.
+/// </remarks>
 public sealed class SearchPlan
 {
     internal SearchPlan(
@@ -469,17 +484,26 @@ public sealed class SearchPlan
     public bool CanUseNonBacktracking { get; }
     public bool NeedsUnicodeDecode { get; }
     public bool MayRequireWholeDocumentVerification { get; }
+    /// <summary>Gets the unitless estimated path-filter cost.</summary>
     public double EstimatedPathFilterCost { get; }
+    /// <summary>Gets the unitless estimated direct-scan cost.</summary>
     public double EstimatedDirectScanCost { get; }
+    /// <summary>Gets the unitless estimated indexed cost, when one is available.</summary>
     public double? EstimatedIndexedCost { get; }
+    /// <summary>Gets the estimated number of documents passed to the selected verifier.</summary>
     public double EstimatedCandidateDocuments { get; }
+    /// <summary>Gets the unitless estimated cost of the selected strategy.</summary>
     public double EstimatedCost { get; }
     public SearchCandidateKind CandidateKind { get; }
     public SearchCandidateCombination CandidateCombination { get; }
     public SearchVerifierKind VerifierKind { get; }
+    /// <summary>Gets the next-best strategy that covers every segment, when available.</summary>
     public PlannerAlternative? RunnerUp { get; }
+    /// <summary>Gets the runner-up's unitless estimated-cost excess over the selected strategy.</summary>
     public double? RunnerUpEstimatedCostDelta { get; }
     public TimeoutPolicy TimeoutPolicy { get; }
+    /// <summary>Gets strategies observed during per-segment planning.</summary>
+    /// <remarks>Use each entry's segment and scope counts to determine its coverage.</remarks>
     public IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; }
 }
 
