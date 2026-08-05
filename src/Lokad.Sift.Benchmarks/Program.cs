@@ -2110,10 +2110,9 @@ static CorpusFileEntry[] EnumerateIndexedDocuments(string cachePath)
     {
         var entry = manifest.Segments[segmentIndex];
         using var segment = storage.OpenSegment(entry.SegmentId);
-        var dead = new HashSet<uint>(entry.DeadOrdinals);
         for (uint ordinal = 0; ordinal < segment.DocumentCount; ordinal++)
         {
-            if (dead.Contains(ordinal))
+            if (entry.DeadOrdinals.Contains(ordinal))
             {
                 continue;
             }
