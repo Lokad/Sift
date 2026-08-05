@@ -86,7 +86,7 @@ internal sealed class IndexBuilder
         var entries = new List<SegmentManifestEntry>();
         var attemptedSegmentIds = new List<SegmentId>();
         StreamedDocuments load;
-        RejectedDocument[] rejectedDocuments;
+        BuildStats pendingStats;
         try
         {
             load = await streamDocuments(
@@ -102,8 +102,8 @@ internal sealed class IndexBuilder
                         cancellationToken));
                 }).ConfigureAwait(false);
 
-            rejectedDocuments = load.RejectedDocuments.ToArray();
-            var pendingStats = new BuildStats(
+            var rejectedDocuments = load.RejectedDocuments.ToArray();
+            pendingStats = new BuildStats(
                 submittedDocuments: load.Submitted,
                 indexedDocuments: load.Accepted,
                 rejectedDocuments: load.Rejected,
@@ -137,18 +137,9 @@ internal sealed class IndexBuilder
 
         watch.Stop();
 
-        return new BuildStats(
-            submittedDocuments: load.Submitted,
-            indexedDocuments: load.Accepted,
-            rejectedDocuments: load.Rejected,
-            segmentCount: entries.Count,
-            submittedBytes: load.SubmittedBytes,
-            contentBytes: load.AcceptedBytes,
-            rejectedBytes: load.RejectedBytes,
-            elapsedMilliseconds: watch.ElapsedMilliseconds,
-            peakManagedBytes: 0,
-            rejectedDocumentDetails: rejectedDocuments,
-            committedIdentity: new IndexIdentity(
+        return pendingStats.Complete(
+            watch.ElapsedMilliseconds,
+            new IndexIdentity(
                 corpusId,
                 new ContentRevision(1),
                 generation));

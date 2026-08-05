@@ -774,7 +774,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     private void WriteManifest(CorpusManifest manifest)
     {
-        manifest = ResolveLegacyDeadContentBytes(manifest).Freeze();
+        manifest = ResolveLegacyDeadContentBytes(manifest).CopyForPublication();
         // Set the retry marker and publish the reader lease before making the generation discoverable.
         SetReclamationPending(isPending: true);
         EnsureGenerationLease(manifest);

@@ -649,7 +649,7 @@ public sealed class SiftIndex : ISiftIndex
             var existingUpsertKeys = new Dictionary<string, LiveDocumentKey>(StringComparer.Ordinal);
             var deletedDocuments = 0;
             StreamedDocuments upsertLoad;
-            RejectedDocument[] rejectedDocuments;
+            UpdateStats pendingStats;
             try
             {
                 var segmentSeed = existingManifest.Generation.Next().Value ^ ((ulong)DateTime.UtcNow.Ticks << 1);
@@ -706,8 +706,8 @@ public sealed class SiftIndex : ISiftIndex
 
                 var requiresManifestMigration = existingManifest.Segments.Any(
                     static segment => segment.DeadContentBytes < 0);
-                rejectedDocuments = upsertLoad.RejectedDocuments.ToArray();
-                var pendingStats = new UpdateStats(
+                var rejectedDocuments = upsertLoad.RejectedDocuments.ToArray();
+                pendingStats = new UpdateStats(
                     submittedUpserts: upsertLoad.Submitted,
                     upsertedDocuments: upsertLoad.Accepted,
                     skippedUpserts: upsertLoad.Skipped,
@@ -791,7 +791,7 @@ public sealed class SiftIndex : ISiftIndex
                             ? existingManifest.ContentRevision.Next()
                             : existingManifest.ContentRevision,
                         existingManifest.Generation.Next(),
-                        commitMetadata.ToArray(),
+                        commitMetadata,
                         newSegments);
                     ResetValidationStats();
                     writeSession.PublishManifest(manifest);
@@ -806,20 +806,7 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             watch.Stop();
-            return new UpdateStats(
-                submittedUpserts: upsertLoad.Submitted,
-                upsertedDocuments: upsertLoad.Accepted,
-                skippedUpserts: upsertLoad.Skipped,
-                rejectedUpserts: upsertLoad.Rejected,
-                deletedDocuments: deletedDocuments,
-                publishedSegments: publishedSegments.Count,
-                submittedBytes: upsertLoad.SubmittedBytes,
-                contentBytes: upsertLoad.AcceptedBytes,
-                skippedBytes: upsertLoad.SkippedBytes,
-                rejectedBytes: upsertLoad.RejectedBytes,
-                rejectedDocumentDetails: rejectedDocuments,
-                elapsedMilliseconds: watch.ElapsedMilliseconds,
-                committedIdentity: committedIdentity);
+            return pendingStats.Complete(watch.ElapsedMilliseconds, committedIdentity);
         }
     }
 

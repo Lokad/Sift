@@ -162,10 +162,25 @@ public sealed class BuildStats
         peakManagedBytes,
         _rejectedDocumentDetails,
         CommittedIdentity);
+
+    internal BuildStats Complete(long elapsedMilliseconds, IndexIdentity committedIdentity) => new(
+        SubmittedDocuments,
+        IndexedDocuments,
+        RejectedDocuments,
+        SegmentCount,
+        SubmittedBytes,
+        ContentBytes,
+        RejectedBytes,
+        elapsedMilliseconds,
+        PeakManagedBytes,
+        _rejectedDocumentDetails,
+        committedIdentity);
 }
 
 public sealed class UpdateStats
 {
+    private readonly RejectedDocument[] _rejectedDocumentDetails;
+
     internal UpdateStats(
         int submittedUpserts,
         int upsertedDocuments,
@@ -191,6 +206,7 @@ public sealed class UpdateStats
         ContentBytes = contentBytes;
         SkippedBytes = skippedBytes;
         RejectedBytes = rejectedBytes;
+        _rejectedDocumentDetails = rejectedDocumentDetails;
         RejectedDocumentDetails = PublicResultCollection.Own(rejectedDocumentDetails);
         ElapsedMilliseconds = elapsedMilliseconds;
         CommittedIdentity = committedIdentity;
@@ -219,6 +235,21 @@ public sealed class UpdateStats
     ///     have the default identity because the manifest has not yet been committed.
     /// </remarks>
     public IndexIdentity CommittedIdentity { get; }
+
+    internal UpdateStats Complete(long elapsedMilliseconds, IndexIdentity committedIdentity) => new(
+        SubmittedUpserts,
+        UpsertedDocuments,
+        SkippedUpserts,
+        RejectedUpserts,
+        DeletedDocuments,
+        PublishedSegments,
+        SubmittedBytes,
+        ContentBytes,
+        SkippedBytes,
+        RejectedBytes,
+        _rejectedDocumentDetails,
+        elapsedMilliseconds,
+        committedIdentity);
 }
 
 public sealed record CompactOptions

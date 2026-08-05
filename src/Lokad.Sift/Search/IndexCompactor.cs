@@ -155,7 +155,7 @@ internal sealed class IndexCompactor
                 manifest.CorpusId,
                 manifest.ContentRevision,
                 manifest.Generation.Next(),
-                [.. manifest.CommitMetadata],
+                manifest.CommitMetadata,
                 mergedSegments);
             resetValidation();
             writeSession.PublishManifest(newManifest);

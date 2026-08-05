@@ -67,7 +67,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         {
             // Freeze caller-owned arrays once at publication. Published manifests
             // are immutable storage state and can then be shared by every reader.
-            _manifest = manifest.Freeze();
+            _manifest = manifest.CopyForPublication();
             _ = ReclaimUnreferencedSegmentsUnderWriterLock();
         }
     }

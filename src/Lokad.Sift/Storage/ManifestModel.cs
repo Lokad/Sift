@@ -25,7 +25,7 @@ internal sealed record CorpusManifest(
     {
     }
 
-    public CorpusManifest Freeze()
+    public CorpusManifest CopyForPublication()
     {
         var segments = new SegmentManifestEntry[Segments.Count];
         for (var i = 0; i < Segments.Count; i++)
