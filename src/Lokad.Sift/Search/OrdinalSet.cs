@@ -32,6 +32,26 @@ internal sealed class OrdinalSet
         _excludedStart = LowerBound(excludedOrdinals.Span, startInclusive);
         _excludedEnd = LowerBound(excludedOrdinals.Span, endExclusive);
         Count = checked((int)(endExclusive - startInclusive) - (_excludedEnd - _excludedStart));
+
+        static int LowerBound(ReadOnlySpan<uint> values, uint target)
+        {
+            var low = 0;
+            var high = values.Length;
+            while (low < high)
+            {
+                var mid = low + ((high - low) >> 1);
+                if (values[mid] < target)
+                {
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid;
+                }
+            }
+
+            return low;
+        }
     }
 
     public static OrdinalSet Empty { get; } = new([]);
@@ -93,26 +113,6 @@ internal sealed class OrdinalSet
         {
             destination[index++] = ordinal;
         }
-    }
-
-    private static int LowerBound(ReadOnlySpan<uint> values, uint target)
-    {
-        var low = 0;
-        var high = values.Length;
-        while (low < high)
-        {
-            var mid = low + ((high - low) >> 1);
-            if (values[mid] < target)
-            {
-                low = mid + 1;
-            }
-            else
-            {
-                high = mid;
-            }
-        }
-
-        return low;
     }
 
     public struct Enumerator

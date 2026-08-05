@@ -94,7 +94,7 @@ internal sealed class SearchPlanExplainer(
         var canUseLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
         var canUseNonBacktracking = query.PatternMode == PatternMode.Regex && regexPlan.CanUseNonBacktracking;
         var needsUnicodeDecode =
-            RegexExecutionPlanner.NeedsUnicodeDecode(
+            NeedsUnicodeDecode(
                 query,
                 preparedQuery.Pattern,
                 preparedQuery.MandatoryTexts,
@@ -181,6 +181,49 @@ internal sealed class SearchPlanExplainer(
             return aggregate is null || EqualityComparer<T>.Default.Equals(aggregate.Value, value)
                 ? value
                 : mixed;
+        }
+
+        static bool NeedsUnicodeDecode(
+            SearchQuery query,
+            PreparedSearchText pattern,
+            PreparedSearchText[] mandatoryFragments,
+            CaseMode resolvedCaseMode,
+            in RegexExecutionPlan regexPlan)
+        {
+            if (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral && !regexPlan.UsesUtf8Regex)
+            {
+                return true;
+            }
+
+            if (query.PatternMode == PatternMode.Regex && (regexPlan.IsExactLiteral || regexPlan.UsesUtf8Regex))
+            {
+                return false;
+            }
+
+            if (query.Multiline || query.DotAll)
+            {
+                return true;
+            }
+
+            if (query.WholeLine)
+            {
+                return !pattern.IsAscii;
+            }
+
+            if (resolvedCaseMode == CaseMode.Sensitive)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < mandatoryFragments.Length; i++)
+            {
+                if (!mandatoryFragments[i].IsAscii)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

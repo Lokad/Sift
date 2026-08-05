@@ -83,7 +83,7 @@ internal static class SearchQueryPreparer
                 }
             }
 
-            var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode, analysis, utf8Syntax);
+            var regexPlan = ResolveRegexExecution(query, resolvedCaseMode, analysis, utf8Syntax);
             var anchors = SearchQueryAnchors.Create(query, resolvedCaseMode, regexPlan, analysis);
             var mandatoryTexts = PreparedSearchText.CreateMany(anchors.MandatoryTexts);
             var advisoryTexts = PreparedSearchText.CreateMany(anchors.AdvisoryTexts);
@@ -103,6 +103,35 @@ internal static class SearchQueryPreparer
                     : PreparedMandatoryFragment.CreateMany(mandatoryTexts, resolvedCaseMode),
                 PreparedOrderedAnchor.CreateGroups(anchors.OrderedAnchorGroups),
                 () => PreparedRegexExecution.Create(query, resolvedCaseMode, regexPlan));
+
+            static RegexExecutionPlan ResolveRegexExecution(
+                SearchQuery query,
+                CaseMode resolvedCaseMode,
+                in RegexFragmentAnalyzer.PatternAnalysis analysis,
+                Utf8RegexSyntax? utf8Syntax)
+            {
+                if (query.PatternMode != PatternMode.Regex)
+                {
+                    return RegexExecutionPlan.Literal;
+                }
+
+                // Invariant regex case folding is not equivalent to ordinal or ASCII folding.
+                // Only sensitive regexes can therefore be replaced by the literal verifier.
+                if (resolvedCaseMode == CaseMode.Sensitive &&
+                    analysis.IsExactLiteral &&
+                    analysis.ExactLiteral is { } exactLiteral)
+                {
+                    return RegexExecutionPlan.ForExactLiteral(exactLiteral);
+                }
+
+                if (utf8Syntax is not null &&
+                    Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, utf8Syntax, out var utf8RegexProgram))
+                {
+                    return RegexExecutionPlan.ForUtf8Regex(utf8RegexProgram);
+                }
+
+                return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, resolvedCaseMode));
+            }
         }
 
         static CaseMode ResolveCaseMode(SearchQuery query)

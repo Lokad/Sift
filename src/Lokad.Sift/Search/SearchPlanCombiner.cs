@@ -78,145 +78,145 @@ internal static class SearchPlanCombiner
                 : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
             timeoutPolicy: basePlan.TimeoutPolicy,
             plannerAlternatives: plannerAlternatives);
-    }
-
-    private static T MergeStrategy<T>(
+        static T MergeStrategy<T>(
         T left,
         int leftSegments,
         T right,
         int rightSegments,
         T mixed)
         where T : struct, Enum
-    {
-        if (leftSegments == 0)
         {
-            return right;
+            if (leftSegments == 0)
+            {
+                return right;
+            }
+
+            if (rightSegments == 0)
+            {
+                return left;
+            }
+
+            return EqualityComparer<T>.Default.Equals(left, right) ? left : mixed;
         }
 
-        if (rightSegments == 0)
-        {
-            return left;
-        }
-
-        return EqualityComparer<T>.Default.Equals(left, right) ? left : mixed;
-    }
-
-    private static PlannerAlternative[] MergePlannerAlternatives(
+        static PlannerAlternative[] MergePlannerAlternatives(
         IReadOnlyList<PlannerAlternative> left,
         IReadOnlyList<PlannerAlternative> right)
-    {
-        var sums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
-        Add(left);
-        Add(right);
-        return sums
-            .Select(static pair => pair.Value.ToPlannerAlternative(
-                pair.Key.CandidateKind,
-                pair.Key.CandidateCombination,
-                pair.Key.VerifierKind,
-                pair.Key.UsesIndex))
-            .OrderBy(static alternative => alternative.EstimatedCost)
-            .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
-            .ToArray();
-
-        void Add(IReadOnlyList<PlannerAlternative> alternatives)
         {
-            for (var i = 0; i < alternatives.Count; i++)
+            var sums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
+            Add(left);
+            Add(right);
+            return sums
+                .Select(static pair => pair.Value.ToPlannerAlternative(
+                    pair.Key.CandidateKind,
+                    pair.Key.CandidateCombination,
+                    pair.Key.VerifierKind,
+                    pair.Key.UsesIndex))
+                .OrderBy(static alternative => alternative.EstimatedCost)
+                .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
+                .ToArray();
+
+            void Add(IReadOnlyList<PlannerAlternative> alternatives)
             {
-                var alternative = alternatives[i];
-                var key = (
-                    alternative.CandidateKind,
-                    alternative.CandidateCombination,
-                    alternative.VerifierKind,
-                    alternative.UsesIndex);
-                ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(sums, key, out _);
-                accumulator.Add(alternative);
+                for (var i = 0; i < alternatives.Count; i++)
+                {
+                    var alternative = alternatives[i];
+                    var key = (
+                        alternative.CandidateKind,
+                        alternative.CandidateCombination,
+                        alternative.VerifierKind,
+                        alternative.UsesIndex);
+                    ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(sums, key, out _);
+                    accumulator.Add(alternative);
+                }
             }
         }
-    }
 
-    private static string[] MergeStrings(
+        static string[] MergeStrings(
         IReadOnlyList<string> left,
         IReadOnlyList<string> right)
-    {
-        if (left.Count == 0)
         {
-            return [.. right];
-        }
-
-        if (right.Count == 0)
-        {
-            return [.. left];
-        }
-
-        var merged = new List<string>(left.Count + right.Count);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < left.Count; i++)
-        {
-            if (seen.Add(left[i]))
+            if (left.Count == 0)
             {
-                merged.Add(left[i]);
+                return [.. right];
             }
-        }
 
-        for (var i = 0; i < right.Count; i++)
-        {
-            if (seen.Add(right[i]))
+            if (right.Count == 0)
             {
-                merged.Add(right[i]);
+                return [.. left];
             }
+
+            var merged = new List<string>(left.Count + right.Count);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < left.Count; i++)
+            {
+                if (seen.Add(left[i]))
+                {
+                    merged.Add(left[i]);
+                }
+            }
+
+            for (var i = 0; i < right.Count; i++)
+            {
+                if (seen.Add(right[i]))
+                {
+                    merged.Add(right[i]);
+                }
+            }
+
+            return [.. merged];
         }
 
-        return [.. merged];
-    }
-
-    private static SelectedNgram[] MergeSelectedNgrams(
+        static SelectedNgram[] MergeSelectedNgrams(
         IReadOnlyList<SelectedNgram> left,
         IReadOnlyList<SelectedNgram> right)
-    {
-        if (left.Count == 0)
         {
-            return [.. right];
+            if (left.Count == 0)
+            {
+                return [.. right];
+            }
+
+            if (right.Count == 0)
+            {
+                return [.. left];
+            }
+
+            var merged = new Dictionary<(string Text, int ByteLength), int>();
+            for (var i = 0; i < left.Count; i++)
+            {
+                var key = (left[i].Text, left[i].ByteLength);
+                merged.TryGetValue(key, out var documentFrequency);
+                merged[key] = checked(documentFrequency + left[i].DocumentFrequency);
+            }
+
+            for (var i = 0; i < right.Count; i++)
+            {
+                var key = (right[i].Text, right[i].ByteLength);
+                merged.TryGetValue(key, out var documentFrequency);
+                merged[key] = checked(documentFrequency + right[i].DocumentFrequency);
+            }
+
+            return merged
+                .Select(static pair => new SelectedNgram(pair.Key.Text, pair.Key.ByteLength, pair.Value))
+                .OrderBy(static gram => gram.ByteLength)
+                .ThenBy(static gram => gram.Text, StringComparer.Ordinal)
+                .ToArray();
         }
 
-        if (right.Count == 0)
+        static double? SumNullable(double? left, double? right)
         {
-            return [.. left];
-        }
+            if (left is null)
+            {
+                return right;
+            }
 
-        var merged = new Dictionary<(string Text, int ByteLength), int>();
-        for (var i = 0; i < left.Count; i++)
-        {
-            var key = (left[i].Text, left[i].ByteLength);
-            merged.TryGetValue(key, out var documentFrequency);
-            merged[key] = checked(documentFrequency + left[i].DocumentFrequency);
-        }
+            if (right is null)
+            {
+                return left;
+            }
 
-        for (var i = 0; i < right.Count; i++)
-        {
-            var key = (right[i].Text, right[i].ByteLength);
-            merged.TryGetValue(key, out var documentFrequency);
-            merged[key] = checked(documentFrequency + right[i].DocumentFrequency);
+            return left.Value + right.Value;
         }
-
-        return merged
-            .Select(static pair => new SelectedNgram(pair.Key.Text, pair.Key.ByteLength, pair.Value))
-            .OrderBy(static gram => gram.ByteLength)
-            .ThenBy(static gram => gram.Text, StringComparer.Ordinal)
-            .ToArray();
     }
 
-    private static double? SumNullable(double? left, double? right)
-    {
-        if (left is null)
-        {
-            return right;
-        }
-
-        if (right is null)
-        {
-            return left;
-        }
-
-        return left.Value + right.Value;
-    }
 }

@@ -8,28 +8,6 @@ internal static class LiteralQueryPlanner
 {
     private const int MinIndexedFragmentBytes = 2;
 
-    public static LiteralPlan[] Enumerate(
-        MappedSegment segment,
-        int scopeDocuments,
-        long scopeBytes,
-        string pattern,
-        ReadOnlySpan<byte> patternBytes,
-        CaseMode resolvedCaseMode,
-        bool selectAllGrams,
-        SiftOptions options)
-    {
-        var direct = LiteralPlan.Direct(scopeDocuments, scopeBytes);
-        if (scopeDocuments == 0 || pattern.Length == 0)
-        {
-            return [direct];
-        }
-
-        var indexed = TryCreateIndexedCandidate(segment, scopeDocuments, scopeBytes, pattern, patternBytes, resolvedCaseMode, selectAllGrams, options);
-        return indexed.HasValue
-            ? [direct, indexed.Value]
-            : [direct];
-    }
-
     public static LiteralPlan? TryCreateIndexedCandidate(
         MappedSegment segment,
         int scopeDocuments,
@@ -40,6 +18,11 @@ internal static class LiteralQueryPlanner
         bool selectAllGrams,
         SiftOptions options)
     {
+        if (scopeDocuments == 0 || pattern.Length == 0)
+        {
+            return null;
+        }
+
         if (scopeDocuments <= options.DirectScanScopeDocumentsThreshold && scopeBytes <= options.DirectScanScopeBytesThreshold)
         {
             return null;
@@ -110,56 +93,56 @@ internal static class LiteralQueryPlanner
             selected,
             pair,
             gramLength);
-    }
 
-    private static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)
-    {
-        if (grams.Count == 0)
+        static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)
         {
-            return [];
-        }
-
-        if (scopeDocuments <= 0)
-        {
-            return [grams[0]];
-        }
-
-        var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(scopeDocuments, options);
-        if (targetCandidates == int.MaxValue)
-        {
-            return grams.ToArray();
-        }
-
-        var selected = new List<SelectedGram>(Math.Min(grams.Count, options.MaxSelectedNgrams));
-        var estimatedCandidates = (double)scopeDocuments;
-        foreach (var gram in grams)
-        {
-            if (selected.Count >= options.MaxSelectedNgrams)
+            if (grams.Count == 0)
             {
-                break;
+                return [];
             }
 
-            selected.Add(gram);
-            var ratio = Math.Clamp((double)gram.DocFreq / scopeDocuments, 0d, 1d);
-            estimatedCandidates *= ratio;
-            if (estimatedCandidates <= targetCandidates)
+            if (scopeDocuments <= 0)
             {
-                break;
+                return [grams[0]];
             }
+
+            var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(scopeDocuments, options);
+            if (targetCandidates == int.MaxValue)
+            {
+                return grams.ToArray();
+            }
+
+            var selected = new List<SelectedGram>(Math.Min(grams.Count, options.MaxSelectedNgrams));
+            var estimatedCandidates = (double)scopeDocuments;
+            foreach (var gram in grams)
+            {
+                if (selected.Count >= options.MaxSelectedNgrams)
+                {
+                    break;
+                }
+
+                selected.Add(gram);
+                var ratio = Math.Clamp((double)gram.DocFreq / scopeDocuments, 0d, 1d);
+                estimatedCandidates *= ratio;
+                if (estimatedCandidates <= targetCandidates)
+                {
+                    break;
+                }
+            }
+
+            return [.. selected];
         }
 
-        return [.. selected];
-    }
-
-    private static IndexRegionPair SelectIndexRegionPair(int gramLength, bool caseInsensitiveAscii)
-    {
-        return gramLength == 3
-            ? caseInsensitiveAscii
-                ? new IndexRegionPair(SegmentRegionId.ContentTriIcLex, SegmentRegionId.ContentTriIcPost)
-                : new IndexRegionPair(SegmentRegionId.ContentTriCsLex, SegmentRegionId.ContentTriCsPost)
-            : caseInsensitiveAscii
-                ? new IndexRegionPair(SegmentRegionId.ContentBiIcLex, SegmentRegionId.ContentBiIcPost)
-                : new IndexRegionPair(SegmentRegionId.ContentBiCsLex, SegmentRegionId.ContentBiCsPost);
+        static IndexRegionPair SelectIndexRegionPair(int gramLength, bool caseInsensitiveAscii)
+        {
+            return gramLength == 3
+                ? caseInsensitiveAscii
+                    ? new IndexRegionPair(SegmentRegionId.ContentTriIcLex, SegmentRegionId.ContentTriIcPost)
+                    : new IndexRegionPair(SegmentRegionId.ContentTriCsLex, SegmentRegionId.ContentTriCsPost)
+                : caseInsensitiveAscii
+                    ? new IndexRegionPair(SegmentRegionId.ContentBiIcLex, SegmentRegionId.ContentBiIcPost)
+                    : new IndexRegionPair(SegmentRegionId.ContentBiCsLex, SegmentRegionId.ContentBiCsPost);
+        }
     }
 
 }

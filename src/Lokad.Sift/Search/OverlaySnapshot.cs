@@ -470,6 +470,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             cancellationToken);
 
         return CombineStats(overlayStats, baseStats);
+
+        static SearchStats CombineStats(SearchStats overlay, SearchStats @base)
+        {
+            var metrics = SearchMetrics.FromSearchStats(overlay);
+            metrics.Add(SearchMetrics.FromSearchStats(@base));
+            return metrics.ToSearchStats(
+                overlay.ElapsedMilliseconds + @base.ElapsedMilliseconds,
+                overlay.HitsReturned + @base.HitsReturned,
+                @base.StopReason);
+        }
     }
 
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
@@ -624,16 +634,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
 
         return documents;
-    }
-
-    private static SearchStats CombineStats(SearchStats overlay, SearchStats @base)
-    {
-        var metrics = SearchMetrics.FromSearchStats(overlay);
-        metrics.Add(SearchMetrics.FromSearchStats(@base));
-        return metrics.ToSearchStats(
-            overlay.ElapsedMilliseconds + @base.ElapsedMilliseconds,
-            overlay.HitsReturned + @base.HitsReturned,
-            @base.StopReason);
     }
 
     private static DocumentKey[] CreateDeletionKeys(IReadOnlyCollection<string> paths)

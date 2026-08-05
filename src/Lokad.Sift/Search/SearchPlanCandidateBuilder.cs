@@ -11,18 +11,23 @@ internal static class SearchPlanCandidateBuilder
         var candidates = new List<SearchPlanCandidate>(4);
         if (features.IsLiteralLike)
         {
-            if (features.Literal is null)
+            var direct = LiteralPlan.Direct(scope.Count, scope.Bytes);
+            candidates.Add(CreateLiteralContentPlan(in features, direct, options));
+            if (features.Literal is not null)
             {
-                candidates.Add(CreateLiteralContentPlan(
-                    in features,
-                    LiteralPlan.Direct(scope.Count, scope.Bytes),
-                    options));
-                return candidates;
-            }
-
-            foreach (var literalPlan in LiteralQueryPlanner.Enumerate(segment, scope.Count, scope.Bytes, features.Literal.Text, features.Literal.Needle, features.ResolvedCaseMode, selectAllGrams: false, options))
-            {
-                candidates.Add(CreateLiteralContentPlan(in features, literalPlan, options));
+                var indexed = LiteralQueryPlanner.TryCreateIndexedCandidate(
+                    segment,
+                    scope.Count,
+                    scope.Bytes,
+                    features.Literal.Text,
+                    features.Literal.Needle,
+                    features.ResolvedCaseMode,
+                    selectAllGrams: false,
+                    options);
+                if (indexed.HasValue)
+                {
+                    candidates.Add(CreateLiteralContentPlan(in features, indexed.Value, options));
+                }
             }
 
             return candidates;
@@ -134,488 +139,486 @@ internal static class SearchPlanCandidateBuilder
         }
 
         return candidates;
-    }
 
-    private static SearchPlanCandidate CreateLiteralContentPlan(in SearchQueryFeatures features, in LiteralPlan literalPlan, SiftOptions options)
-    {
-        var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
-        var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) * features.RegexPlan.DirectScanCostMultiplier;
-        var seedByteLength = literalPlan.SeedByteLength;
-        var estimatedCandidates = literalPlan.UsesIndex && literalPlan.SelectedGrams.Length > 0
-            ? SearchPlanner.EstimateCandidateUpperBound(literalPlan.SelectedGrams, literalPlan.ScopeDocuments)
-            : literalPlan.IsMissingGram ? 0 : literalPlan.ScopeDocuments;
-        double? estimatedIndexedCost = literalPlan.UsesIndex
-            ? literalPlan.IsMissingGram
+        static SearchPlanCandidate CreateLiteralContentPlan(in SearchQueryFeatures features, in LiteralPlan literalPlan, SiftOptions options)
+        {
+            var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
+            var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) * features.RegexPlan.DirectScanCostMultiplier;
+            var seedByteLength = literalPlan.SeedByteLength;
+            var estimatedCandidates = literalPlan.UsesIndex && literalPlan.SelectedGrams.Length > 0
+                ? SearchPlanner.EstimateCandidateUpperBound(literalPlan.SelectedGrams, literalPlan.ScopeDocuments)
+                : literalPlan.IsMissingGram ? 0 : literalPlan.ScopeDocuments;
+            double? estimatedIndexedCost = literalPlan.UsesIndex
+                ? literalPlan.IsMissingGram
+                    ? 0d
+                    : SearchPlanner.EstimateIndexedCost(
+                        seedByteLength,
+                        estimatedCandidates,
+                        literalPlan.SelectedGrams,
+                        features.RegexPlan)
+                : null;
+            var estimatedCost = literalPlan.UsesIndex
+                ? literalPlan.IsMissingGram
+                    ? 0d
+                    : SearchPlanner.ShouldPreferLiteralDirectScan(
+                        literalPlan.ScopeDocuments,
+                        literalPlan.ScopeBytes,
+                        seedByteLength,
+                        literalPlan.SelectedGrams,
+                        estimatedCandidates,
+                        options)
+                        ? directScanCost + 1d
+                        : estimatedIndexedCost ?? 0d
+                : directScanCost;
+            return new SearchPlanCandidate(
+                literalPlan,
+                SearchPlanner.GetCandidateKind(selected, literalPlan.UsesIndex),
+                SearchPlanner.GetCandidateCombination(
+                    selected,
+                    literalPlan.UsesIndex,
+                    literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
+                    literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
+                SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan),
+                directScanCost,
+                estimatedIndexedCost,
+                estimatedCandidates,
+                selected,
+                estimatedCost);
+        }
+
+        static SearchPlanCandidate CreateDirectRegexCandidate(in SearchQueryFeatures features, SegmentScope scope)
+        {
+            var directScanCost = SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan);
+            return new SearchPlanCandidate(
+                LiteralPlan.Direct(scope.Count, scope.Bytes),
+                SearchCandidateKind.DirectScan,
+                SearchCandidateCombination.None,
+                GetVerifierKind(features, scope),
+                directScanCost,
+                null,
+                scope.Count,
+                [],
+                directScanCost);
+        }
+
+        static SearchPlanCandidate CreateRegexIndexedCandidate(in SearchQueryFeatures features, SegmentScope scope, in LiteralPlan literalPlan, double estimatedCandidates, SiftOptions options)
+        {
+            var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
+            var includesUnicodeFallback =
+                features.Query.PatternMode == PatternMode.Regex &&
+                features.ResolvedCaseMode == CaseMode.Insensitive &&
+                features.RegexPlan.UsesUtf8Regex &&
+                scope.NonAsciiDocuments > 0;
+            if (includesUnicodeFallback)
+            {
+                estimatedCandidates = Math.Min(
+                    scope.Count,
+                    estimatedCandidates + scope.NonAsciiDocuments);
+            }
+
+            var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) * features.RegexPlan.DirectScanCostMultiplier;
+            var indexCanRejectEntireScope = literalPlan.IsMissingGram && !includesUnicodeFallback;
+            double? estimatedIndexedCost = indexCanRejectEntireScope
                 ? 0d
                 : SearchPlanner.EstimateIndexedCost(
-                    seedByteLength,
+                    literalPlan.SeedByteLength,
                     estimatedCandidates,
                     literalPlan.SelectedGrams,
-                    features.RegexPlan)
-            : null;
-        var estimatedCost = literalPlan.UsesIndex
-            ? literalPlan.IsMissingGram
+                    features.RegexPlan) +
+                  (includesUnicodeFallback
+                      ? scope.NonAsciiBytes * features.RegexPlan.DirectScanCostMultiplier
+                      : 0d);
+            var estimatedCost = indexCanRejectEntireScope
                 ? 0d
-                : SearchPlanner.ShouldPreferLiteralDirectScan(
-                    literalPlan.ScopeDocuments,
-                    literalPlan.ScopeBytes,
-                    seedByteLength,
+                : SearchPlanner.ShouldPreferRegexDirectScan(
+                    scope,
                     literalPlan.SelectedGrams,
                     estimatedCandidates,
+                    directScanCost,
+                    estimatedIndexedCost ?? 0d,
+                    includesUnicodeFallback,
                     options)
                     ? directScanCost + 1d
-                    : estimatedIndexedCost ?? 0d
-            : directScanCost;
-        return new SearchPlanCandidate(
-            literalPlan,
-            SearchPlanner.GetCandidateKind(selected, literalPlan.UsesIndex),
-            SearchPlanner.GetCandidateCombination(
+                    : estimatedIndexedCost ?? 0d;
+            return new SearchPlanCandidate(
+                literalPlan,
+                SearchPlanner.GetCandidateKind(selected, usesIndex: true),
+                SearchPlanner.GetCandidateCombination(
+                    selected,
+                    usesIndex: true,
+                    literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
+                    literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
+                GetVerifierKind(features, scope),
+                directScanCost,
+                estimatedIndexedCost,
+                estimatedCandidates,
                 selected,
-                literalPlan.UsesIndex,
-                literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
-                literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
-            SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan),
-            directScanCost,
-            estimatedIndexedCost,
-            estimatedCandidates,
-            selected,
-            estimatedCost);
-    }
-
-    private static SearchPlanCandidate CreateDirectRegexCandidate(in SearchQueryFeatures features, SegmentScope scope)
-    {
-        var directScanCost = SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan);
-        return new SearchPlanCandidate(
-            LiteralPlan.Direct(scope.Count, scope.Bytes),
-            SearchCandidateKind.DirectScan,
-            SearchCandidateCombination.None,
-            GetVerifierKind(features, scope),
-            directScanCost,
-            null,
-            scope.Count,
-            [],
-            directScanCost);
-    }
-
-    private static SearchPlanCandidate CreateRegexIndexedCandidate(in SearchQueryFeatures features, SegmentScope scope, in LiteralPlan literalPlan, double estimatedCandidates, SiftOptions options)
-    {
-        var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
-        var includesUnicodeFallback =
-            features.Query.PatternMode == PatternMode.Regex &&
-            features.ResolvedCaseMode == CaseMode.Insensitive &&
-            features.RegexPlan.UsesUtf8Regex &&
-            scope.NonAsciiDocuments > 0;
-        if (includesUnicodeFallback)
-        {
-            estimatedCandidates = Math.Min(
-                scope.Count,
-                estimatedCandidates + scope.NonAsciiDocuments);
+                estimatedCost);
         }
 
-        var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) * features.RegexPlan.DirectScanCostMultiplier;
-        var indexCanRejectEntireScope = literalPlan.IsMissingGram && !includesUnicodeFallback;
-        double? estimatedIndexedCost = indexCanRejectEntireScope
-            ? 0d
-            : SearchPlanner.EstimateIndexedCost(
-                literalPlan.SeedByteLength,
-                estimatedCandidates,
-                literalPlan.SelectedGrams,
-                features.RegexPlan) +
-              (includesUnicodeFallback
-                  ? scope.NonAsciiBytes * features.RegexPlan.DirectScanCostMultiplier
-                  : 0d);
-        var estimatedCost = indexCanRejectEntireScope
-            ? 0d
-            : SearchPlanner.ShouldPreferRegexDirectScan(
-                scope,
-                literalPlan.SelectedGrams,
-                estimatedCandidates,
-                directScanCost,
-                estimatedIndexedCost ?? 0d,
-                includesUnicodeFallback,
-                options)
-                ? directScanCost + 1d
-                : estimatedIndexedCost ?? 0d;
-        return new SearchPlanCandidate(
-            literalPlan,
-            SearchPlanner.GetCandidateKind(selected, usesIndex: true),
-            SearchPlanner.GetCandidateCombination(
-                selected,
-                usesIndex: true,
-                literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
-                literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
-            GetVerifierKind(features, scope),
-            directScanCost,
-            estimatedIndexedCost,
-            estimatedCandidates,
-            selected,
-            estimatedCost);
-    }
-
-    private static SearchVerifierKind GetVerifierKind(
+        static SearchVerifierKind GetVerifierKind(
         in SearchQueryFeatures features,
         SegmentScope scope)
-    {
-        var verifier = SearchPlanKinds.GetVerifierKind(
-            features.Query,
-            features.RegexPlan);
-        return verifier == SearchVerifierKind.Utf8Regex && scope.NonAsciiDocuments > 0
-            ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
-            : verifier;
-    }
-
-    private static LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans, SegmentScope scope, in RegexExecutionPlan regexPlan)
-    {
-        var best = LiteralPlan.Direct(scope.Count, scope.Bytes);
-        var bestScore = double.PositiveInfinity;
-        foreach (var plan in fragmentPlans)
         {
-            if (!plan.UsesIndex)
-            {
-                continue;
-            }
-
-            var score = SearchPlanner.EstimateIndexedCost(plan.SeedByteLength, SearchPlanner.EstimateCandidateUpperBound(plan.SelectedGrams, scope.Count), plan.SelectedGrams, regexPlan);
-            if (score < bestScore)
-            {
-                best = plan;
-                bestScore = score;
-            }
+            var verifier = SearchPlanKinds.GetVerifierKind(
+                features.Query,
+                features.RegexPlan);
+            return verifier == SearchVerifierKind.Utf8Regex && scope.NonAsciiDocuments > 0
+                ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
+                : verifier;
         }
 
-        return best;
-    }
+        static LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans, SegmentScope scope, in RegexExecutionPlan regexPlan)
+        {
+            var best = LiteralPlan.Direct(scope.Count, scope.Bytes);
+            var bestScore = double.PositiveInfinity;
+            foreach (var plan in fragmentPlans)
+            {
+                if (!plan.UsesIndex)
+                {
+                    continue;
+                }
 
-    private static (LiteralPlan Plan, double EstimatedCandidates)? TryCreateStructuredLeadingLiteralPlan(
+                var score = SearchPlanner.EstimateIndexedCost(plan.SeedByteLength, SearchPlanner.EstimateCandidateUpperBound(plan.SelectedGrams, scope.Count), plan.SelectedGrams, regexPlan);
+                if (score < bestScore)
+                {
+                    best = plan;
+                    bestScore = score;
+                }
+            }
+
+            return best;
+        }
+
+        static (LiteralPlan Plan, double EstimatedCandidates)? TryCreateStructuredLeadingLiteralPlan(
         SegmentScope scope,
         LiteralPlan?[] mandatoryPlans,
         PreparedSearchText[] leadingLiterals,
         LiteralPlan?[] leadingPlans,
         SiftOptions options)
-    {
-        if (leadingLiterals.Length < 2)
         {
-            return null;
-        }
-
-        if (leadingLiterals.Length > options.MaxSelectedNgrams)
-        {
-            return null;
-        }
-
-        var sharedFragments = new List<LiteralPlan>(mandatoryPlans.Length);
-        for (var i = 0; i < mandatoryPlans.Length; i++)
-        {
-            var fragmentPlan = mandatoryPlans[i];
-            if (fragmentPlan.HasValue && !fragmentPlan.Value.IsMissingGram && fragmentPlan.Value.SelectedGrams.Length > 0)
-            {
-                sharedFragments.Add(fragmentPlan.Value);
-            }
-        }
-
-        var selected = new List<SelectedGram>(options.MaxSelectedNgrams);
-        var groupLengths = new List<int>(leadingLiterals.Length);
-        IndexRegionPair? pair = null;
-        var gramLength = 0;
-        double estimatedCandidates = 0d;
-        for (var i = 0; i < leadingLiterals.Length; i++)
-        {
-            var literalPlan = leadingPlans[i];
-            if (!literalPlan.HasValue || literalPlan.Value.IsMissingGram || literalPlan.Value.SelectedGrams.Length == 0)
+            if (leadingLiterals.Length < 2)
             {
                 return null;
             }
 
-            var indexed = literalPlan.Value;
-            if (pair is null)
-            {
-                pair = indexed.IndexPair;
-                gramLength = indexed.GramLength;
-            }
-            else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
+            if (leadingLiterals.Length > options.MaxSelectedNgrams)
             {
                 return null;
             }
 
-            var remainingBranchMinimum = leadingLiterals.Length - i - 1;
-            var branchCapacity = options.MaxSelectedNgrams - selected.Count - remainingBranchMinimum;
-            var branch = new List<SelectedGram>(branchCapacity);
-            AddBranchGrams(branch, indexed.SelectedGrams, branchCapacity);
-            for (var fragmentIndex = 0; fragmentIndex < sharedFragments.Count; fragmentIndex++)
+            var sharedFragments = new List<LiteralPlan>(mandatoryPlans.Length);
+            for (var i = 0; i < mandatoryPlans.Length; i++)
             {
-                if (sharedFragments[fragmentIndex].IndexPair.Equals(pair.Value))
+                var fragmentPlan = mandatoryPlans[i];
+                if (fragmentPlan.HasValue && !fragmentPlan.Value.IsMissingGram && fragmentPlan.Value.SelectedGrams.Length > 0)
                 {
-                    AddBranchGrams(
-                        branch,
-                        sharedFragments[fragmentIndex].SelectedGrams,
-                        branchCapacity);
+                    sharedFragments.Add(fragmentPlan.Value);
                 }
             }
 
-            if (branch.Count == 0)
+            var selected = new List<SelectedGram>(options.MaxSelectedNgrams);
+            var groupLengths = new List<int>(leadingLiterals.Length);
+            IndexRegionPair? pair = null;
+            var gramLength = 0;
+            double estimatedCandidates = 0d;
+            for (var i = 0; i < leadingLiterals.Length; i++)
+            {
+                var literalPlan = leadingPlans[i];
+                if (!literalPlan.HasValue || literalPlan.Value.IsMissingGram || literalPlan.Value.SelectedGrams.Length == 0)
+                {
+                    return null;
+                }
+
+                var indexed = literalPlan.Value;
+                if (pair is null)
+                {
+                    pair = indexed.IndexPair;
+                    gramLength = indexed.GramLength;
+                }
+                else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
+                {
+                    return null;
+                }
+
+                var remainingBranchMinimum = leadingLiterals.Length - i - 1;
+                var branchCapacity = options.MaxSelectedNgrams - selected.Count - remainingBranchMinimum;
+                var branch = new List<SelectedGram>(branchCapacity);
+                AddBranchGrams(branch, indexed.SelectedGrams, branchCapacity);
+                for (var fragmentIndex = 0; fragmentIndex < sharedFragments.Count; fragmentIndex++)
+                {
+                    if (sharedFragments[fragmentIndex].IndexPair.Equals(pair.Value))
+                    {
+                        AddBranchGrams(
+                            branch,
+                            sharedFragments[fragmentIndex].SelectedGrams,
+                            branchCapacity);
+                    }
+                }
+
+                if (branch.Count == 0)
+                {
+                    return null;
+                }
+
+                branch.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
+                estimatedCandidates += SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(branch), scope.Count);
+                groupLengths.Add(branch.Count);
+                for (var branchIndex = 0; branchIndex < branch.Count; branchIndex++)
+                {
+                    selected.Add(branch[branchIndex]);
+                }
+            }
+
+            if (selected.Count == 0 || pair is null)
             {
                 return null;
             }
 
-            branch.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-            estimatedCandidates += SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(branch), scope.Count);
-            groupLengths.Add(branch.Count);
-            for (var branchIndex = 0; branchIndex < branch.Count; branchIndex++)
-            {
-                selected.Add(branch[branchIndex]);
-            }
+            return (
+                LiteralPlan.UnionOfIntersections(
+                    scope.Count,
+                    scope.Bytes,
+                    leadingLiterals.Min(static literal => literal.Utf8Bytes.Length),
+                    [.. selected],
+                    pair.Value,
+                    gramLength,
+                    [.. groupLengths]),
+                Math.Clamp(estimatedCandidates, 1d, scope.Count));
         }
 
-        if (selected.Count == 0 || pair is null)
+        static LiteralPlan? TryCreateLeadingLiteralSetPlan(
+        SegmentScope scope,
+        PreparedSearchText[] leadingLiterals,
+        LiteralPlan?[] leadingPlans,
+        SiftOptions options)
         {
-            return null;
-        }
+            if (leadingLiterals.Length == 0)
+            {
+                return null;
+            }
 
-        return (
-            LiteralPlan.UnionOfIntersections(
+            var selected = new List<SelectedGram>(Math.Min(leadingLiterals.Length, options.MaxSelectedNgrams));
+            IndexRegionPair? pair = null;
+            var gramLength = 0;
+            for (var i = 0; i < leadingLiterals.Length && selected.Count < options.MaxSelectedNgrams; i++)
+            {
+                var literalPlan = leadingPlans[i];
+                if (!literalPlan.HasValue || literalPlan.Value.IsMissingGram || literalPlan.Value.SelectedGrams.Length == 0)
+                {
+                    return null;
+                }
+
+                var indexed = literalPlan.Value;
+                if (pair is null)
+                {
+                    pair = indexed.IndexPair;
+                    gramLength = indexed.GramLength;
+                }
+                else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
+                {
+                    return null;
+                }
+
+                TryAddSelectedGram(selected, indexed.SelectedGrams[0]);
+            }
+
+            if (selected.Count == 0 || pair is null)
+            {
+                return null;
+            }
+
+            selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
+            return LiteralPlan.Union(
                 scope.Count,
                 scope.Bytes,
                 leadingLiterals.Min(static literal => literal.Utf8Bytes.Length),
                 [.. selected],
                 pair.Value,
-                gramLength,
-                [.. groupLengths]),
-            Math.Clamp(estimatedCandidates, 1d, scope.Count));
-    }
-
-    private static LiteralPlan? TryCreateLeadingLiteralSetPlan(
-        SegmentScope scope,
-        PreparedSearchText[] leadingLiterals,
-        LiteralPlan?[] leadingPlans,
-        SiftOptions options)
-    {
-        if (leadingLiterals.Length == 0)
-        {
-            return null;
+                gramLength);
         }
 
-        var selected = new List<SelectedGram>(Math.Min(leadingLiterals.Length, options.MaxSelectedNgrams));
-        IndexRegionPair? pair = null;
-        var gramLength = 0;
-        for (var i = 0; i < leadingLiterals.Length && selected.Count < options.MaxSelectedNgrams; i++)
+        static LiteralPlan? TryCreateLiteralSetPlan(MappedSegment segment, SegmentScope scope, CaseMode resolvedCaseMode, PreparedSearchText[] literals, SiftOptions options, bool isAdvisory)
         {
-            var literalPlan = leadingPlans[i];
-            if (!literalPlan.HasValue || literalPlan.Value.IsMissingGram || literalPlan.Value.SelectedGrams.Length == 0)
+            if (literals.Length == 0)
             {
                 return null;
             }
 
-            var indexed = literalPlan.Value;
-            if (pair is null)
+            var selected = new List<SelectedGram>(Math.Min(literals.Length, options.MaxSelectedNgrams));
+            IndexRegionPair? pair = null;
+            var gramLength = 0;
+            var foundAny = false;
+            for (var i = 0; i < literals.Length && selected.Count < options.MaxSelectedNgrams; i++)
             {
-                pair = indexed.IndexPair;
-                gramLength = indexed.GramLength;
-            }
-            else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
-            {
-                return null;
-            }
+                if (literals[i].Text.Length < 3 || IsPoisonousSeedText(literals[i].Text))
+                {
+                    continue;
+                }
 
-            TryAddSelectedGram(selected, indexed.SelectedGrams[0]);
-        }
+                var literalPlan = SelectIndexedLiteralCandidate(segment, scope, literals[i], resolvedCaseMode, selectAllGrams: false, options);
+                if (!literalPlan.HasValue || literalPlan.Value.SelectedGrams.Length == 0)
+                {
+                    continue;
+                }
 
-        if (selected.Count == 0 || pair is null)
-        {
-            return null;
-        }
+                var indexed = literalPlan.Value;
+                if (isAdvisory && IsPoisonousSeedPlan(indexed, scope.Count, options))
+                {
+                    continue;
+                }
 
-        selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Union(
-            scope.Count,
-            scope.Bytes,
-            leadingLiterals.Min(static literal => literal.Utf8Bytes.Length),
-            [.. selected],
-            pair.Value,
-            gramLength);
-    }
+                if (indexed.IsMissingGram)
+                {
+                    foundAny = true;
+                    continue;
+                }
 
-    private static LiteralPlan? TryCreateLiteralSetPlan(MappedSegment segment, SegmentScope scope, CaseMode resolvedCaseMode, PreparedSearchText[] literals, SiftOptions options, bool isAdvisory)
-    {
-        if (literals.Length == 0)
-        {
-            return null;
-        }
+                if (pair is null)
+                {
+                    pair = indexed.IndexPair;
+                    gramLength = indexed.GramLength;
+                }
+                else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
+                {
+                    continue;
+                }
 
-        var selected = new List<SelectedGram>(Math.Min(literals.Length, options.MaxSelectedNgrams));
-        IndexRegionPair? pair = null;
-        var gramLength = 0;
-        var foundAny = false;
-        for (var i = 0; i < literals.Length && selected.Count < options.MaxSelectedNgrams; i++)
-        {
-            if (literals[i].Text.Length < 3 || IsPoisonousSeedText(literals[i].Text))
-            {
-                continue;
-            }
-
-            var literalPlan = SelectIndexedLiteralCandidate(segment, scope, literals[i], resolvedCaseMode, selectAllGrams: false, options);
-            if (!literalPlan.HasValue || literalPlan.Value.SelectedGrams.Length == 0)
-            {
-                continue;
-            }
-
-            var indexed = literalPlan.Value;
-            if (isAdvisory && IsPoisonousSeedPlan(indexed, scope.Count, options))
-            {
-                continue;
-            }
-
-            if (indexed.IsMissingGram)
-            {
+                TryAddSelectedGram(selected, indexed.SelectedGrams[0]);
                 foundAny = true;
-                continue;
             }
 
-            if (pair is null)
+            if (!foundAny)
             {
-                pair = indexed.IndexPair;
-                gramLength = indexed.GramLength;
+                return null;
             }
-            else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
+
+            if (selected.Count == 0 || pair is null)
             {
-                continue;
+                return LiteralPlan.Missing(scope.Count, scope.Bytes, 0, default, 3);
             }
 
-            TryAddSelectedGram(selected, indexed.SelectedGrams[0]);
-            foundAny = true;
+            selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
+            return LiteralPlan.Union(
+                scope.Count,
+                scope.Bytes,
+                gramLength,
+                [.. selected],
+                pair.Value,
+                gramLength);
         }
 
-        if (!foundAny)
+        static bool IsPoisonousSeedText(string value)
         {
-            return null;
-        }
-
-        if (selected.Count == 0 || pair is null)
-        {
-            return LiteralPlan.Missing(scope.Count, scope.Bytes, 0, default, 3);
-        }
-
-        selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Union(
-            scope.Count,
-            scope.Bytes,
-            gramLength,
-            [.. selected],
-            pair.Value,
-            gramLength);
-    }
-
-    private static bool IsPoisonousSeedText(string value)
-    {
-        var hasLetterOrDigit = false;
-        var punctuationCount = 0;
-        for (var i = 0; i < value.Length; i++)
-        {
-            if (char.IsLetterOrDigit(value[i]))
+            var hasLetterOrDigit = false;
+            var punctuationCount = 0;
+            for (var i = 0; i < value.Length; i++)
             {
-                hasLetterOrDigit = true;
+                if (char.IsLetterOrDigit(value[i]))
+                {
+                    hasLetterOrDigit = true;
+                }
+                else if (!char.IsWhiteSpace(value[i]))
+                {
+                    punctuationCount++;
+                }
             }
-            else if (!char.IsWhiteSpace(value[i]))
+
+            if (!hasLetterOrDigit)
             {
-                punctuationCount++;
+                return true;
             }
+
+            return punctuationCount > 0 && punctuationCount * 2 >= value.Length;
         }
 
-        if (!hasLetterOrDigit)
+        static bool IsPoisonousSeedPlan(in LiteralPlan plan, int scopeDocuments, SiftOptions options)
         {
-            return true;
+            if (plan.IsMissingGram || plan.SelectedGrams.Length == 0 || scopeDocuments <= 0)
+            {
+                return true;
+            }
+
+            var density = (double)plan.SelectedGrams[0].DocFreq / scopeDocuments;
+            var densityThreshold = options.DirectScanCandidateDensityThreshold > 0
+                ? Math.Min(options.DirectScanCandidateDensityThreshold * 0.5d, 0.35d)
+                : 0.35d;
+            return density >= densityThreshold;
         }
 
-        return punctuationCount > 0 && punctuationCount * 2 >= value.Length;
-    }
-
-    private static bool IsPoisonousSeedPlan(in LiteralPlan plan, int scopeDocuments, SiftOptions options)
-    {
-        if (plan.IsMissingGram || plan.SelectedGrams.Length == 0 || scopeDocuments <= 0)
-        {
-            return true;
-        }
-
-        var density = (double)plan.SelectedGrams[0].DocFreq / scopeDocuments;
-        var densityThreshold = options.DirectScanCandidateDensityThreshold > 0
-            ? Math.Min(options.DirectScanCandidateDensityThreshold * 0.5d, 0.35d)
-            : 0.35d;
-        return density >= densityThreshold;
-    }
-
-    private static void AddBranchGrams(
+        static void AddBranchGrams(
         List<SelectedGram> branch,
         ReadOnlySpan<SelectedGram> grams,
         int maximumCount)
-    {
-        for (var i = 0; i < grams.Length && branch.Count < maximumCount; i++)
         {
-            TryAddSelectedGram(branch, grams[i]);
-        }
-    }
-
-    private static LiteralPlan? SelectIndexedLiteralCandidate(MappedSegment segment, SegmentScope scope, PreparedSearchText literal, CaseMode resolvedCaseMode, bool selectAllGrams, SiftOptions options)
-        => SelectIndexedLiteralCandidate(segment, scope, literal.Text, literal.Utf8Bytes, resolvedCaseMode, selectAllGrams, options);
-
-    private static LiteralPlan? SelectIndexedLiteralCandidate(MappedSegment segment, SegmentScope scope, string literal, ReadOnlySpan<byte> utf8Bytes, CaseMode resolvedCaseMode, bool selectAllGrams, SiftOptions options)
-    {
-        return LiteralQueryPlanner.TryCreateIndexedCandidate(
-            segment,
-            scope.Count,
-            scope.Bytes,
-            literal,
-            utf8Bytes,
-            resolvedCaseMode,
-            selectAllGrams,
-            options);
-    }
-
-    private static SelectedGram[] MergeFragmentGrams(List<LiteralPlan> fragmentPlans, LiteralPlan anchor, SiftOptions options)
-    {
-        var selected = new List<SelectedGram>(options.MaxSelectedNgrams);
-        foreach (var plan in fragmentPlans)
-        {
-            if (!plan.UsesIndex || plan.SelectedGrams.Length == 0 || !plan.IndexPair.Equals(anchor.IndexPair))
+            for (var i = 0; i < grams.Length && branch.Count < maximumCount; i++)
             {
-                continue;
+                TryAddSelectedGram(branch, grams[i]);
+            }
+        }
+
+        static LiteralPlan? SelectIndexedLiteralCandidate(MappedSegment segment, SegmentScope scope, PreparedSearchText literal, CaseMode resolvedCaseMode, bool selectAllGrams, SiftOptions options)
+        {
+            return LiteralQueryPlanner.TryCreateIndexedCandidate(
+                segment,
+                scope.Count,
+                scope.Bytes,
+                literal.Text,
+                literal.Utf8Bytes,
+                resolvedCaseMode,
+                selectAllGrams,
+                options);
+        }
+
+        static SelectedGram[] MergeFragmentGrams(List<LiteralPlan> fragmentPlans, LiteralPlan anchor, SiftOptions options)
+        {
+            var selected = new List<SelectedGram>(options.MaxSelectedNgrams);
+            foreach (var plan in fragmentPlans)
+            {
+                if (!plan.UsesIndex || plan.SelectedGrams.Length == 0 || !plan.IndexPair.Equals(anchor.IndexPair))
+                {
+                    continue;
+                }
+
+                AddBranchGrams(selected, plan.SelectedGrams, options.MaxSelectedNgrams);
             }
 
-            AddBranchGrams(selected, plan.SelectedGrams, options.MaxSelectedNgrams);
-        }
+            if (selected.Count == 0)
+            {
+                return [];
+            }
 
-        if (selected.Count == 0)
-        {
-            return [];
-        }
+            selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
+            var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(anchor.ScopeDocuments, options);
+            if (targetCandidates == int.MaxValue)
+            {
+                return [.. selected];
+            }
 
-        selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(anchor.ScopeDocuments, options);
-        if (targetCandidates == int.MaxValue)
-        {
+            for (var count = 1; count < selected.Count; count++)
+            {
+                if (SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(selected)[..count], anchor.ScopeDocuments) <= targetCandidates)
+                {
+                    return CollectionsMarshal.AsSpan(selected)[..count].ToArray();
+                }
+            }
+
             return [.. selected];
         }
 
-        for (var count = 1; count < selected.Count; count++)
+        static void TryAddSelectedGram(List<SelectedGram> selected, SelectedGram candidate)
         {
-            if (SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(selected)[..count], anchor.ScopeDocuments) <= targetCandidates)
+            for (var i = 0; i < selected.Count; i++)
             {
-                return CollectionsMarshal.AsSpan(selected)[..count].ToArray();
+                if (selected[i].Gram == candidate.Gram && selected[i].GramLength == candidate.GramLength)
+                {
+                    return;
+                }
             }
+
+            selected.Add(candidate);
         }
 
-        return [.. selected];
-    }
-
-    private static void TryAddSelectedGram(List<SelectedGram> selected, SelectedGram candidate)
-    {
-        for (var i = 0; i < selected.Count; i++)
-        {
-            if (selected[i].Gram == candidate.Gram && selected[i].GramLength == candidate.GramLength)
-            {
-                return;
-            }
-        }
-
-        selected.Add(candidate);
     }
 
 }
