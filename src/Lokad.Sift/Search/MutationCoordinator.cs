@@ -2,6 +2,7 @@ namespace Lokad.Sift;
 
 internal sealed class MutationCoordinator : IDisposable
 {
+    private static readonly AsyncLocal<MutationCoordinator?> Current = new();
     private readonly object _sync = new();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly ManualResetEventSlim _idle = new(initialState: true);
@@ -24,6 +25,7 @@ internal sealed class MutationCoordinator : IDisposable
         Func<CancellationToken, ValueTask<TResult>> mutation,
         CancellationToken cancellationToken)
     {
+        ThrowIfExecutingMutation();
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_stopped, typeof(SiftIndex));
@@ -46,7 +48,19 @@ internal sealed class MutationCoordinator : IDisposable
             }
 
             return await Task.Run(
-                async () => await mutation(operationCancellation.Token).ConfigureAwait(false),
+                async () =>
+                {
+                    var previous = Current.Value;
+                    Current.Value = this;
+                    try
+                    {
+                        return await mutation(operationCancellation.Token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        Current.Value = previous;
+                    }
+                },
                 CancellationToken.None).ConfigureAwait(false);
         }
         finally
@@ -77,11 +91,13 @@ internal sealed class MutationCoordinator : IDisposable
 
     public void WaitForIdle()
     {
+        ThrowIfExecutingMutation();
         _idle.Wait();
     }
 
     public void Dispose()
     {
+        ThrowIfExecutingMutation();
         lock (_sync)
         {
             if (_disposed)
@@ -97,6 +113,15 @@ internal sealed class MutationCoordinator : IDisposable
         _cancellation.Dispose();
         _idle.Dispose();
         _gate.Dispose();
+    }
+
+    public void ThrowIfExecutingMutation()
+    {
+        if (ReferenceEquals(Current.Value, this))
+        {
+            throw new InvalidOperationException(
+                "The index cannot be mutated or disposed from one of its active mutation callbacks.");
+        }
     }
 
     private sealed class RequestScope(MutationCoordinator owner) : IDisposable

@@ -5,6 +5,33 @@ namespace Lokad.Sift.Tests;
 public sealed class ConcurrencyTests
 {
     [Fact]
+    public async Task MutationCallbacksRejectReentrantMutationAndDisposalWithoutPoisoningIndex()
+    {
+        var index = SiftIndex.CreateInMemory();
+        Exception? mutationFailure = null;
+        Exception? disposeFailure = null;
+        var source = new CallbackDocumentSource(() =>
+            mutationFailure = Record.Exception(() =>
+                index.Update(new InMemoryDocumentSource([]), []).GetAwaiter().GetResult()));
+
+        await index.Build(
+            source,
+            new BuildOptions
+            {
+                CommitMetadataProvider = _ =>
+                {
+                    disposeFailure = Record.Exception(index.Dispose);
+                    return default;
+                }
+            });
+
+        Assert.IsType<InvalidOperationException>(mutationFailure);
+        Assert.IsType<InvalidOperationException>(disposeFailure);
+        index.GetIndexState();
+        index.Dispose();
+    }
+
+    [Fact]
     public async Task SnapshotDisposalFromCollectorIsRejectedWithoutPoisoningSnapshot()
     {
         using var index = SiftIndex.CreateInMemory();
@@ -451,6 +478,23 @@ public sealed class ConcurrencyTests
         public void Dispose()
         {
             _release.Dispose();
+        }
+    }
+
+    private sealed class CallbackDocumentSource(Action callback) : IDocumentSource
+    {
+        private bool _completed;
+
+        public bool TryReadNext(out SubmittedDocument document)
+        {
+            if (!_completed)
+            {
+                _completed = true;
+                callback();
+            }
+
+            document = default;
+            return false;
         }
     }
 

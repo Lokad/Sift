@@ -44,7 +44,8 @@ public sealed class SiftOptions
 public sealed record BuildOptions
 {
     // Invoked after ingestion succeeds and before the manifest is published.
-    // The returned bytes are copied into the new manifest.
+    // The returned bytes are copied into the new manifest. The callback must not
+    // dispose or synchronously start another mutation on the consuming index.
     public Func<BuildCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
@@ -65,7 +66,8 @@ public sealed record UpdateOptions
     // Physical generation changes caused by compaction do not invalidate the expectation.
     public IndexIdentity? ExpectedIdentity { get; init; }
     // Invoked after ingestion succeeds and before the manifest is published.
-    // The returned bytes are copied into the new manifest.
+    // The returned bytes are copied into the new manifest. The callback must not
+    // dispose or synchronously start another mutation on the consuming index.
     public Func<UpdateCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 

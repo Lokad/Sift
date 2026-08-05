@@ -162,6 +162,8 @@ public interface IDocumentSource
     /// <remarks>
     ///     The returned content must remain immutable for the lifetime declared by
     ///     <see cref="SubmittedDocument.ContentLifetime"/>.
+    ///     The callback must not dispose or synchronously start another mutation on
+    ///     the consuming index before returning.
     /// </remarks>
     bool TryReadNext(out SubmittedDocument document);
 }

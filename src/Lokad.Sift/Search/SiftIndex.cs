@@ -881,6 +881,7 @@ public sealed class SiftIndex : ISiftIndex
 
     public void Dispose()
     {
+        _mutations.ThrowIfExecutingMutation();
         lock (_activitySync)
         {
             if (_disposed != 0)
