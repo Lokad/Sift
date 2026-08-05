@@ -19,15 +19,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private const int MaxConstrainedGapSearchBytes = 512;
     private const int ParallelHitBufferCapacity = 256;
     private readonly IReadOnlyList<SegmentManifestEntry> _segments;
+    private readonly Dictionary<SegmentId, SegmentManifestEntry> _segmentsById;
     private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
     private readonly StorageReadSnapshot _storageSnapshot;
     private readonly SearchPlanExplainer _planExplainer;
     private readonly object _hitOwner = new();
-    private readonly object _mappedSegmentsSync = new();
-    // Reuse mappings across search, path lookup, and hit materialization while the generation is pinned.
-    private readonly Dictionary<SegmentId, MappedSegment> _mappedSegments = new();
+    private readonly object _segmentCachesSync = new();
+    // Reuse mappings and derived live-row metadata while the generation is pinned.
+    private readonly Dictionary<SegmentId, SegmentCache> _segmentCaches = new();
     // Keep the generation lease alive until every operation that may open one
     // of its segment packs has completed.
     // Collectors may materialize hits while Search holds its disposal-exclusion read lease.
@@ -35,6 +36,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private Action? _onDisposed;
     private readonly Action<Exception>? _onIndexFailure;
     private int _disposed;
+#if SIFT_INTERNAL_VERIFICATION
+    private int _segmentCacheCreationCount;
+    internal int SegmentCacheCreationCount => Volatile.Read(ref _segmentCacheCreationCount);
+#endif
     internal IndexIdentity Identity => new(
         _storageSnapshot.Manifest.CorpusId,
         _storageSnapshot.Manifest.ContentRevision,
@@ -66,6 +71,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         // A snapshot pins the manifest generation, not every segment mapping.
         // Search operations open only the segment packs they are actively using.
         _segments = _storageSnapshot.Manifest.Segments;
+        _segmentsById = _segments.ToDictionary(static entry => entry.SegmentId);
         _planExplainer = new SearchPlanExplainer(_segments, _options, OpenSegment);
     }
 
@@ -565,11 +571,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         _lifetimeLock.EnterWriteLock();
         try
         {
-            foreach (var segment in _mappedSegments.Values)
+            foreach (var cache in _segmentCaches.Values)
             {
-                segment.Dispose();
+                cache.Segment.Dispose();
             }
-            _mappedSegments.Clear();
+            _segmentCaches.Clear();
             _storageSnapshot.Dispose();
             Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
         }
@@ -581,12 +587,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SegmentCache OpenSegment(SegmentId segmentId)
     {
-        foreach (var candidate in _segments)
+        if (_segmentsById.TryGetValue(segmentId, out var entry))
         {
-            if (candidate.SegmentId == segmentId)
-            {
-                return OpenSegment(candidate);
-            }
+            return OpenSegment(entry);
         }
 
         throw new InvalidOperationException($"Unknown segment id {segmentId.Value}.");
@@ -604,24 +607,24 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         MappedSegment? openedSegment = null;
         try
         {
-            lock (_mappedSegmentsSync)
+            lock (_segmentCachesSync)
             {
-                if (_mappedSegments.TryGetValue(entry.SegmentId, out var mappedSegment))
+                if (_segmentCaches.TryGetValue(entry.SegmentId, out var cache))
                 {
-                    return CreateCache(mappedSegment, entry);
+                    return cache;
                 }
             }
 
             openedSegment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
-            lock (_mappedSegmentsSync)
+            lock (_segmentCachesSync)
             {
-                if (_mappedSegments.TryGetValue(entry.SegmentId, out var mappedSegment))
+                if (_segmentCaches.TryGetValue(entry.SegmentId, out var cache))
                 {
-                    return CreateCache(mappedSegment, entry);
+                    return cache;
                 }
 
-                _mappedSegments.Add(entry.SegmentId, openedSegment);
-                var cache = CreateCache(openedSegment, entry);
+                cache = CreateCache(openedSegment, entry);
+                _segmentCaches.Add(entry.SegmentId, cache);
                 openedSegment = null;
                 return cache;
             }
@@ -632,7 +635,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             openedSegment?.Dispose();
         }
 
-        static SegmentCache CreateCache(MappedSegment segment, SegmentManifestEntry manifestEntry)
+        SegmentCache CreateCache(MappedSegment segment, SegmentManifestEntry manifestEntry)
         {
             var nonAscii = segment.GetNonAsciiDocumentStats();
             var liveNonAsciiDocuments = nonAscii.DocumentCount;
@@ -647,12 +650,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 }
             }
 
-            return new SegmentCache(
+            var cache = new SegmentCache(
                 segment,
                 manifestEntry.DeadOrdinals,
                 manifestEntry.ContentBytes - manifestEntry.DeadContentBytes,
                 liveNonAsciiDocuments,
                 liveNonAsciiBytes);
+#if SIFT_INTERNAL_VERIFICATION
+            Interlocked.Increment(ref _segmentCacheCreationCount);
+#endif
+            return cache;
         }
     }
 
