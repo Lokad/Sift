@@ -8,14 +8,20 @@ namespace Lokad.Sift.Search;
 
 internal sealed class OverlaySnapshot : IOverlaySnapshot
 {
+    private static readonly IComparer<byte[]> Utf8PathOrder =
+        Comparer<byte[]>.Create(static (left, right) =>
+            left.AsSpan().SequenceCompareTo(right));
+
     private readonly SearchSnapshot _baseSnapshot;
     private readonly IndexIdentity _baseIdentity;
     private readonly SiftIndex _overlayIndex;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
-    private Dictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
+    private SortedDictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
     private HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _baseDocumentExistence = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> _hiddenPathBytes = new(StringComparer.Ordinal);
+    private readonly List<byte[]> _sortedHiddenPaths = [];
     private readonly HashSet<SegmentId> _baseSegmentIds;
     private readonly Dictionary<SegmentId, SegmentId> _overlayToSyntheticSegmentIds = [];
     private readonly Dictionary<SegmentId, OverlayHitOrigin> _syntheticHitOrigins = [];
@@ -25,7 +31,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private readonly object _syntheticSync = new();
     private OverlayGeneration _overlayGeneration;
-    private HiddenPathVisibility _hiddenPathVisibility = HiddenPathVisibility.Empty;
+    private readonly HiddenPathVisibility _hiddenPathVisibility;
     private ulong _nextSyntheticSegmentId = ulong.MaxValue;
     private ulong _revision;
     private int _disposed;
@@ -40,6 +46,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _overlayGeneration = new OverlayGeneration(
             (SearchSnapshot)_overlayIndex.OpenSnapshot(searchOptions));
         _baseSegmentIds = new HashSet<SegmentId>(_baseSnapshot.GetSegmentIds());
+        _hiddenPathVisibility = new HiddenPathVisibility(_sortedHiddenPaths);
     }
 
     public Task<OverlayUpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
@@ -101,23 +108,31 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         async Task<OverlayUpdateStats> ApplyUpdateUnderLock()
         {
-            static HiddenPathVisibility CreateHiddenPathVisibility(
-                IEnumerable<string> overlayPaths,
-                IReadOnlyCollection<string> deletedPaths)
+            void ApplyVisibilityChanges(
+                IReadOnlyDictionary<string, byte[]> additions,
+                IReadOnlyList<string> removals)
             {
-                var hidden = new List<byte[]>();
-                foreach (var path in overlayPaths)
+                for (var i = 0; i < removals.Count; i++)
                 {
-                    hidden.Add(Encoding.UTF8.GetBytes(path));
+                    var bytes = _hiddenPathBytes[removals[i]];
+                    _hiddenPathBytes.Remove(removals[i]);
+                    var index = _sortedHiddenPaths.BinarySearch(bytes, Utf8PathOrder);
+                    if (index < 0)
+                    {
+                        throw new InvalidOperationException("The overlay visibility index is inconsistent.");
+                    }
+
+                    _sortedHiddenPaths.RemoveAt(index);
                 }
 
-                foreach (var path in deletedPaths)
+                foreach (var addition in additions)
                 {
-                    hidden.Add(Encoding.UTF8.GetBytes(path));
+                    _hiddenPathBytes.Add(addition.Key, addition.Value);
+                    var index = _sortedHiddenPaths.BinarySearch(
+                        addition.Value,
+                        Utf8PathOrder);
+                    _sortedHiddenPaths.Insert(~index, addition.Value);
                 }
-
-                hidden.Sort(static (left, right) => left.AsSpan().SequenceCompareTo(right));
-                return new HiddenPathVisibility([.. hidden]);
             }
 
             var watch = Stopwatch.StartNew();
@@ -163,16 +178,18 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 baseDocuments.Add(path, exists);
             }
 
-            Dictionary<string, long> nextOverlayDocuments;
+            SortedDictionary<string, long> nextOverlayDocuments;
             HashSet<string> nextDeletedPaths;
+            ulong currentRevision;
             var deletedDocuments = 0;
             _stateLock.EnterReadLock();
             try
             {
-                nextOverlayDocuments = new Dictionary<string, long>(
+                nextOverlayDocuments = new SortedDictionary<string, long>(
                     _overlayDocuments,
                     StringComparer.Ordinal);
                 nextDeletedPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
+                currentRevision = _revision;
             }
             finally
             {
@@ -202,15 +219,54 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 }
             }
 
-            var nextVisibility = CreateHiddenPathVisibility(
-                nextOverlayDocuments.Keys,
-                nextDeletedPaths);
+            var incrementedRevision = load.Documents.Count > 0 || deletedDocuments > 0
+                ? checked(currentRevision + 1)
+                : currentRevision;
+
+            var visibilityAdditions = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            var visibilityRemovals = new List<string>();
+            for (var i = 0; i < load.Documents.Count; i++)
+            {
+                var path = load.Documents[i].Path;
+                if (!_hiddenPathBytes.ContainsKey(path))
+                {
+                    visibilityAdditions.Add(path, Encoding.UTF8.GetBytes(path));
+                }
+            }
+
+            foreach (var path in deletionSet)
+            {
+                var shouldHide = nextOverlayDocuments.ContainsKey(path) || nextDeletedPaths.Contains(path);
+                var isHidden = _hiddenPathBytes.ContainsKey(path);
+                if (shouldHide && !isHidden)
+                {
+                    visibilityAdditions.Add(path, Encoding.UTF8.GetBytes(path));
+                }
+                else if (!shouldHide && isHidden)
+                {
+                    visibilityRemovals.Add(path);
+                }
+            }
+
+            _stateLock.EnterWriteLock();
+            try
+            {
+                _hiddenPathBytes.EnsureCapacity(_hiddenPathBytes.Count + visibilityAdditions.Count);
+                _sortedHiddenPaths.EnsureCapacity(_sortedHiddenPaths.Count + visibilityAdditions.Count);
+            }
+            finally
+            {
+                _stateLock.ExitWriteLock();
+            }
 
             var overlayUpdate = await _overlayIndex.UpdatePrevalidated(
                 load,
                 CreateDeletionKeys(deletionSet),
                 new UpdateOptions(options.RejectedUpsertPolicy),
                 cancellationToken);
+            var nextRevision = overlayUpdate.UpsertedDocuments > 0 || deletedDocuments > 0
+                ? incrementedRevision
+                : currentRevision;
 
             var nextGeneration = new OverlayGeneration(
                 (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions));
@@ -223,13 +279,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 _overlayGeneration = nextGeneration;
                 _overlayDocuments = nextOverlayDocuments;
                 _deletedPaths = nextDeletedPaths;
-                _hiddenPathVisibility = nextVisibility;
-                if (overlayUpdate.UpsertedDocuments > 0 || deletedDocuments > 0)
-                {
-                    _revision = checked(_revision + 1);
-                }
-
-                committedRevision = new OverlayRevision(_revision);
+                ApplyVisibilityChanges(visibilityAdditions, visibilityRemovals);
+                _revision = nextRevision;
+                committedRevision = new OverlayRevision(nextRevision);
             }
             finally
             {
@@ -557,7 +609,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             documents.Add(new OverlayDocumentMetadata(pair.Key, pair.Value));
         }
 
-        documents.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
         return documents;
     }
 
@@ -571,27 +622,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             @base.StopReason);
     }
 
-    private static DocumentKey[] CreateDeletionKeys(IEnumerable<string> paths)
+    private static DocumentKey[] CreateDeletionKeys(IReadOnlyCollection<string> paths)
     {
-        if (paths is ICollection<string> collection)
-        {
-            var keys = new DocumentKey[collection.Count];
-            var index = 0;
-            foreach (var path in collection)
-            {
-                keys[index++] = new DocumentKey(path);
-            }
-
-            return keys;
-        }
-
-        var list = new List<DocumentKey>();
+        var keys = new DocumentKey[paths.Count];
+        var index = 0;
         foreach (var path in paths)
         {
-            list.Add(new DocumentKey(path));
+            keys[index++] = new DocumentKey(path);
         }
 
-        return [.. list];
+        return keys;
     }
 
     private sealed class StateReadLease(ReaderWriterLockSlim stateLock) : IDisposable
@@ -606,11 +646,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     private sealed class HiddenPathVisibility : IPathVisibility
     {
-        public static HiddenPathVisibility Empty { get; } = new([]);
+        private readonly IReadOnlyList<byte[]> _hiddenPaths;
 
-        private readonly byte[][] _hiddenPaths;
-
-        public HiddenPathVisibility(byte[][] hiddenPaths)
+        public HiddenPathVisibility(IReadOnlyList<byte[]> hiddenPaths)
         {
             _hiddenPaths = hiddenPaths;
         }
@@ -618,7 +656,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         public bool IsVisible(ReadOnlySpan<byte> normalizedPathUtf8)
         {
             var lower = 0;
-            var upper = _hiddenPaths.Length - 1;
+            var upper = _hiddenPaths.Count - 1;
             while (lower <= upper)
             {
                 var middle = lower + ((upper - lower) / 2);
