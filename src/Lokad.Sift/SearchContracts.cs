@@ -307,7 +307,13 @@ public sealed class PlannerAlternative
     public double EstimatedCandidateDocuments { get; }
     public double EstimatedCost { get; }
     public int SegmentCount { get; }
+
+    /// <summary>Gets the number of physical segment rows in this planning scope.</summary>
+    /// <remarks>For overlays, this includes hidden base rows because visibility is applied after segment planning.</remarks>
     public int ScopeDocumentCount { get; }
+
+    /// <summary>Gets the content bytes of the physical segment rows in this planning scope.</summary>
+    /// <remarks>For overlays, this includes hidden base rows because visibility is applied after segment planning.</remarks>
     public long ScopeByteCount { get; }
 }
 
@@ -379,7 +385,13 @@ public sealed class SearchPlan
 
     public SearchPatternKind PatternKind { get; }
     public CaseMode ResolvedCaseMode { get; }
+
+    /// <summary>Gets the number of physical segment rows covered by the plan.</summary>
+    /// <remarks>For overlays, this includes hidden base rows because visibility is applied after segment planning.</remarks>
     public int ScopeDocumentCount { get; }
+
+    /// <summary>Gets the content bytes of the physical segment rows covered by the plan.</summary>
+    /// <remarks>For overlays, this includes hidden base rows because visibility is applied after segment planning.</remarks>
     public long ScopeByteCount { get; }
     public int SegmentCount { get; }
     public IReadOnlyList<string> MandatoryFragments { get; }
@@ -454,7 +466,13 @@ public sealed class SearchStats
     }
 
     public long ElapsedMilliseconds { get; }
+
+    /// <summary>Gets the number of physical segment rows selected before visibility filtering.</summary>
+    /// <remarks>For overlays, this includes hidden base rows so it describes search work rather than logical document count.</remarks>
     public int ScopeDocuments { get; }
+
+    /// <summary>Gets the content bytes of physical segment rows selected before visibility filtering.</summary>
+    /// <remarks>For overlays, this includes hidden base rows so it describes search work rather than logical content size.</remarks>
     public long ScopeBytes { get; }
     public long PostingsBytesRead { get; }
     public int CandidateDocumentsAfterIndex { get; }
