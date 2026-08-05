@@ -771,6 +771,27 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task StreamedIdenticalUpsertsReuseLiveSegmentMappings()
+    {
+        var documents = Enumerable.Range(0, 4)
+            .Select(static index => ($"src/{index}.txt", $"content {index}"))
+            .ToArray();
+        using var fixture = new CorpusFixture();
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(new InMemoryDocumentSource(documents));
+        var storage = TestHelpers.GetStorage(index);
+        var opensBeforeUpdate = storage.SegmentOpenCount;
+
+        var stats = await index.Update(new InMemoryDocumentSource(documents), []);
+
+        Assert.Equal(documents.Length, stats.SkippedUpserts);
+        Assert.Equal(documents.Length, storage.SegmentOpenCount - opensBeforeUpdate);
+    }
+
+    [Fact]
     public async Task MixedUpdateSkipsOnlyIdenticalUpserts()
     {
         using var index = SiftIndex.CreateInMemory();

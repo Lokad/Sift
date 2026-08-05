@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Numerics;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Search;
@@ -644,6 +643,7 @@ public sealed class SiftIndex : ISiftIndex
                 Generation: default,
                 CommitMetadata: [],
                 Segments: []);
+            using var liveDocuments = new LiveDocumentResolver(_storage, existingManifest);
 
             var deletionSet = new HashSet<string>(StringComparer.Ordinal);
             foreach (var deletion in deletions)
@@ -669,7 +669,7 @@ public sealed class SiftIndex : ISiftIndex
                     deletionSet,
                     options.RejectedUpsertPolicy,
                     partition => RemoveUnchangedDocuments(
-                        existingManifest,
+                        liveDocuments,
                         partition,
                         existingUpsertKeys,
                         cancellationToken),
@@ -701,8 +701,7 @@ public sealed class SiftIndex : ISiftIndex
                     }
                 }
 
-                foreach (var pair in FindLiveDocumentKeys(
-                    existingManifest,
+                foreach (var pair in liveDocuments.Resolve(
                     removalPaths,
                     cancellationToken))
                 {
@@ -1268,182 +1267,6 @@ public sealed class SiftIndex : ISiftIndex
         }
     }
 
-    private Dictionary<string, LiveDocumentKey> FindLiveDocumentKeys(
-        CorpusManifest manifest,
-        IReadOnlySet<string> affectedPaths,
-        CancellationToken cancellationToken)
-    {
-        return FindLiveDocumentKeys(
-            manifest,
-            affectedPaths,
-            incomingDocuments: null,
-            unchangedPaths: null,
-            cancellationToken);
-    }
-
-    private Dictionary<string, LiveDocumentKey> FindLiveDocumentKeys(
-        CorpusManifest manifest,
-        IReadOnlySet<string> affectedPaths,
-        IReadOnlyDictionary<string, StoredDocument>? incomingDocuments,
-        ISet<string>? unchangedPaths,
-        CancellationToken cancellationToken)
-    {
-        var live = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
-        if (affectedPaths.Count == 0)
-        {
-            return live;
-        }
-
-        var unresolvedPaths = affectedPaths.ToHashSet(StringComparer.Ordinal);
-        string[]? sortedPaths = null;
-        for (var entryIndex = manifest.Segments.Count - 1;
-             entryIndex >= 0 && unresolvedPaths.Count > 0;
-             entryIndex--)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var entry = manifest.Segments[entryIndex];
-            using var segment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
-            var binarySearchComparisons = (long)unresolvedPaths.Count *
-                (BitOperations.Log2((uint)Math.Max(segment.DocumentCount, 1)) + 1);
-            if (binarySearchComparisons <= segment.DocumentCount)
-            {
-                // A small batch can target paths near the end of a large segment,
-                // for which a merge scan would traverse nearly every document.
-                foreach (var path in affectedPaths)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!unresolvedPaths.Contains(path) ||
-                        !segment.TryFindDocumentOrdinal(path, out var foundOrdinal))
-                    {
-                        continue;
-                    }
-
-                    unresolvedPaths.Remove(path);
-                    if (!entry.DeadOrdinals.Contains(foundOrdinal))
-                    {
-                        var document = segment.GetDocument(foundOrdinal);
-                        var key = new LiveDocumentKey(
-                            entry.SegmentId,
-                            foundOrdinal,
-                            document.ContentLength,
-                            document.MTimeUtcTicks,
-                            document.ContentHash64);
-                        live.Add(path, key);
-                        RecordUnchangedDocument(
-                            segment,
-                            document,
-                            path,
-                            key,
-                            incomingDocuments,
-                            unchangedPaths);
-                    }
-                }
-
-                continue;
-            }
-
-            if (sortedPaths is null)
-            {
-                sortedPaths = affectedPaths.ToArray();
-                Array.Sort(sortedPaths, StringComparer.Ordinal);
-            }
-
-            // Both inputs are ordinal-sorted, so one merge pass replaces a
-            // binary search for every path in a large update batch.
-            var pathIndex = 0;
-            var ordinal = 0u;
-            var deadIndex = 0;
-            var comparisons = 0;
-            while (pathIndex < sortedPaths.Length && ordinal < segment.DocumentCount)
-            {
-                while (pathIndex < sortedPaths.Length && !unresolvedPaths.Contains(sortedPaths[pathIndex]))
-                {
-                    pathIndex++;
-                }
-
-                if (pathIndex >= sortedPaths.Length)
-                {
-                    break;
-                }
-
-                if ((comparisons++ & 0xFFF) == 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-
-                var document = segment.GetDocument(ordinal);
-                var comparison = segment.ComparePathOrdinal(document, sortedPaths[pathIndex]);
-                if (comparison < 0)
-                {
-                    ordinal++;
-                    continue;
-                }
-
-                if (comparison > 0)
-                {
-                    pathIndex++;
-                    continue;
-                }
-
-                while (deadIndex < entry.DeadOrdinals.Length && entry.DeadOrdinals[deadIndex] < ordinal)
-                {
-                    deadIndex++;
-                }
-
-                if (deadIndex >= entry.DeadOrdinals.Length || entry.DeadOrdinals[deadIndex] != ordinal)
-                {
-                    var path = sortedPaths[pathIndex];
-                    var key = new LiveDocumentKey(
-                        entry.SegmentId,
-                        ordinal,
-                        document.ContentLength,
-                        document.MTimeUtcTicks,
-                        document.ContentHash64);
-                    live.Add(path, key);
-                    RecordUnchangedDocument(
-                        segment,
-                        document,
-                        path,
-                        key,
-                        incomingDocuments,
-                        unchangedPaths);
-                }
-
-                unresolvedPaths.Remove(sortedPaths[pathIndex]);
-                ordinal++;
-                pathIndex++;
-            }
-        }
-
-        return live;
-    }
-
-    private static void RecordUnchangedDocument(
-        MappedSegment segment,
-        SegmentDocument indexedDocument,
-        string path,
-        in LiveDocumentKey indexedKey,
-        IReadOnlyDictionary<string, StoredDocument>? incomingDocuments,
-        ISet<string>? unchangedPaths)
-    {
-        if (incomingDocuments is null ||
-            unchangedPaths is null ||
-            !incomingDocuments.TryGetValue(path, out var incoming) ||
-            indexedKey.ContentLength != incoming.Content.Length ||
-            indexedKey.ContentHash64 != incoming.ContentHash64 ||
-            indexedKey.MTimeUtcTicks != incoming.MTimeUtcTicks)
-        {
-            return;
-        }
-
-        // The persisted hash is only a fast rejection filter; byte equality
-        // is required before suppressing a replacement.
-        if (segment.GetContentBytes(indexedDocument).SequenceEqual(incoming.Content.Span))
-        {
-            unchangedPaths.Add(path);
-        }
-    }
-
     private sealed class ValidationScope(SiftIndex owner) : IDisposable
     {
         private SiftIndex? _owner = owner;
@@ -1467,12 +1290,12 @@ public sealed class SiftIndex : ISiftIndex
     }
 
     private void RemoveUnchangedDocuments(
-        CorpusManifest manifest,
+        LiveDocumentResolver liveDocuments,
         List<StoredDocument> documents,
         IDictionary<string, LiveDocumentKey> existingKeys,
         CancellationToken cancellationToken)
     {
-        if (documents.Count == 0 || manifest.Segments.Count == 0)
+        if (documents.Count == 0)
         {
             return;
         }
@@ -1480,8 +1303,7 @@ public sealed class SiftIndex : ISiftIndex
         var byPath = documents.ToDictionary(static document => document.Path, StringComparer.Ordinal);
         var paths = byPath.Keys.ToHashSet(StringComparer.Ordinal);
         var unchangedPaths = new HashSet<string>(StringComparer.Ordinal);
-        var current = FindLiveDocumentKeys(
-            manifest,
+        var current = liveDocuments.ResolveAndFindUnchanged(
             paths,
             byPath,
             unchangedPaths,
@@ -1493,13 +1315,6 @@ public sealed class SiftIndex : ISiftIndex
 
         documents.RemoveAll(document => unchangedPaths.Contains(document.Path));
     }
-
-    private readonly record struct LiveDocumentKey(
-        SegmentId SegmentId,
-        uint Ordinal,
-        int ContentLength,
-        long MTimeUtcTicks,
-        ulong ContentHash64);
 
     private sealed class Utf8PathComparer : IComparer<byte[]>
     {
