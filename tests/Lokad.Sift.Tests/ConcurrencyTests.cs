@@ -5,6 +5,83 @@ namespace Lokad.Sift.Tests;
 public sealed class ConcurrencyTests
 {
     [Fact]
+    public async Task SnapshotDisposalFromCollectorIsRejectedWithoutPoisoningSnapshot()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "needle")]));
+        var snapshot = index.OpenSnapshot();
+        Exception? callbackFailure = null;
+
+        snapshot.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            new CallbackHitCollector(() =>
+                callbackFailure = Record.Exception(snapshot.Dispose)));
+
+        Assert.IsType<InvalidOperationException>(callbackFailure);
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        snapshot.Dispose();
+    }
+
+    [Fact]
+    public async Task OverlayMutationFromCollectorIsRejectedWithoutPoisoningOverlay()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "needle")]), []);
+        Exception? updateFailure = null;
+        Exception? disposeFailure = null;
+
+        overlay.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            new CallbackHitCollector(() =>
+            {
+                updateFailure = Record.Exception(() =>
+                    overlay.Update(
+                        new InMemoryDocumentSource([("src/b.txt", "other")]),
+                        []).GetAwaiter().GetResult());
+                disposeFailure = Record.Exception(overlay.Dispose);
+            }));
+
+        Assert.IsType<InvalidOperationException>(updateFailure);
+        Assert.IsType<InvalidOperationException>(disposeFailure);
+        await overlay.Update(new InMemoryDocumentSource([("src/b.txt", "other")]), []);
+        Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+    }
+
+    [Fact]
+    public async Task MutationStopCancelsCallbacksOutsideCoordinatorLock()
+    {
+        using var coordinator = new MutationCoordinator();
+        var callbackRegistered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackRan = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var mutation = coordinator.Run(
+            SiftWriteActivity.Build,
+            async cancellationToken =>
+            {
+                using var registration = cancellationToken.Register(() =>
+                {
+                    _ = coordinator.GetWriteActivityStats();
+                    callbackRan.SetResult();
+                });
+                callbackRegistered.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return 0;
+            },
+            CancellationToken.None);
+        await callbackRegistered.Task;
+
+        await Task.Run(coordinator.Stop).WaitAsync(TimeSpan.FromSeconds(5));
+
+        await callbackRan.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await mutation);
+    }
+
+    [Fact]
     public async Task ConcurrentReadersCanSearchSameCorpus()
     {
         var documents = Enumerable.Range(0, 2000)

@@ -145,6 +145,10 @@ public readonly record struct RejectedDocument
 
 public interface IDocumentKeyCollector
 {
+    /// <remarks>
+    ///     The callback runs within the visit operation. It must not dispose the
+    ///     producing snapshot or update the producing overlay before returning.
+    /// </remarks>
     bool OnDocument(DocumentKey key);
 }
 

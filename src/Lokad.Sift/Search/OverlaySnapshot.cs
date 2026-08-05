@@ -84,6 +84,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         OverlayUpdateOptions options,
         CancellationToken cancellationToken)
     {
+        if (_stateLock.IsReadLockHeld)
+        {
+            throw new InvalidOperationException(
+                "An overlay cannot be updated from one of its active callbacks.");
+        }
+
         if (!Enum.IsDefined(options.RejectedUpsertPolicy))
         {
             throw new ArgumentOutOfRangeException(nameof(options), "RejectedUpsertPolicy is invalid.");
@@ -518,6 +524,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public void Dispose()
     {
+        if (_stateLock.IsReadLockHeld)
+        {
+            throw new InvalidOperationException(
+                "An overlay cannot be disposed from one of its active callbacks.");
+        }
+
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
         {
             return;

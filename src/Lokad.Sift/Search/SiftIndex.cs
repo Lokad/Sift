@@ -29,7 +29,7 @@ public sealed class SiftIndex : ISiftIndex
     private readonly SemaphoreSlim _validationGate = new(1, 1);
     // Makes worker ownership and the idle signal atomic with respect to new requests and Dispose.
     private readonly object _reclamationSync = new();
-    // Prevents Dispose from racing a mutation between its disposed check and activity registration.
+    // Prevents Dispose from racing validation activity registration.
     private readonly object _activitySync = new();
     private readonly object _validationStatsSync = new();
     private IndexValidationStats _validationStats = new(
@@ -889,17 +889,13 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             Volatile.Write(ref _disposed, 1);
-            _validationCancellation.Cancel();
         }
 
+        _validationCancellation.Cancel();
         _mutations.Stop();
         _mutations.WaitForIdle();
         _validationsIdle.Wait();
-        lock (_reclamationSync)
-        {
-            _reclamationCancellation.Cancel();
-        }
-
+        _reclamationCancellation.Cancel();
         _reclamationIdle.Wait();
         _retainedIndexingWorkspaceLease?.Dispose();
         _mutations.Dispose();

@@ -59,6 +59,15 @@ internal sealed class HitBuffer : IHitCollector
     }
 }
 
+internal sealed class CallbackHitCollector(Action callback) : IHitCollector
+{
+    public bool OnHit(in RawHit hit)
+    {
+        callback();
+        return false;
+    }
+}
+
 internal sealed class CorpusFixture : IDisposable
 {
     private readonly string _root;

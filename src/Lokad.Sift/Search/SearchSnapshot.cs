@@ -562,6 +562,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     public void Dispose()
     {
+        if (_lifetimeLock.IsReadLockHeld)
+        {
+            throw new InvalidOperationException(
+                "A snapshot cannot be disposed from one of its active callbacks.");
+        }
+
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
         {
             return;

@@ -538,5 +538,9 @@ public sealed class MaterializedHit
 
 public interface IHitCollector
 {
+    /// <remarks>
+    ///     The callback runs within the search operation. It must not dispose the
+    ///     producing snapshot or update the producing overlay before returning.
+    /// </remarks>
     bool OnHit(in RawHit hit);
 }

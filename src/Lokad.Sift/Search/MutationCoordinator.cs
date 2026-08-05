@@ -70,8 +70,9 @@ internal sealed class MutationCoordinator : IDisposable
             }
 
             _stopped = true;
-            _cancellation.Cancel();
         }
+
+        _cancellation.Cancel();
     }
 
     public void WaitForIdle()
