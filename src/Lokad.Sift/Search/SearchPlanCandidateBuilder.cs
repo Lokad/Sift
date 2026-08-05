@@ -87,15 +87,14 @@ internal static class SearchPlanCandidateBuilder
             if (selected.Length > 0)
             {
                 var estimatedCandidates = SearchPlanner.EstimateCandidateUpperBound(selected, scope.Count);
-                var indexed = LiteralPlan.Indexed(
+                var indexed = LiteralPlan.Intersection(
                     features.ResolvedCaseMode,
             scope.Count,
                     scope.Bytes,
                     string.Join("|", features.Anchors.MandatoryTexts),
                     selected,
                     anchor.IndexPair,
-                    anchor.GramLength,
-                    isMissing: false);
+                    anchor.GramLength);
                 candidates.Add(CreateRegexIndexedCandidate(in features, scope, indexed, estimatedCandidates, options));
             }
         }
@@ -328,7 +327,7 @@ internal static class SearchPlanCandidateBuilder
         }
 
         return (
-            LiteralPlan.Indexed(
+            LiteralPlan.UnionOfIntersections(
                 resolvedCaseMode,
             scope.Count,
                 scope.Bytes,
@@ -336,9 +335,7 @@ internal static class SearchPlanCandidateBuilder
                 [.. selected],
                 pair.Value,
                 gramLength,
-                isMissing: false,
-                unionCandidates: true,
-                unionGroupLengths: [.. groupLengths]),
+                [.. groupLengths]),
             Math.Clamp(estimatedCandidates, 1d, scope.Count));
     }
 
@@ -382,7 +379,7 @@ internal static class SearchPlanCandidateBuilder
         }
 
         selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Indexed(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength, isMissing: false, unionCandidates: true);
+        return LiteralPlan.Union(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength);
     }
 
     private static LiteralPlan? TryCreateLiteralSetPlan(MappedSegment segment, SegmentScope scope, CaseMode resolvedCaseMode, PreparedSearchText[] literals, SiftOptions options, bool isAdvisory)
@@ -442,11 +439,11 @@ internal static class SearchPlanCandidateBuilder
 
         if (selected.Count == 0 || pair is null)
         {
-            return LiteralPlan.Indexed(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [], default, 3, isMissing: true, unionCandidates: true);
+            return LiteralPlan.Missing(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, default, 3);
         }
 
         selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Indexed(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength, isMissing: false, unionCandidates: true);
+        return LiteralPlan.Union(resolvedCaseMode, scope.Count, scope.Bytes, string.Empty, [.. selected], pair.Value, gramLength);
     }
 
     private static bool IsPoisonousSeedText(string value)

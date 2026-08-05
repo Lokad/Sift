@@ -68,7 +68,7 @@ internal static class LiteralQueryPlanner
 
             if (!segment.TryGetPostings(pair, gram, out var postings, out var docFreq))
             {
-                return LiteralPlan.Indexed(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, [], pair, gramLength, isMissing: true);
+                return LiteralPlan.Missing(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, pair, gramLength);
             }
 
             var seen = false;
@@ -98,7 +98,7 @@ internal static class LiteralQueryPlanner
         var selected = selectAllGrams
             ? grams.ToArray()
             : TrimSelectedGrams(grams, scopeDocuments, options);
-        return LiteralPlan.Indexed(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, selected, pair, gramLength, isMissing: false);
+        return LiteralPlan.Intersection(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, selected, pair, gramLength);
     }
 
     private static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)
@@ -157,19 +157,50 @@ internal readonly record struct LiteralPlan(
     CaseMode ResolvedCaseMode,
     int ScopeDocuments,
     long ScopeBytes,
-    bool UsesIndex,
-    bool UnionCandidates,
-    bool IsMissingGram,
+    LiteralCandidateMode CandidateMode,
     string MandatoryFragment,
     SelectedGram[] SelectedGrams,
     IndexRegionPair IndexPair,
     int GramLength,
     int[]? UnionGroupLengths)
 {
+    public bool UsesIndex => CandidateMode != LiteralCandidateMode.Direct;
+    public bool UnionCandidates => CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections;
+    public bool IsMissingGram => CandidateMode == LiteralCandidateMode.Missing;
+
     public static LiteralPlan Direct(CaseMode resolvedCaseMode, int scopeDocuments, long scopeBytes)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, false, false, false, string.Empty, [], default, 0, null);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Direct, string.Empty, [], default, 0, null);
 
-    public static LiteralPlan Indexed(
+    public static LiteralPlan Missing(
+        CaseMode resolvedCaseMode,
+        int scopeDocuments,
+        long scopeBytes,
+        string mandatoryFragment,
+        IndexRegionPair pair,
+        int gramLength)
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Missing, mandatoryFragment, [], pair, gramLength, null);
+
+    public static LiteralPlan Intersection(
+        CaseMode resolvedCaseMode,
+        int scopeDocuments,
+        long scopeBytes,
+        string mandatoryFragment,
+        SelectedGram[] selectedGrams,
+        IndexRegionPair pair,
+        int gramLength)
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Intersection, mandatoryFragment, selectedGrams, pair, gramLength, null);
+
+    public static LiteralPlan Union(
+        CaseMode resolvedCaseMode,
+        int scopeDocuments,
+        long scopeBytes,
+        string mandatoryFragment,
+        SelectedGram[] selectedGrams,
+        IndexRegionPair pair,
+        int gramLength)
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Union, mandatoryFragment, selectedGrams, pair, gramLength, null);
+
+    public static LiteralPlan UnionOfIntersections(
         CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
@@ -177,53 +208,17 @@ internal readonly record struct LiteralPlan(
         SelectedGram[] selectedGrams,
         IndexRegionPair pair,
         int gramLength,
-        bool isMissing)
-        => Indexed(
-            resolvedCaseMode,
-            scopeDocuments,
-            scopeBytes,
-            mandatoryFragment,
-            selectedGrams,
-            pair,
-            gramLength,
-            isMissing,
-            unionCandidates: false,
-            unionGroupLengths: null);
+        int[] unionGroupLengths)
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.UnionOfIntersections, mandatoryFragment, selectedGrams, pair, gramLength, unionGroupLengths);
+}
 
-    public static LiteralPlan Indexed(
-        CaseMode resolvedCaseMode,
-        int scopeDocuments,
-        long scopeBytes,
-        string mandatoryFragment,
-        SelectedGram[] selectedGrams,
-        IndexRegionPair pair,
-        int gramLength,
-        bool isMissing,
-        bool unionCandidates)
-        => Indexed(
-            resolvedCaseMode,
-            scopeDocuments,
-            scopeBytes,
-            mandatoryFragment,
-            selectedGrams,
-            pair,
-            gramLength,
-            isMissing,
-            unionCandidates,
-            unionGroupLengths: null);
-
-    public static LiteralPlan Indexed(
-        CaseMode resolvedCaseMode,
-        int scopeDocuments,
-        long scopeBytes,
-        string mandatoryFragment,
-        SelectedGram[] selectedGrams,
-        IndexRegionPair pair,
-        int gramLength,
-        bool isMissing,
-        bool unionCandidates,
-        int[]? unionGroupLengths)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, true, unionCandidates, isMissing, mandatoryFragment, selectedGrams, pair, gramLength, unionGroupLengths);
+internal enum LiteralCandidateMode
+{
+    Direct,
+    Intersection,
+    Union,
+    UnionOfIntersections,
+    Missing
 }
 
 internal readonly record struct SelectedGram(
