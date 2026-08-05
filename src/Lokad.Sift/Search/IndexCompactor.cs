@@ -206,9 +206,9 @@ internal sealed class IndexCompactor
                 "DeadContentFractionThreshold must be between zero and one.");
         }
 
-        if (options.SmallSegmentMergeThreshold < 1)
+        if (options.MinimumSegmentCountForSmallMerge < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "SmallSegmentMergeThreshold must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(options), "MinimumSegmentCountForSmallMerge must be positive.");
         }
 
         if (options.MetadataBloatDeadOrdinalsThreshold < 1)
@@ -393,7 +393,7 @@ internal sealed class IndexCompactor
             selectedSegmentBytes += segmentBytes;
         }
 
-        if (selected.Count > 0 || manifest.Segments.Count <= options.SmallSegmentMergeThreshold)
+        if (selected.Count > 0 || manifest.Segments.Count <= options.MinimumSegmentCountForSmallMerge)
         {
             return selected;
         }

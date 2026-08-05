@@ -144,7 +144,7 @@ public sealed class MutationIntegrationTests
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
         var expectedIdentity = index.GetIndexIdentity();
 
-        var compaction = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+        var compaction = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
         var compactedIdentity = index.GetIndexIdentity();
         Assert.True(compaction.InputSegments > 0);
         Assert.Equal(expectedIdentity.CorpusId, compactedIdentity.CorpusId);
@@ -766,7 +766,7 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
         await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega\n")]), [new DocumentKey("src/b.txt")]);
 
-        var compact = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+        var compact = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
         Assert.Equal(1, compact.InputSegments);
         Assert.Equal(0, compact.OutputSegments);
         Assert.Equal(0, compact.ContentBytes);
@@ -924,7 +924,7 @@ public sealed class MutationIntegrationTests
         await index.Build(fixture.CreateSource());
         await index.Update(new InMemoryDocumentSource([("src/000000.txt", "omega\n")]), []);
 
-        var compact = await index.Compact(new CompactOptions { MaxMergedSegments = 1, SmallSegmentMergeThreshold = 1 });
+        var compact = await index.Compact(new CompactOptions { MaxMergedSegments = 1, MinimumSegmentCountForSmallMerge = 1 });
 
         Assert.Equal(0, compact.InputSegments);
 
@@ -951,7 +951,7 @@ public sealed class MutationIntegrationTests
             ("src/b.txt", "0123456789"),
             ("src/c.txt", "0123456789")
         ]));
-        var options = new CompactOptions { SmallSegmentMergeThreshold = 1 };
+        var options = new CompactOptions { MinimumSegmentCountForSmallMerge = 1 };
 
         var maintenance = index.GetMaintenanceStats();
 
@@ -971,7 +971,7 @@ public sealed class MutationIntegrationTests
         await index.Update(new InMemoryDocumentSource([("src/a.txt", "alpha")]), []);
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
         await index.Update(new InMemoryDocumentSource([("src/c.txt", "gamma")]), []);
-        var options = new CompactOptions { SmallSegmentMergeThreshold = 1 };
+        var options = new CompactOptions { MinimumSegmentCountForSmallMerge = 1 };
 
         Assert.True(index.ShouldCompact(options));
 
@@ -1090,7 +1090,7 @@ public sealed class MutationIntegrationTests
         ]));
         var before = index.Storage.ReadManifest();
 
-        var compact = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+        var compact = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
         var after = index.Storage.ReadManifest();
 
         Assert.Equal(0, compact.InputSegments);
@@ -1114,7 +1114,7 @@ public sealed class MutationIntegrationTests
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "def")]), []);
         await index.Update(new InMemoryDocumentSource([("src/c.txt", "ghi")]), []);
 
-        var compact = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+        var compact = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
 
         Assert.Equal(3, compact.InputSegments);
         Assert.Equal(1, compact.OutputSegments);
@@ -1132,7 +1132,7 @@ public sealed class MutationIntegrationTests
             new InMemoryDocumentSource([(privateUsePath, "beta")]),
             []);
 
-        var compact = await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 });
+        var compact = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
 
         Assert.Equal(2, compact.InputSegments);
         using var snapshot = index.OpenSnapshot();
@@ -1161,7 +1161,7 @@ public sealed class MutationIntegrationTests
         var before = index.Storage.ReadManifest();
 
         var exception = await Assert.ThrowsAsync<IOException>(() =>
-            index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1, MinimumFreeBytesAfterCompaction = long.MaxValue }));
+            index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1, MinimumFreeBytesAfterCompaction = long.MaxValue }));
 
         Assert.Contains("retaining", exception.Message, StringComparison.Ordinal);
         var after = index.Storage.ReadManifest();
@@ -1269,7 +1269,7 @@ public sealed class MutationIntegrationTests
             ThrowOnStage = PublicationStage.AfterSegmentFlushBeforePublish
         };
 
-        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 }));
+        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 }));
 
         storage.FaultInjector = null;
         storage.EnsureLayout();
@@ -1307,7 +1307,7 @@ public sealed class MutationIntegrationTests
             ThrowOnStage = PublicationStage.AfterManifestFlushBeforeSwap
         };
 
-        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions { SmallSegmentMergeThreshold = 1 }));
+        await Assert.ThrowsAsync<IOException>(async () => await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 }));
 
         storage.FaultInjector = null;
         storage.EnsureLayout();

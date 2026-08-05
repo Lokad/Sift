@@ -699,7 +699,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 MaxMergedSegments = int.MaxValue,
                 DeadFractionThreshold = 0,
                 DeadContentFractionThreshold = 0,
-                SmallSegmentMergeThreshold = 1,
+                MinimumSegmentCountForSmallMerge = 1,
                 MetadataBloatDeadOrdinalsThreshold = 1,
                 MaxInputSegmentBytes = long.MaxValue,
                 MinimumFreeBytesAfterCompaction = 0

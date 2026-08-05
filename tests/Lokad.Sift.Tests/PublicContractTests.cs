@@ -60,6 +60,8 @@ public sealed class PublicContractTests
 
         Assert.NotNull(pattern);
         Assert.False(pattern.CanWrite);
+        Assert.Equal(2, typeof(SearchQuery).GetConstructors().Length);
+        Assert.Single(typeof(CompactOptions).GetConstructors());
     }
 
     [Fact]

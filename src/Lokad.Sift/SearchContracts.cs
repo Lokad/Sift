@@ -58,7 +58,7 @@ public sealed record SearchQuery
     {
     }
 
-    public SearchQuery(
+    private SearchQuery(
         string pattern,
         PatternMode patternMode,
         CaseMode caseMode,

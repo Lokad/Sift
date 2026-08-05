@@ -280,18 +280,18 @@ public sealed record CompactOptions
             maxMergedSegments: 16,
             deadFractionThreshold: 0.20,
             deadContentFractionThreshold: 0.20,
-            smallSegmentMergeThreshold: 16,
+            minimumSegmentCountForSmallMerge: 16,
             metadataBloatDeadOrdinalsThreshold: 1024,
             maxInputSegmentBytes: 1L * 1024 * 1024 * 1024,
             minimumFreeBytesAfterCompaction: 512L * 1024 * 1024)
     {
     }
 
-    public CompactOptions(
+    private CompactOptions(
         int maxMergedSegments,
         double deadFractionThreshold,
         double deadContentFractionThreshold,
-        int smallSegmentMergeThreshold,
+        int minimumSegmentCountForSmallMerge,
         int metadataBloatDeadOrdinalsThreshold,
         long maxInputSegmentBytes,
         long minimumFreeBytesAfterCompaction)
@@ -299,7 +299,7 @@ public sealed record CompactOptions
         MaxMergedSegments = maxMergedSegments;
         DeadFractionThreshold = deadFractionThreshold;
         DeadContentFractionThreshold = deadContentFractionThreshold;
-        SmallSegmentMergeThreshold = smallSegmentMergeThreshold;
+        MinimumSegmentCountForSmallMerge = minimumSegmentCountForSmallMerge;
         MetadataBloatDeadOrdinalsThreshold = metadataBloatDeadOrdinalsThreshold;
         MaxInputSegmentBytes = maxInputSegmentBytes;
         MinimumFreeBytesAfterCompaction = minimumFreeBytesAfterCompaction;
@@ -311,7 +311,7 @@ public sealed record CompactOptions
     // Selects segments whose deleted bodies account for this share of content bytes.
     public double DeadContentFractionThreshold { get; init; }
     // Delays clean small-segment merging until the corpus exceeds this pack count.
-    public int SmallSegmentMergeThreshold { get; init; }
+    public int MinimumSegmentCountForSmallMerge { get; init; }
     public int MetadataBloatDeadOrdinalsThreshold { get; init; }
     // Applies to physical packs; one larger debt-bearing segment remains reclaimable.
     public long MaxInputSegmentBytes { get; init; }
