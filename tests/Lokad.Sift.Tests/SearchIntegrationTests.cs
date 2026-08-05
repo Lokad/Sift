@@ -2141,10 +2141,11 @@ public sealed class SearchIntegrationTests
         });
         await index.Build(fixture.CreateSource());
 
-        using var snapshot = index.OpenSnapshot(new SearchOptions(4));
+        using var snapshot = Assert.IsType<SearchSnapshot>(
+            index.OpenSnapshot(new SearchOptions(4)));
         var collector = new HitBuffer();
         snapshot.Search(
-            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxMatchedDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter(),
             collector);
 
@@ -2153,6 +2154,7 @@ public sealed class SearchIntegrationTests
             .ToArray();
         var expectedPaths = documents.Select(static doc => doc.Item1).ToArray();
         Assert.Equal(expectedPaths, actualPaths);
+        Assert.Equal(1, snapshot.ParallelSearchCount);
     }
 
     [Fact]
@@ -2210,7 +2212,7 @@ public sealed class SearchIntegrationTests
             new StopAfterFirstHitCollector());
 
         Assert.Equal(SearchStopReason.CollectorStopped, stats.StopReason);
-        Assert.Equal(1, stats.VerifiedDocuments);
+        Assert.InRange(stats.VerifiedDocuments, 1, 4);
         Assert.Equal(1, stats.HitsReturned);
     }
 
@@ -2256,7 +2258,12 @@ public sealed class SearchIntegrationTests
         await sequentialIndex.Build(fixture.CreateSource());
 
         using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 10, MaxMatchedDocuments = 6, MaxBytesScanned = 80 };
+        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive)
+        {
+            MaxHits = 10,
+            MaxMatchedDocuments = 6,
+            MaxBytesScanned = long.MaxValue
+        };
         var sequentialCollector = new HitBuffer();
         var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
         var expected = sequentialCollector.Hits
@@ -2268,7 +2275,8 @@ public sealed class SearchIntegrationTests
         {
             TargetSegmentDocumentCount = 16
         });
-        using var parallelSnapshot = parallelIndex.OpenSnapshot(new SearchOptions(4));
+        using var parallelSnapshot = Assert.IsType<SearchSnapshot>(
+            parallelIndex.OpenSnapshot(new SearchOptions(4)));
         var parallelCollector = new HitBuffer();
         var parallelStats = parallelSnapshot.Search(query, new PathFilter(), parallelCollector);
         var actual = parallelCollector.Hits
@@ -2277,17 +2285,15 @@ public sealed class SearchIntegrationTests
             .ToArray();
 
         Assert.Equal(expected, actual);
-        Assert.Equal(sequentialStats.CandidateDocumentsAfterIndex, parallelStats.CandidateDocumentsAfterIndex);
-        Assert.Equal(sequentialStats.CandidateDocumentsAfterPrecheck, parallelStats.CandidateDocumentsAfterPrecheck);
-        Assert.Equal(sequentialStats.VerifiedDocuments, parallelStats.VerifiedDocuments);
-        Assert.Equal(sequentialStats.BytesScanned, parallelStats.BytesScanned);
-        Assert.Equal(sequentialStats.DecodedChars, parallelStats.DecodedChars);
+        Assert.True(parallelStats.VerifiedDocuments >= sequentialStats.VerifiedDocuments);
+        Assert.True(parallelStats.BytesScanned >= sequentialStats.BytesScanned);
         Assert.Equal(sequentialStats.HitsReturned, parallelStats.HitsReturned);
         Assert.Equal(sequentialStats.StopReason, parallelStats.StopReason);
+        Assert.Equal(1, parallelSnapshot.ParallelSearchCount);
     }
 
     [Fact]
-    public async Task FiniteGlobalLimitsAvoidParallelSegmentPrework()
+    public async Task FiniteByteLimitAvoidsParallelSegmentPrework()
     {
         var documents = Enumerable.Range(0, 8)
             .Select(static i => ($"src/{i:D2}.txt", "needle"))
@@ -2304,11 +2310,15 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
-            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 1, MaxMatchedDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue },
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
+            {
+                MaxHits = int.MaxValue,
+                MaxBytesScanned = 5
+            },
             new PathFilter(),
             collector);
 
-        Assert.Equal(SearchStopReason.MaxHits, stats.StopReason);
+        Assert.Equal(SearchStopReason.MaxBytesScanned, stats.StopReason);
         Assert.Equal(1, storage.SegmentOpenCount - opensBeforeSearch);
     }
 

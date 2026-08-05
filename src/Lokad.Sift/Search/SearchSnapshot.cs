@@ -38,7 +38,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private int _disposed;
 #if SIFT_INTERNAL_VERIFICATION
     private int _segmentCacheCreationCount;
+    private int _parallelSearchCount;
     internal int SegmentCacheCreationCount => Volatile.Read(ref _segmentCacheCreationCount);
+    internal int ParallelSearchCount => Volatile.Read(ref _parallelSearchCount);
 #endif
     internal IndexIdentity Identity => new(
         _storageSnapshot.Manifest.CorpusId,
@@ -294,9 +296,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken callerCancellationToken,
         Stopwatch watch)
     {
+#if SIFT_INTERNAL_VERIFICATION
+        Interlocked.Increment(ref _parallelSearchCount);
+#endif
         var preparedRegex = preparedQuery.GetRegexExecution();
         var metrics = SearchMetrics.ForRegex(preparedRegex);
         var hitsReturned = 0;
+        var matchedDocuments = 0;
+        (SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)? lastMatchedDocument = null;
         var stopReason = SearchStopReason.None;
 
         if (HasElapsed(query, watch))
@@ -381,11 +388,32 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         {
                             foreach (var hit in hitBuffers[batchIndex].GetConsumingEnumerable(cancellationToken))
                             {
+                                var hitDocument = (hit.SegmentId, hit.DocumentOrdinal);
+                                if (lastMatchedDocument != hitDocument)
+                                {
+                                    if (matchedDocuments >= query.MaxMatchedDocuments)
+                                    {
+                                        stopReason = SearchStopReason.MaxMatchedDocuments;
+                                        batchCancellation.Cancel();
+                                        break;
+                                    }
+
+                                    matchedDocuments++;
+                                    lastMatchedDocument = hitDocument;
+                                }
+
                                 var shouldContinue = collector.OnHit(hit);
                                 hitsReturned++;
                                 if (!shouldContinue)
                                 {
                                     stopReason = SearchStopReason.CollectorStopped;
+                                    batchCancellation.Cancel();
+                                    break;
+                                }
+
+                                if (hitsReturned >= query.MaxHits)
+                                {
+                                    stopReason = SearchStopReason.MaxHits;
                                     batchCancellation.Cancel();
                                     break;
                                 }
@@ -398,10 +426,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                             }
 
                             var result = batchResults[batchIndex];
-                            metrics.Add(result.Metrics);
 
                             if (stopReason != SearchStopReason.None)
                             {
+                                goto Done;
+                            }
+
+                            if (matchedDocuments >= query.MaxMatchedDocuments)
+                            {
+                                stopReason = SearchStopReason.MaxMatchedDocuments;
                                 goto Done;
                             }
 
@@ -424,6 +457,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         Task.WaitAll(workers);
                         for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
                         {
+                            metrics.Add(batchResults[batchIndex].Metrics);
                             hitBuffers[batchIndex].Dispose();
                         }
                     }
@@ -1614,8 +1648,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         return _searchOptions.SegmentParallelism > 1 &&
                _segments.Count > 1 &&
-               query.MaxHits == int.MaxValue &&
-               query.MaxMatchedDocuments == int.MaxValue &&
                query.MaxBytesScanned == long.MaxValue;
     }
 }

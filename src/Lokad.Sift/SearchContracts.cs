@@ -119,6 +119,11 @@ public readonly record struct SearchOptions
     }
 
     /// <summary>Gets the number of segments searched concurrently. Zero uses the default of one.</summary>
+    /// <remarks>
+    ///     A finite <see cref="SearchQuery.MaxBytesScanned"/> uses one segment lane
+    ///     so the byte budget remains exact. Hit and matched-document limits are
+    ///     enforced globally while parallel workers preserve manifest hit order.
+    /// </remarks>
     public int SegmentParallelism { get; init; }
 }
 
