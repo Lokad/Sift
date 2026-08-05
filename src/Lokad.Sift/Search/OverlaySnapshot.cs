@@ -87,6 +87,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             try
             {
                 ThrowIfDisposed();
+                await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
                 return await ApplyUpdateUnderLock().ConfigureAwait(false);
             }
             finally
@@ -160,7 +161,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 _stateLock.ExitWriteLock();
             }
 
-            await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
             watch.Stop();
 
             return new UpdateStats(
@@ -633,6 +633,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     private async Task CompactOverlayIfNeeded(CancellationToken cancellationToken)
     {
+        // A generation whose results escaped must keep its retired packs readable.
+        // Retaining those results takes precedence over compacting this transient
+        // index; disposing the overlay releases the entire index at once.
+        if (_retainedOverlaySnapshots.Count > 0)
+        {
+            return;
+        }
+
         var maintenance = _overlayIndex.GetMaintenanceStats();
         var minimumSegmentsForDocuments = maintenance.LiveDocuments == 0
             ? 0
