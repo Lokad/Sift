@@ -621,6 +621,12 @@ public interface IIndexSnapshot : IDisposable
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
     SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
     SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
+
+    /// <summary>Materializes a raw hit produced by this snapshot.</summary>
+    /// <remarks>
+    ///     Hits produced by an overlay remain valid until its next update. All hits
+    ///     become invalid when their producing snapshot is disposed.
+    /// </remarks>
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
 
     /// <summary>Gets a document body owned by this snapshot.</summary>

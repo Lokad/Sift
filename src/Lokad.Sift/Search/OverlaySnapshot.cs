@@ -288,6 +288,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             try
             {
                 previousGeneration = _overlayGeneration;
+                InvalidateOverlayHits();
                 _overlayGeneration = nextGeneration;
                 _overlayDocuments = nextOverlayDocuments;
                 _deletedPaths = nextDeletedPaths;
@@ -494,11 +495,18 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
     {
         using var state = BeginRead();
-        CapturedHitDocument capturedDocument;
+        OverlayHitOrigin? origin;
         lock (_syntheticSync)
         {
-            if (!_syntheticHitOrigins.TryGetValue(hit.SegmentId, out var origin))
+            if (!_syntheticHitOrigins.TryGetValue(hit.SegmentId, out origin))
             {
+                if (hit.IsOwnedBy(_hitOwner))
+                {
+                    throw new ArgumentException(
+                        "The overlay hit is no longer valid because the overlay was updated.",
+                        nameof(hit));
+                }
+
                 return _baseSnapshot.Materialize(hit, contextBefore, contextAfter);
             }
 
@@ -506,16 +514,13 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             {
                 throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
             }
-
-            capturedDocument = origin.GetDocument(hit.DocumentOrdinal);
         }
 
-        return HitMaterializer.Materialize(
-            capturedDocument,
+        return origin.Snapshot.MaterializeOverlayHit(
             hit,
+            origin.SegmentId,
             contextBefore,
-            contextAfter,
-            _options);
+            contextAfter);
     }
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
@@ -582,8 +587,18 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var next = new OverlayGeneration(
             (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions));
         var previous = _overlayGeneration;
+        InvalidateOverlayHits();
         _overlayGeneration = next;
         previous.Snapshot.Dispose();
+    }
+
+    private void InvalidateOverlayHits()
+    {
+        lock (_syntheticSync)
+        {
+            _overlayToSyntheticSegmentIds.Clear();
+            _syntheticHitOrigins.Clear();
+        }
     }
 
     private SegmentId CaptureHit(OverlayGeneration generation, in RawHit hit)
@@ -593,7 +608,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             var overlaySegmentId = hit.SegmentId;
             if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId, out var syntheticSegmentId))
             {
-                _syntheticHitOrigins[syntheticSegmentId].Capture(generation.Snapshot, hit);
                 return syntheticSegmentId;
             }
 
@@ -605,12 +619,24 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
             _nextSyntheticSegmentId--;
             _overlayToSyntheticSegmentIds.Add(overlaySegmentId, syntheticSegmentId);
-            var origin = new OverlayHitOrigin(overlaySegmentId);
-            origin.Capture(generation.Snapshot, hit);
+            var origin = new OverlayHitOrigin(generation.Snapshot, overlaySegmentId);
             _syntheticHitOrigins.Add(syntheticSegmentId, origin);
             return syntheticSegmentId;
         }
     }
+
+#if SIFT_INTERNAL_VERIFICATION
+    internal int RetainedOverlayHitOriginCount
+    {
+        get
+        {
+            lock (_syntheticSync)
+            {
+                return _syntheticHitOrigins.Count;
+            }
+        }
+    }
+#endif
 
     private StateReadLease BeginRead()
     {
@@ -864,27 +890,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         public SearchSnapshot Snapshot { get; } = snapshot;
     }
 
-    private sealed class OverlayHitOrigin(SegmentId segmentId)
+    private sealed class OverlayHitOrigin(SearchSnapshot snapshot, SegmentId segmentId)
     {
-        private readonly Dictionary<DocumentOrdinal, CapturedHitDocument> _documents = [];
-
-        public void Capture(SearchSnapshot snapshot, in RawHit hit)
-        {
-            if (!_documents.ContainsKey(hit.DocumentOrdinal))
-            {
-                _documents.Add(hit.DocumentOrdinal, snapshot.CaptureHitDocument(hit));
-            }
-        }
-
-        public CapturedHitDocument GetDocument(DocumentOrdinal ordinal)
-        {
-            if (_documents.TryGetValue(ordinal, out var document))
-            {
-                return document;
-            }
-
-            throw new ArgumentException(
-                $"The overlay hit refers to unknown document ordinal {ordinal.Value} in segment {segmentId.Value}.");
-        }
+        public SearchSnapshot Snapshot { get; } = snapshot;
+        public SegmentId SegmentId { get; } = segmentId;
     }
 }

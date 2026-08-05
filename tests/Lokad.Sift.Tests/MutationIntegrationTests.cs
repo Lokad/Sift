@@ -263,7 +263,7 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task OverlayHitsRemainBoundToTheirProducingGeneration()
+    public async Task OverlayUpdateExpiresHitsFromThePreviousGeneration()
     {
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([]));
@@ -286,7 +286,7 @@ public sealed class MutationIntegrationTests
             new PathFilter(),
             newHits);
 
-        Assert.Equal("old", overlay.Materialize(oldHits.Hits.Single(), 0, 0).MatchText);
+        Assert.Throws<ArgumentException>(() => overlay.Materialize(oldHits.Hits.Single(), 0, 0));
         Assert.Equal("new", overlay.Materialize(newHits.Hits.Single(), 0, 0).MatchText);
     }
 
@@ -309,7 +309,7 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task OverlayCompactionPreservesEscapedHitsWithoutRetainingGenerations()
+    public async Task OverlayUpdatesBoundHitOriginTrackingToTheCurrentGeneration()
     {
         const int revisions = 8;
         using var index = SiftIndex.CreateInMemory(new SiftOptions
@@ -330,13 +330,14 @@ public sealed class MutationIntegrationTests
                 new SearchQuery("revision", PatternMode.Literal, CaseMode.Sensitive),
                 new PathFilter(),
                 hits);
+            Assert.InRange(overlay.RetainedOverlayHitOriginCount, 1, 2);
             if (revision == 0)
             {
                 firstHit = hits.Hits.Single();
             }
         }
 
-        Assert.Equal("revision", overlay.Materialize(firstHit, 0, 0).MatchText);
+        Assert.Throws<ArgumentException>(() => overlay.Materialize(firstHit, 0, 0));
         Assert.InRange(overlay.GetOverlayMaintenanceStats().SegmentCount, 1, 2);
     }
 

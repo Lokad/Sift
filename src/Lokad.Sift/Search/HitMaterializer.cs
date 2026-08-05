@@ -25,24 +25,6 @@ internal static class HitMaterializer
             options);
     }
 
-    public static MaterializedHit Materialize(
-        CapturedHitDocument document,
-        in RawHit hit,
-        int contextBefore,
-        int contextAfter,
-        SiftOptions options)
-    {
-        return Materialize(
-            document.Path,
-            document.Content,
-            document.EncodedLineIndex,
-            document.IsAscii,
-            hit,
-            contextBefore,
-            contextAfter,
-            options);
-    }
-
     private static MaterializedHit Materialize(
         string path,
         ReadOnlySpan<byte> contentBytes,
@@ -230,9 +212,3 @@ internal static class HitMaterializer
             : Encoding.UTF8.GetString(bytes);
     }
 }
-
-internal sealed record CapturedHitDocument(
-    string Path,
-    byte[] Content,
-    byte[] EncodedLineIndex,
-    bool IsAscii);
