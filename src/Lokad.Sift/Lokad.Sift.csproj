@@ -31,4 +31,9 @@
     <PackageReference Include="Lokad.Utf8Regex" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
   </ItemGroup>
+  <Target Name="RejectInternalVerificationInProduct" BeforeTargets="CoreCompile;Pack">
+    <Error
+      Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';SIFT_INTERNAL_VERIFICATION;'))"
+      Text="SIFT_INTERNAL_VERIFICATION is test-only and must not be compiled or packed into Lokad.Sift." />
+  </Target>
 </Project>

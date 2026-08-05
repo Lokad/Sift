@@ -25,3 +25,16 @@ Important benchmark rule:
 - Run benchmark work in `Release`, not `Debug`, otherwise the numbers are misleading.
 - Prefer `.\bench.ps1` over ad hoc `dotnet run` so stale benchmark hosts and output paths are handled consistently.
 - Benchmark commands should be run sequentially, not in parallel.
+
+## Conditional compilation
+
+`SIFT_INTERNAL_VERIFICATION` is the repository's only conditional-compilation
+symbol. The test project defines it because it compiles the implementation
+sources directly. It enables fault injection, operation counters, and helper
+entry points used only to verify internal behavior.
+
+Never define `SIFT_INTERNAL_VERIFICATION` for `Lokad.Sift` itself or for a
+package build. The library project rejects the symbol before compilation and
+packing so the verification hooks cannot enter the shipped assembly. Document
+any future conditional-compilation symbol here and give it an explicit package
+policy before introducing its first `#if`.

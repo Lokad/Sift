@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!-- See AGENTS.md. This symbol applies only to the source-linked verification
+         copy; the product project rejects it during compilation and packing. -->
     <DefineConstants>$(DefineConstants);SIFT_INTERNAL_VERIFICATION</DefineConstants>
   </PropertyGroup>
 
