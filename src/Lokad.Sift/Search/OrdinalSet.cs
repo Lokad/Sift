@@ -61,23 +61,6 @@ internal sealed class OrdinalSet
 
     public Enumerator GetEnumerator() => new(this);
 
-    public uint[] ToArray()
-    {
-        if (!_isRange)
-        {
-            return _ordinals.ToArray();
-        }
-
-        var result = new uint[Count];
-        var index = 0;
-        foreach (var ordinal in this)
-        {
-            result[index++] = ordinal;
-        }
-
-        return result;
-    }
-
     public bool TryGetSpan(out ReadOnlySpan<uint> ordinals)
     {
         if (_isRange)
@@ -95,6 +78,20 @@ internal sealed class OrdinalSet
         foreach (var ordinal in this)
         {
             destination.Set((int)ordinal);
+        }
+    }
+
+    public void CopyTo(Span<uint> destination)
+    {
+        if (destination.Length < Count)
+        {
+            throw new ArgumentException("The destination is shorter than the ordinal set.", nameof(destination));
+        }
+
+        var index = 0;
+        foreach (var ordinal in this)
+        {
+            destination[index++] = ordinal;
         }
     }
 

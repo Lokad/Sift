@@ -18,7 +18,7 @@ internal static class LiteralQueryPlanner
         bool selectAllGrams,
         SiftOptions options)
     {
-        var direct = LiteralPlan.Direct(resolvedCaseMode, scopeDocuments, scopeBytes);
+        var direct = LiteralPlan.Direct(scopeDocuments, scopeBytes);
         if (scopeDocuments == 0 || pattern.Length == 0)
         {
             return [direct];
@@ -69,7 +69,6 @@ internal static class LiteralQueryPlanner
             if (!segment.TryGetPostings(pair, gram, out var postings, out var docFreq))
             {
                 return LiteralPlan.Missing(
-                    resolvedCaseMode,
                     scopeDocuments,
                     scopeBytes,
                     patternBytes.Length,
@@ -105,7 +104,6 @@ internal static class LiteralQueryPlanner
             ? grams.ToArray()
             : TrimSelectedGrams(grams, scopeDocuments, options);
         return LiteralPlan.Intersection(
-            resolvedCaseMode,
             scopeDocuments,
             scopeBytes,
             patternBytes.Length,
@@ -166,55 +164,75 @@ internal static class LiteralQueryPlanner
 
 }
 
-internal readonly record struct LiteralPlan(
-    CaseMode ResolvedCaseMode,
-    int ScopeDocuments,
-    long ScopeBytes,
-    LiteralCandidateMode CandidateMode,
-    int SeedByteLength,
-    SelectedGram[] SelectedGrams,
-    IndexRegionPair IndexPair,
-    int GramLength,
-    int[]? UnionGroupLengths)
+internal readonly struct LiteralPlan
 {
+    private LiteralPlan(
+        int scopeDocuments,
+        long scopeBytes,
+        LiteralCandidateMode candidateMode,
+        int seedByteLength,
+        SelectedGram[] selectedGrams,
+        IndexRegionPair indexPair,
+        int gramLength,
+        int[] unionGroupLengths)
+    {
+        ScopeDocuments = scopeDocuments;
+        ScopeBytes = scopeBytes;
+        CandidateMode = candidateMode;
+        SeedByteLength = seedByteLength;
+        SelectedGrams = selectedGrams;
+        IndexPair = indexPair;
+        GramLength = gramLength;
+        UnionGroupLengths = unionGroupLengths;
+    }
+
+    public int ScopeDocuments { get; }
+    public long ScopeBytes { get; }
+    public LiteralCandidateMode CandidateMode { get; }
+    public int SeedByteLength { get; }
+    public SelectedGram[] SelectedGrams { get; }
+    public IndexRegionPair IndexPair { get; }
+    public int GramLength { get; }
+    public int[] UnionGroupLengths { get; }
     public bool UsesIndex => CandidateMode != LiteralCandidateMode.Direct;
-    public bool UnionCandidates => CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections;
     public bool IsMissingGram => CandidateMode == LiteralCandidateMode.Missing;
 
-    public static LiteralPlan Direct(CaseMode resolvedCaseMode, int scopeDocuments, long scopeBytes)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Direct, 0, [], default, 0, null);
+    public static LiteralPlan Direct(int scopeDocuments, long scopeBytes)
+        => new(scopeDocuments, scopeBytes, LiteralCandidateMode.Direct, 0, [], default, 0, []);
 
     public static LiteralPlan Missing(
-        CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
         int seedByteLength,
         IndexRegionPair pair,
         int gramLength)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Missing, seedByteLength, [], pair, gramLength, null);
+        => new(scopeDocuments, scopeBytes, LiteralCandidateMode.Missing, seedByteLength, [], pair, gramLength, []);
 
     public static LiteralPlan Intersection(
-        CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
         int seedByteLength,
         SelectedGram[] selectedGrams,
         IndexRegionPair pair,
         int gramLength)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Intersection, seedByteLength, selectedGrams, pair, gramLength, null);
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(selectedGrams.Length);
+        return new(scopeDocuments, scopeBytes, LiteralCandidateMode.Intersection, seedByteLength, selectedGrams, pair, gramLength, []);
+    }
 
     public static LiteralPlan Union(
-        CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
         int seedByteLength,
         SelectedGram[] selectedGrams,
         IndexRegionPair pair,
         int gramLength)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Union, seedByteLength, selectedGrams, pair, gramLength, null);
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(selectedGrams.Length);
+        return new(scopeDocuments, scopeBytes, LiteralCandidateMode.Union, seedByteLength, selectedGrams, pair, gramLength, []);
+    }
 
     public static LiteralPlan UnionOfIntersections(
-        CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
         int seedByteLength,
@@ -222,7 +240,21 @@ internal readonly record struct LiteralPlan(
         IndexRegionPair pair,
         int gramLength,
         int[] unionGroupLengths)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.UnionOfIntersections, seedByteLength, selectedGrams, pair, gramLength, unionGroupLengths);
+    {
+        var selectedGramCount = 0;
+        for (var i = 0; i < unionGroupLengths.Length; i++)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(unionGroupLengths[i]);
+            selectedGramCount = checked(selectedGramCount + unionGroupLengths[i]);
+        }
+
+        if (selectedGramCount != selectedGrams.Length)
+        {
+            throw new ArgumentException("Union group lengths must cover every selected gram.", nameof(unionGroupLengths));
+        }
+
+        return new(scopeDocuments, scopeBytes, LiteralCandidateMode.UnionOfIntersections, seedByteLength, selectedGrams, pair, gramLength, unionGroupLengths);
+    }
 }
 
 internal enum LiteralCandidateMode

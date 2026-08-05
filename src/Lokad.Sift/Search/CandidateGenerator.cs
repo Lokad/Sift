@@ -31,11 +31,90 @@ internal static class CandidateGenerator
 
         try
         {
-            return plan.UnionCandidates
-                ? plan.UnionGroupLengths is not null && plan.UnionGroupLengths.Length > 0
-                    ? GenerateUnionOfIntersections(segment, scopeOrdinals, plan.IndexPair, grams, plan.UnionGroupLengths)
-                    : GenerateUnion(segment, scopeOrdinals, plan.IndexPair, grams)
-                : Generate(segment, scopeOrdinals, plan.IndexPair, grams);
+            return plan.CandidateMode switch
+            {
+                LiteralCandidateMode.Intersection => Generate(segment, scopeOrdinals, plan.IndexPair, grams),
+                LiteralCandidateMode.Union => GenerateUnion(segment, scopeOrdinals, plan.IndexPair, grams),
+                LiteralCandidateMode.UnionOfIntersections => GenerateUnionOfIntersections(
+                    segment,
+                    scopeOrdinals,
+                    plan.IndexPair,
+                    grams,
+                    plan.UnionGroupLengths),
+                _ => throw new InvalidOperationException("The literal candidate mode does not use postings.")
+            };
+
+            static CandidateResult GenerateUnion(
+                MappedSegment segment,
+                OrdinalSet scopeOrdinals,
+                IndexRegionPair pair,
+                ReadOnlySpan<int> grams)
+            {
+                var postingsBytesRead = 0L;
+                using var candidates = new PooledBitSet(segment.DocumentCount);
+                for (var i = 0; i < grams.Length; i++)
+                {
+                    if (!segment.TryGetPostings(pair, grams[i], out var postings, out _))
+                    {
+                        continue;
+                    }
+
+                    postingsBytesRead += postings.Length;
+                    PostingsCodec.DecodeIntoBitSet(postings, candidates);
+                }
+
+                if (!scopeOrdinals.CoversWholeSegment(segment.DocumentCount))
+                {
+                    using var scope = new PooledBitSet(segment.DocumentCount);
+                    scopeOrdinals.CopyTo(scope);
+                    candidates.And(scope);
+                }
+
+                return new CandidateResult(OrdinalSet.FromSorted(candidates.ToOrdinals()), postingsBytesRead);
+            }
+
+            static CandidateResult GenerateUnionOfIntersections(
+                MappedSegment segment,
+                OrdinalSet scopeOrdinals,
+                IndexRegionPair pair,
+                ReadOnlySpan<int> grams,
+                ReadOnlySpan<int> groupLengths)
+            {
+                using var candidates = new PooledBitSet(segment.DocumentCount);
+                using var branch = new PooledBitSet(segment.DocumentCount);
+                using var postingsBits = new PooledBitSet(segment.DocumentCount);
+                var postingsBytesRead = 0L;
+                var offset = 0;
+                for (var i = 0; i < groupLengths.Length; i++)
+                {
+                    var length = groupLengths[i];
+                    branch.Clear();
+                    scopeOrdinals.CopyTo(branch);
+                    var branchExists = true;
+                    for (var gramIndex = offset; gramIndex < offset + length; gramIndex++)
+                    {
+                        if (!segment.TryGetPostings(pair, grams[gramIndex], out var postings, out _))
+                        {
+                            branchExists = false;
+                            break;
+                        }
+
+                        postingsBytesRead += postings.Length;
+                        postingsBits.Clear();
+                        PostingsCodec.DecodeIntoBitSet(postings, postingsBits);
+                        branch.And(postingsBits);
+                    }
+
+                    if (branchExists)
+                    {
+                        candidates.Or(branch);
+                    }
+
+                    offset += length;
+                }
+
+                return new CandidateResult(OrdinalSet.FromSorted(candidates.ToOrdinals()), postingsBytesRead);
+            }
         }
         finally
         {
@@ -91,18 +170,35 @@ internal static class CandidateGenerator
 
                 postingsBytesRead += postings.Length;
                 postingsBits.Clear();
-                DecodeIntoBitSet(postings, postingsBits);
+                PostingsCodec.DecodeIntoBitSet(postings, postingsBits);
                 candidateBits.And(postingsBits);
             }
 
             return new CandidateResult(OrdinalSet.FromSorted(candidateBits.ToOrdinals()), postingsBytesRead);
         }
 
-        ReadOnlySpan<uint> current = scopeOrdinals.TryGetSpan(out var explicitOrdinals)
-            ? explicitOrdinals
-            : scopeOrdinals.ToArray();
-        var firstBuffer = ArrayPool<uint>.Shared.Rent(Math.Max(current.Length, 1));
-        var secondBuffer = ArrayPool<uint>.Shared.Rent(Math.Max(current.Length, 1));
+        var hasExplicitOrdinals = scopeOrdinals.TryGetSpan(out var explicitOrdinals);
+        var bufferLength = Math.Max(scopeOrdinals.Count, 1);
+        var firstBuffer = ArrayPool<uint>.Shared.Rent(bufferLength);
+        uint[]? secondBuffer = null;
+        ReadOnlySpan<uint> current;
+        var writeToFirstBuffer = true;
+        if (hasExplicitOrdinals)
+        {
+            current = explicitOrdinals;
+            if (grams.Length > 1)
+            {
+                secondBuffer = ArrayPool<uint>.Shared.Rent(bufferLength);
+            }
+        }
+        else
+        {
+            scopeOrdinals.CopyTo(firstBuffer);
+            current = firstBuffer.AsSpan(0, scopeOrdinals.Count);
+            secondBuffer = ArrayPool<uint>.Shared.Rent(bufferLength);
+            writeToFirstBuffer = false;
+        }
+
         try
         {
             for (var i = 0; i < grams.Length; i++)
@@ -113,9 +209,10 @@ internal static class CandidateGenerator
                 }
 
                 postingsBytesRead += postings.Length;
-                var destination = (i & 1) == 0 ? firstBuffer : secondBuffer;
+                var destination = writeToFirstBuffer ? firstBuffer : secondBuffer!;
                 var intersectionCount = PostingsCodec.IntersectSorted(current, postings, docFreq, destination);
                 current = destination.AsSpan(0, intersectionCount);
+                writeToFirstBuffer = !writeToFirstBuffer;
                 if (current.Length == 0)
                 {
                     return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
@@ -139,7 +236,7 @@ internal static class CandidateGenerator
 
                         postingsBytesRead += remainingPostings.Length;
                         postingsBits.Clear();
-                        DecodeIntoBitSet(remainingPostings, postingsBits);
+                        PostingsCodec.DecodeIntoBitSet(remainingPostings, postingsBits);
                         candidateBits.And(postingsBits);
                     }
 
@@ -154,92 +251,11 @@ internal static class CandidateGenerator
         finally
         {
             ArrayPool<uint>.Shared.Return(firstBuffer);
-            ArrayPool<uint>.Shared.Return(secondBuffer);
-        }
-    }
-
-    private static CandidateResult GenerateUnion(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
-    {
-        var postingsBytesRead = 0L;
-        if (grams.Length == 0)
-        {
-            return new CandidateResult(scopeOrdinals, 0);
-        }
-
-        using var candidates = new PooledBitSet(segment.DocumentCount);
-        for (var i = 0; i < grams.Length; i++)
-        {
-            if (!segment.TryGetPostings(pair, grams[i], out var postings, out _))
+            if (secondBuffer is not null)
             {
-                continue;
+                ArrayPool<uint>.Shared.Return(secondBuffer);
             }
-
-            postingsBytesRead += postings.Length;
-            DecodeIntoBitSet(postings, candidates);
         }
-
-        if (!scopeOrdinals.CoversWholeSegment(segment.DocumentCount))
-        {
-            using var scope = new PooledBitSet(segment.DocumentCount);
-            scopeOrdinals.CopyTo(scope);
-
-            candidates.And(scope);
-        }
-
-        return new CandidateResult(OrdinalSet.FromSorted(candidates.ToOrdinals()), postingsBytesRead);
-    }
-
-    private static CandidateResult GenerateUnionOfIntersections(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams, ReadOnlySpan<int> groupLengths)
-    {
-        if (grams.Length == 0 || groupLengths.Length == 0)
-        {
-            return new CandidateResult(scopeOrdinals, 0);
-        }
-
-        using var candidates = new PooledBitSet(segment.DocumentCount);
-        using var branch = new PooledBitSet(segment.DocumentCount);
-        using var postingsBits = new PooledBitSet(segment.DocumentCount);
-        var postingsBytesRead = 0L;
-        var offset = 0;
-        for (var i = 0; i < groupLengths.Length && offset < grams.Length; i++)
-        {
-            var length = groupLengths[i];
-            if (length <= 0 || offset + length > grams.Length)
-            {
-                break;
-            }
-
-            branch.Clear();
-            scopeOrdinals.CopyTo(branch);
-            var branchExists = true;
-            for (var gramIndex = offset; gramIndex < offset + length; gramIndex++)
-            {
-                if (!segment.TryGetPostings(pair, grams[gramIndex], out var postings, out _))
-                {
-                    branchExists = false;
-                    break;
-                }
-
-                postingsBytesRead += postings.Length;
-                postingsBits.Clear();
-                DecodeIntoBitSet(postings, postingsBits);
-                branch.And(postingsBits);
-            }
-
-            if (branchExists)
-            {
-                candidates.Or(branch);
-            }
-
-            offset += length;
-        }
-
-        return new CandidateResult(OrdinalSet.FromSorted(candidates.ToOrdinals()), postingsBytesRead);
-    }
-
-    private static void DecodeIntoBitSet(ReadOnlySpan<byte> postings, PooledBitSet bitSet)
-    {
-        PostingsCodec.DecodeIntoBitSet(postings, bitSet);
     }
 
 }

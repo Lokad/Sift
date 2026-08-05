@@ -15,7 +15,7 @@ internal static class SearchPlanCandidateBuilder
             {
                 candidates.Add(CreateLiteralContentPlan(
                     in features,
-                    LiteralPlan.Direct(features.ResolvedCaseMode, scope.Count, scope.Bytes),
+                    LiteralPlan.Direct(scope.Count, scope.Bytes),
                     options));
                 return candidates;
             }
@@ -65,7 +65,6 @@ internal static class SearchPlanCandidateBuilder
         {
             var structuralUnion = TryCreateStructuredLeadingLiteralPlan(
                 scope,
-                features.ResolvedCaseMode,
                 mandatoryPlans,
                 features.LeadingLiterals,
                 leadingPlans,
@@ -89,7 +88,6 @@ internal static class SearchPlanCandidateBuilder
 
             var alternationPlan = TryCreateLeadingLiteralSetPlan(
                 scope,
-                features.ResolvedCaseMode,
                 features.LeadingLiterals,
                 leadingPlans,
                 options);
@@ -117,7 +115,7 @@ internal static class SearchPlanCandidateBuilder
             }
         }
 
-        var anchor = SelectAnchorPlan(fragmentPlans, features.ResolvedCaseMode, scope, features.RegexPlan);
+        var anchor = SelectAnchorPlan(fragmentPlans, scope, features.RegexPlan);
         if (anchor.UsesIndex)
         {
             var selected = MergeFragmentGrams(fragmentPlans, anchor, options);
@@ -125,7 +123,6 @@ internal static class SearchPlanCandidateBuilder
             {
                 var estimatedCandidates = SearchPlanner.EstimateCandidateUpperBound(selected, scope.Count);
                 var indexed = LiteralPlan.Intersection(
-                    features.ResolvedCaseMode,
                     scope.Count,
                     scope.Bytes,
                     anchor.SeedByteLength,
@@ -175,8 +172,8 @@ internal static class SearchPlanCandidateBuilder
             SearchPlanner.GetCandidateCombination(
                 selected,
                 literalPlan.UsesIndex,
-                literalPlan.UnionCandidates,
-                literalPlan.UnionGroupLengths is not null),
+                literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
+                literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
             SearchPlanKinds.GetVerifierKind(features.Query, features.RegexPlan),
             directScanCost,
             estimatedIndexedCost,
@@ -189,7 +186,7 @@ internal static class SearchPlanCandidateBuilder
     {
         var directScanCost = SearchPlanner.EstimateDirectScanCost(scope, features.RegexPlan);
         return new SearchPlanCandidate(
-            LiteralPlan.Direct(features.Query.CaseMode, scope.Count, scope.Bytes),
+            LiteralPlan.Direct(scope.Count, scope.Bytes),
             SearchCandidateKind.DirectScan,
             SearchCandidateCombination.None,
             GetVerifierKind(features, scope),
@@ -245,8 +242,8 @@ internal static class SearchPlanCandidateBuilder
             SearchPlanner.GetCandidateCombination(
                 selected,
                 usesIndex: true,
-                literalPlan.UnionCandidates,
-                literalPlan.UnionGroupLengths is not null),
+                literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
+                literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
             GetVerifierKind(features, scope),
             directScanCost,
             estimatedIndexedCost,
@@ -267,9 +264,9 @@ internal static class SearchPlanCandidateBuilder
             : verifier;
     }
 
-    private static LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans, CaseMode resolvedCaseMode, SegmentScope scope, in RegexExecutionPlan regexPlan)
+    private static LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans, SegmentScope scope, in RegexExecutionPlan regexPlan)
     {
-        var best = LiteralPlan.Direct(resolvedCaseMode, scope.Count, scope.Bytes);
+        var best = LiteralPlan.Direct(scope.Count, scope.Bytes);
         var bestScore = double.PositiveInfinity;
         foreach (var plan in fragmentPlans)
         {
@@ -291,7 +288,6 @@ internal static class SearchPlanCandidateBuilder
 
     private static (LiteralPlan Plan, double EstimatedCandidates)? TryCreateStructuredLeadingLiteralPlan(
         SegmentScope scope,
-        CaseMode resolvedCaseMode,
         LiteralPlan?[] mandatoryPlans,
         PreparedSearchText[] leadingLiterals,
         LiteralPlan?[] leadingPlans,
@@ -377,7 +373,6 @@ internal static class SearchPlanCandidateBuilder
 
         return (
             LiteralPlan.UnionOfIntersections(
-                resolvedCaseMode,
                 scope.Count,
                 scope.Bytes,
                 leadingLiterals.Min(static literal => literal.Utf8Bytes.Length),
@@ -390,7 +385,6 @@ internal static class SearchPlanCandidateBuilder
 
     private static LiteralPlan? TryCreateLeadingLiteralSetPlan(
         SegmentScope scope,
-        CaseMode resolvedCaseMode,
         PreparedSearchText[] leadingLiterals,
         LiteralPlan?[] leadingPlans,
         SiftOptions options)
@@ -432,7 +426,6 @@ internal static class SearchPlanCandidateBuilder
 
         selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
         return LiteralPlan.Union(
-            resolvedCaseMode,
             scope.Count,
             scope.Bytes,
             leadingLiterals.Min(static literal => literal.Utf8Bytes.Length),
@@ -498,12 +491,11 @@ internal static class SearchPlanCandidateBuilder
 
         if (selected.Count == 0 || pair is null)
         {
-            return LiteralPlan.Missing(resolvedCaseMode, scope.Count, scope.Bytes, 0, default, 3);
+            return LiteralPlan.Missing(scope.Count, scope.Bytes, 0, default, 3);
         }
 
         selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
         return LiteralPlan.Union(
-            resolvedCaseMode,
             scope.Count,
             scope.Bytes,
             gramLength,
