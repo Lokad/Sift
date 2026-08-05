@@ -13,8 +13,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly SiftIndex _overlayIndex;
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
-    private readonly Dictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
+    private Dictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
+    private HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _baseDocumentExistence = new(StringComparer.Ordinal);
     private readonly HashSet<SegmentId> _baseSegmentIds;
     private readonly Dictionary<SegmentId, SegmentId> _overlayToSyntheticSegmentIds = [];
     private readonly Dictionary<SegmentId, OverlayHitOrigin> _syntheticHitOrigins = [];
@@ -100,6 +101,25 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         async Task<OverlayUpdateStats> ApplyUpdateUnderLock()
         {
+            static HiddenPathVisibility CreateHiddenPathVisibility(
+                IEnumerable<string> overlayPaths,
+                IReadOnlyCollection<string> deletedPaths)
+            {
+                var hidden = new List<byte[]>();
+                foreach (var path in overlayPaths)
+                {
+                    hidden.Add(Encoding.UTF8.GetBytes(path));
+                }
+
+                foreach (var path in deletedPaths)
+                {
+                    hidden.Add(Encoding.UTF8.GetBytes(path));
+                }
+
+                hidden.Sort(static (left, right) => left.AsSpan().SequenceCompareTo(right));
+                return new HiddenPathVisibility([.. hidden]);
+            }
+
             var watch = Stopwatch.StartNew();
             var load = IndexBuilder.LoadDocuments(
                 upserts,
@@ -122,42 +142,88 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 deletionSet.UnionWith(load.RejectedDocuments.Select(static document => document.Path));
             }
 
+            for (var i = 0; i < load.Documents.Count; i++)
+            {
+                if (deletionSet.Contains(load.Documents[i].Path))
+                {
+                    throw new InvalidOperationException(
+                        $"Path '{load.Documents[i].Path}' cannot appear in both upserts and deletions.");
+                }
+            }
+
+            var baseDocuments = new Dictionary<string, bool>(deletionSet.Count, StringComparer.Ordinal);
+            foreach (var path in deletionSet)
+            {
+                if (!_baseDocumentExistence.TryGetValue(path, out var exists))
+                {
+                    exists = _baseSnapshot.ContainsDocument(new DocumentKey(path));
+                    _baseDocumentExistence.Add(path, exists);
+                }
+
+                baseDocuments.Add(path, exists);
+            }
+
+            Dictionary<string, long> nextOverlayDocuments;
+            HashSet<string> nextDeletedPaths;
+            var deletedDocuments = 0;
+            _stateLock.EnterReadLock();
+            try
+            {
+                nextOverlayDocuments = new Dictionary<string, long>(
+                    _overlayDocuments,
+                    StringComparer.Ordinal);
+                nextDeletedPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
+            }
+            finally
+            {
+                _stateLock.ExitReadLock();
+            }
+
+            for (var i = 0; i < load.Documents.Count; i++)
+            {
+                var document = load.Documents[i];
+                nextOverlayDocuments[document.Path] = document.MTimeUtcTicks;
+                nextDeletedPaths.Remove(document.Path);
+            }
+
+            foreach (var path in deletionSet)
+            {
+                var removedOverlayDocument = nextOverlayDocuments.Remove(path);
+                var baseDocumentExists = baseDocuments[path];
+                var newlyHiddenBaseDocument = baseDocumentExists && nextDeletedPaths.Add(path);
+                if (removedOverlayDocument || newlyHiddenBaseDocument)
+                {
+                    deletedDocuments++;
+                }
+
+                if (!baseDocumentExists)
+                {
+                    nextDeletedPaths.Remove(path);
+                }
+            }
+
+            var nextVisibility = CreateHiddenPathVisibility(
+                nextOverlayDocuments.Keys,
+                nextDeletedPaths);
+
             var overlayUpdate = await _overlayIndex.UpdatePrevalidated(
                 load,
                 CreateDeletionKeys(deletionSet),
                 new UpdateOptions(options.RejectedUpsertPolicy),
                 cancellationToken);
 
-            var deletedDocuments = 0;
+            var nextGeneration = new OverlayGeneration(
+                (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions));
             OverlayRevision committedRevision;
+            OverlayGeneration previousGeneration;
             _stateLock.EnterWriteLock();
             try
             {
-                for (var i = 0; i < load.Documents.Count; i++)
-                {
-                    var document = load.Documents[i];
-                    _overlayDocuments[document.Path] = document.MTimeUtcTicks;
-                    _deletedPaths.Remove(document.Path);
-                }
-
-                foreach (var path in deletionSet)
-                {
-                    var removedOverlayDocument = _overlayDocuments.Remove(path);
-                    var baseDocumentExists = _baseSnapshot.ContainsDocument(new DocumentKey(path));
-                    var newlyHiddenBaseDocument = baseDocumentExists && _deletedPaths.Add(path);
-                    if (removedOverlayDocument || newlyHiddenBaseDocument)
-                    {
-                        deletedDocuments++;
-                    }
-
-                    if (!baseDocumentExists)
-                    {
-                        _deletedPaths.Remove(path);
-                    }
-                }
-
-                RefreshOverlaySnapshot();
-                RefreshHiddenPathVisibility();
+                previousGeneration = _overlayGeneration;
+                _overlayGeneration = nextGeneration;
+                _overlayDocuments = nextOverlayDocuments;
+                _deletedPaths = nextDeletedPaths;
+                _hiddenPathVisibility = nextVisibility;
                 if (overlayUpdate.UpsertedDocuments > 0 || deletedDocuments > 0)
                 {
                     _revision = checked(_revision + 1);
@@ -169,6 +235,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             {
                 _stateLock.ExitWriteLock();
             }
+            previousGeneration.Snapshot.Dispose();
 
             watch.Stop();
 
@@ -480,24 +547,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
-    }
-
-    private void RefreshHiddenPathVisibility()
-    {
-        var hidden = new byte[_overlayDocuments.Count + _deletedPaths.Count][];
-        var index = 0;
-        foreach (var path in _overlayDocuments.Keys)
-        {
-            hidden[index++] = Encoding.UTF8.GetBytes(path);
-        }
-
-        foreach (var path in _deletedPaths)
-        {
-            hidden[index++] = Encoding.UTF8.GetBytes(path);
-        }
-
-        Array.Sort(hidden, static (left, right) => left.AsSpan().SequenceCompareTo(right));
-        _hiddenPathVisibility = new HiddenPathVisibility(hidden);
     }
 
     private List<OverlayDocumentMetadata> GetSortedOverlayDocumentMetadata()

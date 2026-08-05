@@ -418,6 +418,33 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayUpdateDoesNotCommitBeforeBaseVisibilityIsKnown()
+    {
+        using var fixture = new CorpusFixture(("src/base.txt", "base"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var overlay = index.OpenOverlaySnapshot();
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        var segmentBytes = File.ReadAllBytes(segmentPath);
+        File.Delete(segmentPath);
+
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
+            await overlay.Update(
+                new InMemoryDocumentSource([("src/pending.txt", "pending")]),
+                [new DocumentKey("src/base.txt")]));
+
+        File.WriteAllBytes(segmentPath, segmentBytes);
+        await overlay.Update(
+            new InMemoryDocumentSource([]),
+            [new DocumentKey("src/missing.txt")]);
+
+        Assert.False(overlay.TryGetDocumentBytes(new DocumentKey("src/pending.txt"), out _));
+    }
+
+    [Fact]
     public async Task OverlayUpdatesReportLogicalRevisions()
     {
         using var index = SiftIndex.CreateInMemory();
