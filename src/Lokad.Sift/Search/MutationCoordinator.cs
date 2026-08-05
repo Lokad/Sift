@@ -7,15 +7,16 @@ internal sealed class MutationCoordinator : IDisposable
     private readonly ManualResetEventSlim _idle = new(initialState: true);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private int _requests;
-    private int _currentActivity;
+    private SiftWriteActivity _currentActivity;
     private bool _stopped;
     private bool _disposed;
 
     public WriteActivityStats GetWriteActivityStats()
     {
-        var isBusy = Volatile.Read(ref _requests) > 0;
-        var currentActivity = (SiftWriteActivity)Volatile.Read(ref _currentActivity);
-        return new WriteActivityStats(isBusy ? currentActivity : SiftWriteActivity.Idle);
+        lock (_sync)
+        {
+            return new WriteActivityStats(_requests > 0, _currentActivity);
+        }
     }
 
     public async Task<TResult> Run<TResult>(
@@ -39,14 +40,22 @@ internal sealed class MutationCoordinator : IDisposable
         await _gate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
         try
         {
-            Volatile.Write(ref _currentActivity, (int)activity);
+            lock (_sync)
+            {
+                _currentActivity = activity;
+            }
+
             return await Task.Run(
                 async () => await mutation(operationCancellation.Token).ConfigureAwait(false),
                 CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
-            Volatile.Write(ref _currentActivity, (int)SiftWriteActivity.Idle);
+            lock (_sync)
+            {
+                _currentActivity = SiftWriteActivity.Idle;
+            }
+
             _gate.Release();
         }
     }

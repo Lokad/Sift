@@ -367,10 +367,18 @@ public enum SiftWriteActivity
     Compact
 }
 
-public readonly record struct WriteActivityStats(
-    SiftWriteActivity CurrentActivity)
+public readonly record struct WriteActivityStats
 {
-    public bool IsWriteBusy => CurrentActivity != SiftWriteActivity.Idle;
+    internal WriteActivityStats(bool isWriteBusy, SiftWriteActivity currentActivity)
+    {
+        IsWriteBusy = isWriteBusy;
+        CurrentActivity = currentActivity;
+    }
+
+    // True while a mutation is running or waiting for the writer gate.
+    public bool IsWriteBusy { get; }
+    // Idle when work is queued but no mutation currently owns the writer gate.
+    public SiftWriteActivity CurrentActivity { get; }
 }
 
 public readonly record struct IndexIdentity(
