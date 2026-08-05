@@ -309,6 +309,61 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayCompactionPreservesEscapedHitsWithoutRetainingGenerations()
+    {
+        const int revisions = 8;
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            OverlayCompactionSegmentThreshold = 1
+        });
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = Assert.IsType<OverlaySnapshot>(index.OpenOverlaySnapshot());
+        RawHit firstHit = default;
+
+        for (var revision = 0; revision < revisions; revision++)
+        {
+            await overlay.Update(
+                new InMemoryDocumentSource([("src/a.txt", $"revision {revision}")]),
+                []);
+            var hits = new HitBuffer();
+            overlay.Search(
+                new SearchQuery("revision", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter(),
+                hits);
+            if (revision == 0)
+            {
+                firstHit = hits.Hits.Single();
+            }
+        }
+
+        Assert.Equal("revision", overlay.Materialize(firstHit, 0, 0).MatchText);
+        Assert.InRange(overlay.GetOverlayMaintenanceStats().SegmentCount, 1, 2);
+    }
+
+    [Fact]
+    public async Task OverlayHitsCannotBeMaterializedByAnotherOverlay()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var first = index.OpenOverlaySnapshot();
+        using var second = index.OpenOverlaySnapshot();
+        await first.Update(new InMemoryDocumentSource([("src/a.txt", "needle")]), []);
+        await second.Update(new InMemoryDocumentSource([("src/a.txt", "needle")]), []);
+        var firstHits = new HitBuffer();
+        var secondHits = new HitBuffer();
+        first.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            firstHits);
+        second.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            secondHits);
+
+        Assert.Throws<ArgumentException>(() => second.Materialize(firstHits.Hits.Single(), 0, 0));
+    }
+
+    [Fact]
     public async Task RawHitsCannotBeMaterializedByAnotherSnapshot()
     {
         using var index = SiftIndex.CreateInMemory();

@@ -14,9 +14,45 @@ internal static class HitMaterializer
         SiftOptions options)
     {
         var document = segment.GetDocument(hit.DocumentOrdinal.Value);
-        var path = segment.GetPath(document);
-        var contentBytes = segment.GetContentBytes(document);
-        var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
+        return Materialize(
+            segment.GetPath(document),
+            segment.GetContentBytes(document),
+            segment.GetEncodedLineIndexBytes(document),
+            (document.Flags & SegmentDocumentFlags.Ascii) != 0,
+            hit,
+            contextBefore,
+            contextAfter,
+            options);
+    }
+
+    public static MaterializedHit Materialize(
+        CapturedHitDocument document,
+        in RawHit hit,
+        int contextBefore,
+        int contextAfter,
+        SiftOptions options)
+    {
+        return Materialize(
+            document.Path,
+            document.Content,
+            document.EncodedLineIndex,
+            document.IsAscii,
+            hit,
+            contextBefore,
+            contextAfter,
+            options);
+    }
+
+    private static MaterializedHit Materialize(
+        string path,
+        ReadOnlySpan<byte> contentBytes,
+        ReadOnlySpan<byte> encodedLineIndex,
+        bool asciiDocument,
+        in RawHit hit,
+        int contextBefore,
+        int contextAfter,
+        SiftOptions options)
+    {
         if (hit.StartByte < 0 || hit.EndByte < hit.StartByte || hit.EndByte > contentBytes.Length)
         {
             throw new ArgumentOutOfRangeException(nameof(hit), "Hit byte bounds are outside the document.");
@@ -30,7 +66,6 @@ internal static class HitMaterializer
             : LineMap.GetLineFromByteOffset(
                 encodedLineIndex,
                 Math.Max(hit.StartByte, hit.EndByte == 0 ? hit.StartByte : hit.EndByte - 1));
-        var asciiDocument = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
         var startColumn = GetUtf16Column(
             contentBytes,
             encodedLineIndex,
@@ -195,3 +230,9 @@ internal static class HitMaterializer
             : Encoding.UTF8.GetString(bytes);
     }
 }
+
+internal sealed record CapturedHitDocument(
+    string Path,
+    byte[] Content,
+    byte[] EncodedLineIndex,
+    bool IsAscii);

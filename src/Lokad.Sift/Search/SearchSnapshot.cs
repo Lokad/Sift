@@ -465,6 +465,31 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
+    internal CapturedHitDocument CaptureHitDocument(in RawHit hit)
+    {
+        if (!hit.IsOwnedBy(_hitOwner))
+        {
+            throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
+        }
+
+        try
+        {
+            using var operation = BeginOperation();
+            var cache = OpenSegment(hit.SegmentId);
+            var document = cache.Segment.GetDocument(hit.DocumentOrdinal.Value);
+            return new CapturedHitDocument(
+                cache.Segment.GetPath(document),
+                cache.Segment.GetContentBytes(document).ToArray(),
+                cache.Segment.GetEncodedLineIndexBytes(document).ToArray(),
+                (document.Flags & SegmentDocumentFlags.Ascii) != 0);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
         try
