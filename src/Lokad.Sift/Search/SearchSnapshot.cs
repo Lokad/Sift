@@ -24,6 +24,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly SearchOptions _searchOptions;
     private readonly StorageReadSnapshot _storageSnapshot;
     private readonly SearchPlanExplainer _planExplainer;
+    private readonly object _hitOwner = new();
     private readonly object _mappedSegmentsSync = new();
     // Reuse mappings across search, path lookup, and hit materialization while the generation is pinned.
     private readonly Dictionary<SegmentId, MappedSegment> _mappedSegments = new();
@@ -157,6 +158,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
         var guardedCollector = new GuardedHitCollector(collector);
+        var ownedCollector = new HitOwnerCollector(_hitOwner, guardedCollector);
         try
         {
             using var operation = BeginOperation();
@@ -172,7 +174,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     query,
                     matcher,
                     preparedQuery,
-                    guardedCollector,
+                    ownedCollector,
                     pathVisibility,
                     effectiveCancellationToken,
                     cancellationToken,
@@ -181,7 +183,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     query,
                     matcher,
                     preparedQuery,
-                    guardedCollector,
+                    ownedCollector,
                     pathVisibility,
                     effectiveCancellationToken,
                     cancellationToken,
@@ -440,6 +442,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         ArgumentOutOfRangeException.ThrowIfNegative(contextBefore);
         ArgumentOutOfRangeException.ThrowIfNegative(contextAfter);
+        if (!hit.IsOwnedBy(_hitOwner))
+        {
+            throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
+        }
+
         try
         {
             using var operation = BeginOperation();
@@ -514,22 +521,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         cache = default;
         ordinal = default;
         return false;
-    }
-
-    internal string GetPath(in RawHit hit)
-    {
-        try
-        {
-            using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId);
-            var document = cache.Segment.GetDocument(hit.DocumentOrdinal.Value);
-            return cache.Segment.GetPath(document);
-        }
-        catch (Exception exception) when (IsIndexCorruption(exception))
-        {
-            ReportIndexFailure(exception);
-            throw;
-        }
     }
 
     internal SegmentId[] GetSegmentIds()

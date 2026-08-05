@@ -50,6 +50,7 @@ public sealed class PublicContractTests
         Assert.Equal(
             typeof(DocumentOrdinal),
             GetPropertyType<RawHit>(nameof(RawHit.DocumentOrdinal)));
+        Assert.Empty(typeof(RawHit).GetConstructors(BindingFlags.Public | BindingFlags.Instance));
     }
 
     [Fact]

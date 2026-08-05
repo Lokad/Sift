@@ -165,13 +165,73 @@ public sealed class PathFilter
     public string? PathRegex { get; init; }
 }
 
-public readonly record struct RawHit(
-    SegmentId SegmentId,
-    DocumentOrdinal DocumentOrdinal,
-    int StartByte,
-    int EndByte,
-    int StartLine,
-    int EndLine);
+public readonly record struct RawHit
+{
+    private readonly object? _owner;
+
+    internal RawHit(
+        SegmentId segmentId,
+        DocumentOrdinal documentOrdinal,
+        int startByte,
+        int endByte,
+        int startLine,
+        int endLine)
+        : this(
+            segmentId,
+            documentOrdinal,
+            startByte,
+            endByte,
+            startLine,
+            endLine,
+            owner: null)
+    {
+    }
+
+    private RawHit(
+        SegmentId segmentId,
+        DocumentOrdinal documentOrdinal,
+        int startByte,
+        int endByte,
+        int startLine,
+        int endLine,
+        object? owner)
+    {
+        SegmentId = segmentId;
+        DocumentOrdinal = documentOrdinal;
+        StartByte = startByte;
+        EndByte = endByte;
+        StartLine = startLine;
+        EndLine = endLine;
+        _owner = owner;
+    }
+
+    public SegmentId SegmentId { get; }
+    public DocumentOrdinal DocumentOrdinal { get; }
+    public int StartByte { get; }
+    public int EndByte { get; }
+    public int StartLine { get; }
+    public int EndLine { get; }
+
+    internal bool IsOwnedBy(object owner) => ReferenceEquals(_owner, owner);
+
+    internal RawHit WithOwner(object owner) => new(
+        SegmentId,
+        DocumentOrdinal,
+        StartByte,
+        EndByte,
+        StartLine,
+        EndLine,
+        owner);
+
+    internal RawHit WithSegmentId(SegmentId segmentId) => new(
+        segmentId,
+        DocumentOrdinal,
+        StartByte,
+        EndByte,
+        StartLine,
+        EndLine,
+        _owner);
+}
 
 public readonly record struct SelectedNgram(string Text, int ByteLength, int DocumentFrequency);
 

@@ -263,6 +263,68 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayHitsRemainBoundToTheirProducingGeneration()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(
+            new InMemoryDocumentSource([("src/a.txt", "old value")]),
+            []);
+        var oldHits = new HitBuffer();
+        overlay.Search(
+            new SearchQuery("old", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            oldHits);
+
+        await overlay.Update(
+            new InMemoryDocumentSource([("src/a.txt", "new value")]),
+            []);
+        var newHits = new HitBuffer();
+        overlay.Search(
+            new SearchQuery("new", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            newHits);
+
+        Assert.Equal("old", overlay.Materialize(oldHits.Hits.Single(), 0, 0).MatchText);
+        Assert.Equal("new", overlay.Materialize(newHits.Hits.Single(), 0, 0).MatchText);
+    }
+
+    [Fact]
+    public async Task OverlayDocumentMemoryRemainsValidAcrossUpdates()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(
+            new InMemoryDocumentSource([("src/a.txt", "old value")]),
+            []);
+        Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var oldContent));
+
+        await overlay.Update(
+            new InMemoryDocumentSource([("src/a.txt", "new value")]),
+            []);
+
+        Assert.Equal("old value"u8.ToArray(), oldContent.ToArray());
+    }
+
+    [Fact]
+    public async Task RawHitsCannotBeMaterializedByAnotherSnapshot()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "needle")]));
+        using var first = index.OpenSnapshot();
+        using var second = index.OpenSnapshot();
+        var hits = new HitBuffer();
+        first.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            hits);
+
+        Assert.Throws<ArgumentException>(() => second.Materialize(hits.Hits.Single(), 0, 0));
+    }
+
+    [Fact]
     public async Task OverlayDeletionStatsCountOnlyLiveDocuments()
     {
         using var index = SiftIndex.CreateInMemory();
