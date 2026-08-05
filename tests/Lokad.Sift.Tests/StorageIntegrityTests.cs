@@ -527,6 +527,66 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task InMemoryRecoveryPreservesLiveSnapshots()
+    {
+        var storage = new BlockingValidationStorage(new InMemorySiftStorage());
+        using var index = new SiftIndex(storage, new SiftOptions());
+        await index.Build(new InMemoryDocumentSource([("src/old.txt", "old")]));
+        using var oldSnapshot = index.OpenSnapshot();
+        var validation = index.Validate(CancellationToken.None);
+        Assert.True(storage.ValidationStarted.Wait(TimeSpan.FromSeconds(5)));
+        storage.ReleaseValidation.Set();
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await validation);
+        Assert.True(index.RequiresRebuild);
+
+        await index.Build(new InMemoryDocumentSource([("src/new.txt", "new")]));
+
+        Assert.True(oldSnapshot.TryGetDocumentBytes(
+            new DocumentKey("src/old.txt"),
+            out var oldContent));
+        Assert.Equal("old"u8.ToArray(), oldContent.ToArray());
+        using var newSnapshot = index.OpenSnapshot();
+        Assert.True(newSnapshot.TryGetDocumentBytes(new DocumentKey("src/new.txt"), out _));
+    }
+
+    [Fact]
+    public async Task FileRecoveryRejectsLiveSnapshotsBeforeDeletingPacks()
+    {
+        using var fixture = new CorpusFixture(("src/old.txt", "old"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var oldSnapshot = index.OpenSnapshot();
+        try
+        {
+            var segmentPath = Directory.EnumerateFiles(
+                Path.Combine(fixture.CorpusPath, "segments"),
+                "segment.pack",
+                SearchOption.AllDirectories).Single();
+            var segmentBytes = File.ReadAllBytes(segmentPath);
+            CorruptContentByte(segmentPath);
+            await Assert.ThrowsAsync<InvalidDataException>(async () =>
+                await index.Validate(CancellationToken.None));
+            File.WriteAllBytes(segmentPath, segmentBytes);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await index.Build(new InMemoryDocumentSource([("src/new.txt", "new")])));
+
+            Assert.True(oldSnapshot.TryGetDocumentBytes(
+                new DocumentKey("src/old.txt"),
+                out var oldContent));
+            Assert.Equal("old"u8.ToArray(), oldContent.ToArray());
+        }
+        finally
+        {
+            oldSnapshot.Dispose();
+        }
+
+        await index.Build(new InMemoryDocumentSource([("src/new.txt", "new")]));
+        using var newSnapshot = index.OpenSnapshot();
+        Assert.True(newSnapshot.TryGetDocumentBytes(new DocumentKey("src/new.txt"), out _));
+    }
+
+    [Fact]
     public void TruncatedSegmentIsRejectedAsInvalidData()
     {
         using var fixture = new CorpusFixture();

@@ -237,14 +237,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             if (!discardCorruptState)
             {
                 EnsureReplacementAllowedUnderWriterLock();
-                return;
             }
-
-            _manifest = null;
-            _segments.Clear();
-            _snapshotSegmentReferences.Clear();
-            _snapshotGenerationReferences.Clear();
-            _reclamationPending = false;
         }
     }
 

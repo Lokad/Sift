@@ -743,6 +743,39 @@ internal sealed partial class CorpusStorage : ISiftStorage
 
     private void ResetCorruptIndexUnderWriterLock()
     {
+        void EnsureNoActiveSnapshots()
+        {
+            if (!Directory.Exists(GenerationLeasesPath))
+            {
+                return;
+            }
+
+            foreach (var leasePath in Directory.EnumerateFiles(GenerationLeasesPath, "*.lease"))
+            {
+                try
+                {
+                    using var lease = new FileStream(
+                        leasePath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.None);
+                }
+                catch (IOException exception)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot rebuild a corrupt Sift index while snapshots remain open.",
+                        exception);
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot prove that every Sift snapshot is closed before rebuilding.",
+                        exception);
+                }
+            }
+        }
+
+        EnsureNoActiveSnapshots();
         Directory.CreateDirectory(_rootPath);
         Directory.CreateDirectory(LockPath);
         using (var marker = new FileStream(
