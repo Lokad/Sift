@@ -79,7 +79,7 @@ internal sealed class IndexBuilder
         using var writeSession = _storage.AcquireWriteSession(cancellationToken);
         writeSession.PrepareFullBuild(discardCorruptState);
 
-        var existing = _storage.HasManifest ? _storage.ReadManifest() : null;
+        var existing = writeSession.CurrentManifest;
         var corpusId = Guid.NewGuid();
         var generation = (existing?.Generation ?? 0UL) + 1UL;
         var segmentSeed = generation ^ ((ulong)DateTime.UtcNow.Ticks << 1);

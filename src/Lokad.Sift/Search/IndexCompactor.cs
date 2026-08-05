@@ -92,7 +92,8 @@ internal sealed class IndexCompactor
         }
 
         return HasActionableWork(
-            _storage.ReadManifest(),
+            writeSession.CurrentManifest ??
+                throw new InvalidDataException("The Sift manifest disappeared while the writer lock was held."),
             options,
             CancellationToken.None);
     }
@@ -106,9 +107,7 @@ internal sealed class IndexCompactor
         var watch = Stopwatch.StartNew();
         using var writeSession = _storage.AcquireWriteSession(cancellationToken);
         ensureIndexUsable();
-        var manifest = _storage.HasManifest
-            ? _storage.RefreshManifest()
-            : new CorpusManifest(Guid.NewGuid(), 0, []);
+        var manifest = writeSession.CurrentManifest ?? new CorpusManifest(Guid.NewGuid(), 0, []);
         var selectedSegmentIds = SelectSegments(
             manifest,
             options,

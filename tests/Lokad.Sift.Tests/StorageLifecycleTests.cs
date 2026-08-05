@@ -195,12 +195,35 @@ public sealed class StorageLifecycleTests
 
         oldSnapshot.Dispose();
 
+        await WaitUntilAsync(
+            () => index.GetStorageStats().RetiredSegmentCount == 0,
+            TimeSpan.FromSeconds(5));
         var afterRelease = index.GetStorageStats();
         Assert.Equal(afterRelease.ManifestSegmentCount, afterRelease.PhysicalSegmentCount);
         Assert.Equal(afterRelease.ManifestSegmentBytes, afterRelease.PhysicalSegmentBytes);
         Assert.Equal(0, afterRelease.RetiredSegmentCount);
         Assert.Equal(0, afterRelease.RetiredSegmentBytes);
         Assert.Equal(0, afterRelease.LeasedGenerationCount);
+    }
+
+    [Fact]
+    public async Task StorageStatsDoNotReclaimRetiredPacks()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        using var index = new SiftIndex(storage, new SiftOptions());
+        await index.Build(fixture.CreateSource());
+        var oldSnapshot = ((ISiftStorage)storage).OpenReadSnapshot();
+
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "omega\n")]));
+        oldSnapshot.Dispose();
+
+        var observed = index.GetStorageStats();
+
+        Assert.Equal(1, observed.RetiredSegmentCount);
+        Assert.Equal(1, observed.PendingDeletionSegmentCount);
+        ((ISiftStorage)storage).ReclaimUnreferencedSegments(CancellationToken.None);
+        Assert.Equal(0, index.GetStorageStats().RetiredSegmentCount);
     }
 
     [Fact]
@@ -229,6 +252,9 @@ public sealed class StorageLifecycleTests
 
         oldSnapshot.Dispose();
 
+        await WaitUntilAsync(
+            () => secondIndex.GetStorageStats().RetiredSegmentCount == 0,
+            TimeSpan.FromSeconds(5));
         var afterRelease = secondIndex.GetStorageStats();
         Assert.Equal(0, afterRelease.RetiredSegmentCount);
         Assert.Equal(afterRelease.ManifestSegmentBytes, afterRelease.PhysicalSegmentBytes);
@@ -263,9 +289,9 @@ public sealed class StorageLifecycleTests
             process.Kill(entireProcessTree: true);
             process.WaitForExit();
 
-            await WaitUntilAsync(
-                () => index.GetStorageStats().RetiredSegmentCount == 0,
-                TimeSpan.FromSeconds(5));
+            ((ISiftStorage)TestHelpers.GetStorage(index))
+                .ReclaimUnreferencedSegments(CancellationToken.None);
+            Assert.Equal(0, index.GetStorageStats().RetiredSegmentCount);
         }
         finally
         {

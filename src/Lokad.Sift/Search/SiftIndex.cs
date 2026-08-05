@@ -615,8 +615,8 @@ public sealed class SiftIndex : ISiftIndex
             var watch = Stopwatch.StartNew();
             using var writeSession = _storage.AcquireWriteSession(cancellationToken);
             ThrowIfRebuildRequired();
-            var hadManifest = _storage.HasManifest;
-            var currentManifest = hadManifest ? _storage.RefreshManifest() : null;
+            var currentManifest = writeSession.CurrentManifest;
+            var hadManifest = currentManifest is not null;
             var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
             var committedIdentity = actualIdentity;
             if (options.ExpectedIdentity is { } expectedIdentity &&
@@ -1138,8 +1138,8 @@ public sealed class SiftIndex : ISiftIndex
         Exception? currentFailure = null;
         try
         {
-            if (!_storage.HasManifest ||
-                _storage.ReadManifest().Segments.All(segment => segment.SegmentId != failedSegmentId))
+            if (writeSession.CurrentManifest is not { } currentManifest ||
+                currentManifest.Segments.All(segment => segment.SegmentId != failedSegmentId))
             {
                 return;
             }

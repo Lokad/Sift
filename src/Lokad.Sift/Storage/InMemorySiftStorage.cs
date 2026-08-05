@@ -211,7 +211,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         using var writerLock = AcquireWriterLock(CancellationToken.None);
         lock (_stateLock)
         {
-            var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
+            var reclamation = InspectReclamationUnderWriterLock();
             return GetStorageStatsUnderWriterLock(reclamation);
         }
     }
@@ -224,7 +224,10 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 
     private bool CanReplaceSegmentsUnderWriterLock()
     {
-        return ReclaimUnreferencedSegmentsUnderWriterLock().DeferredSegmentCount == 0;
+        lock (_stateLock)
+        {
+            return InspectReclamationUnderWriterLock().DeferredSegmentCount == 0;
+        }
     }
 
     private void PrepareFullBuildUnderWriterLock(bool discardCorruptState)
@@ -295,8 +298,8 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             OldestLeasedGeneration = reclamation.OldestLeasedGeneration,
             SnapshotDeferredSegmentCount = reclamation.DeferredSegmentCount,
             SnapshotDeferredSegmentBytes = reclamation.DeferredSegmentBytes,
-            PendingDeletionSegmentCount = reclamation.FailedSegmentCount,
-            PendingDeletionSegmentBytes = reclamation.FailedSegmentBytes,
+            PendingDeletionSegmentCount = _segments.Count - manifestSegmentCount - reclamation.DeferredSegmentCount,
+            PendingDeletionSegmentBytes = physicalSegmentBytes - manifestSegmentBytes - reclamation.DeferredSegmentBytes,
             BlockedReclamationSegmentCount = reclamation.BlockedSegmentCount,
             BlockedReclamationSegmentBytes = reclamation.BlockedSegmentBytes,
             IsReclamationBlocked = reclamation.IsBlocked,
@@ -311,6 +314,38 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         {
             return ReclaimUnreferencedSegmentsCore();
         }
+    }
+
+    private SegmentReclamationStats InspectReclamationUnderWriterLock()
+    {
+        if (_manifest is null)
+        {
+            return default;
+        }
+
+        var manifestSegmentIds = _manifest.Segments
+            .Select(static segment => segment.SegmentId)
+            .ToHashSet();
+        var deferredSegments = _segments
+            .Where(segment =>
+                !manifestSegmentIds.Contains(segment.Key) &&
+                _snapshotSegmentReferences.ContainsKey(segment.Key))
+            .ToArray();
+        return new SegmentReclamationStats(
+            ReclaimedSegmentCount: 0,
+            ReclaimedSegmentBytes: 0,
+            DeferredSegmentCount: deferredSegments.Length,
+            DeferredSegmentBytes: deferredSegments.Sum(static segment => (long)segment.Value.Length),
+            FailedSegmentCount: 0,
+            FailedSegmentBytes: 0,
+            BlockedSegmentCount: 0,
+            BlockedSegmentBytes: 0,
+            IsBlocked: false,
+            LeasedGenerationCount: _snapshotGenerationReferences.Keys.Count(generation => generation != _manifest.Generation),
+            OldestLeasedGeneration: _snapshotGenerationReferences.Keys
+                .Where(generation => generation != _manifest.Generation)
+                .Select(static generation => (ulong?)generation)
+                .Min());
     }
 
     private SegmentReclamationStats ReclaimUnreferencedSegmentsCore()
@@ -383,6 +418,17 @@ internal sealed class InMemorySiftStorage : ISiftStorage
     {
         private IDisposable? _writerLock = writerLock;
         private IDisposable? _indexingWorkspaceLease = indexingWorkspaceLease;
+
+        public CorpusManifest? CurrentManifest
+        {
+            get
+            {
+                lock (storage._stateLock)
+                {
+                    return storage._manifest;
+                }
+            }
+        }
 
         public SegmentManifestEntry PublishSegment<TDocument>(
             IReadOnlyList<TDocument> documents,

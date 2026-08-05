@@ -528,23 +528,13 @@ internal sealed class CorpusStorage : ISiftStorage
     StorageStats ISiftStorage.GetStorageStats()
     {
         using var writerLock = AcquireWriterLock();
-        SegmentReclamationStats reclamation;
-        if (IsReclamationPending())
-        {
-            reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
-        }
-        else
-        {
-            // A clear marker avoids the retired-generation sweep, but the current
-            // lease remains the fail-closed authority for the live manifest.
-            reclamation = default;
-            if (HasManifest && !IsCurrentGenerationLeaseValid(RefreshManifest()))
-            {
-                reclamation = reclamation with { IsBlocked = true };
-            }
-        }
-
-        return GetStorageStatsUnderWriterLock(reclamation);
+        var physicalSegments = EnumeratePhysicalSegments();
+        var manifest = HasManifest ? RefreshManifest() : null;
+        var reclamation = InspectReclamationUnderWriterLock(
+            manifest,
+            physicalSegments,
+            CancellationToken.None);
+        return GetStorageStatsUnderWriterLock(reclamation, manifest, physicalSegments);
     }
 
     void ISiftStorage.ReclaimUnreferencedSegments(CancellationToken cancellationToken)
@@ -569,16 +559,12 @@ internal sealed class CorpusStorage : ISiftStorage
             return true;
         }
 
-        // Publication leaves the marker clear only after every retired pack is gone.
-        if (!IsReclamationPending())
-        {
-            return IsCurrentGenerationLeaseValid(RefreshManifest());
-        }
-
-        var reclamation = ReclaimUnreferencedSegmentsUnderWriterLock();
-        return !reclamation.IsBlocked &&
-               reclamation.FailedSegmentCount == 0 &&
-               reclamation.DeferredSegmentCount == 0;
+        var manifest = RefreshManifest();
+        var reclamation = InspectReclamationUnderWriterLock(
+            manifest,
+            EnumeratePhysicalSegments(),
+            CancellationToken.None);
+        return !reclamation.IsBlocked && reclamation.DeferredSegmentCount == 0;
     }
 
     private void PrepareFullBuildUnderWriterLock(bool discardCorruptState)
@@ -1119,6 +1105,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     private LeaseProtection InspectGenerationLeases(
         CorpusManifest manifest,
+        GenerationLeaseInspection inspection,
         CancellationToken cancellationToken)
     {
         var protectedSegmentIds = manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
@@ -1147,14 +1134,16 @@ internal sealed class CorpusStorage : ISiftStorage
 
             try
             {
-                // DeleteOnClose closes the race between proving no reader exists and removing the lease.
+                // Exclusive access proves that no cross-process reader still holds this generation.
                 using (new FileStream(
                     leasePath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.None,
                     bufferSize: 1,
-                    FileOptions.DeleteOnClose))
+                    inspection == GenerationLeaseInspection.Reclaim
+                        ? FileOptions.DeleteOnClose
+                        : FileOptions.None))
                 {
                 }
 
@@ -1243,7 +1232,10 @@ internal sealed class CorpusStorage : ISiftStorage
 
         var manifest = RefreshManifest();
         var manifestSegmentIds = manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
-        var protection = InspectGenerationLeases(manifest, cancellationToken);
+        var protection = InspectGenerationLeases(
+            manifest,
+            GenerationLeaseInspection.Reclaim,
+            cancellationToken);
         if (protection.IsBlocked)
         {
             // A malformed or inaccessible lease could name any retired pack, so delete none.
@@ -1333,12 +1325,78 @@ internal sealed class CorpusStorage : ISiftStorage
         _segmentValidationGates.TryRemove(segmentId, out _);
     }
 
-    private StorageStats GetStorageStatsUnderWriterLock(SegmentReclamationStats reclamation)
+    private SegmentReclamationStats InspectReclamationUnderWriterLock(
+        CorpusManifest? manifest,
+        IReadOnlyList<PhysicalSegment> physicalSegments,
+        CancellationToken cancellationToken)
     {
-        var manifestSegmentIds = HasManifest
-            ? ReadManifest().Segments.Select(static segment => segment.SegmentId).ToHashSet()
-            : [];
-        var physicalSegments = EnumeratePhysicalSegments();
+        if (manifest is null)
+        {
+            return new SegmentReclamationStats(
+                ReclaimedSegmentCount: 0,
+                ReclaimedSegmentBytes: 0,
+                DeferredSegmentCount: 0,
+                DeferredSegmentBytes: 0,
+                FailedSegmentCount: 0,
+                FailedSegmentBytes: 0,
+                BlockedSegmentCount: physicalSegments.Count,
+                BlockedSegmentBytes: physicalSegments.Sum(static segment => segment.Bytes),
+                IsBlocked: physicalSegments.Count > 0,
+                LeasedGenerationCount: 0,
+                OldestLeasedGeneration: null);
+        }
+
+        var manifestSegmentIds = manifest.Segments
+            .Select(static segment => segment.SegmentId)
+            .ToHashSet();
+        var retiredSegments = physicalSegments
+            .Where(segment => !manifestSegmentIds.Contains(segment.SegmentId))
+            .ToArray();
+        var protection = InspectGenerationLeases(
+            manifest,
+            GenerationLeaseInspection.Observe,
+            cancellationToken);
+        if (protection.IsBlocked)
+        {
+            return new SegmentReclamationStats(
+                ReclaimedSegmentCount: 0,
+                ReclaimedSegmentBytes: 0,
+                DeferredSegmentCount: 0,
+                DeferredSegmentBytes: 0,
+                FailedSegmentCount: 0,
+                FailedSegmentBytes: 0,
+                BlockedSegmentCount: retiredSegments.Length,
+                BlockedSegmentBytes: retiredSegments.Sum(static segment => segment.Bytes),
+                IsBlocked: true,
+                protection.LeasedGenerationCount,
+                protection.OldestLeasedGeneration);
+        }
+
+        var deferredSegments = retiredSegments
+            .Where(segment => protection.ProtectedSegmentIds.Contains(segment.SegmentId))
+            .ToArray();
+        return new SegmentReclamationStats(
+            ReclaimedSegmentCount: 0,
+            ReclaimedSegmentBytes: 0,
+            DeferredSegmentCount: deferredSegments.Length,
+            DeferredSegmentBytes: deferredSegments.Sum(static segment => segment.Bytes),
+            FailedSegmentCount: 0,
+            FailedSegmentBytes: 0,
+            BlockedSegmentCount: 0,
+            BlockedSegmentBytes: 0,
+            IsBlocked: false,
+            protection.LeasedGenerationCount,
+            protection.OldestLeasedGeneration);
+    }
+
+    private StorageStats GetStorageStatsUnderWriterLock(
+        SegmentReclamationStats reclamation,
+        CorpusManifest? manifest,
+        IReadOnlyList<PhysicalSegment> physicalSegments)
+    {
+        var manifestSegmentIds = manifest?.Segments
+            .Select(static segment => segment.SegmentId)
+            .ToHashSet() ?? [];
         long manifestSegmentBytes = 0;
         var manifestSegmentCount = 0;
         long retiredSegmentBytes = 0;
@@ -1722,6 +1780,12 @@ internal sealed class CorpusStorage : ISiftStorage
         ulong? OldestLeasedGeneration,
         bool IsBlocked);
 
+    private enum GenerationLeaseInspection
+    {
+        Observe,
+        Reclaim
+    }
+
     private sealed class CapacityBudget(long physicalBytes, long? availableBytes)
     {
         public long PhysicalBytes { get; private set; } = physicalBytes;
@@ -1755,6 +1819,22 @@ internal sealed class CorpusStorage : ISiftStorage
     {
         private IDisposable? _writerLock = writerLock;
         private IDisposable? _indexingWorkspaceLease = indexingWorkspaceLease;
+        private CorpusManifest? _currentManifest;
+        private bool _currentManifestLoaded;
+
+        public CorpusManifest? CurrentManifest
+        {
+            get
+            {
+                if (!_currentManifestLoaded)
+                {
+                    _currentManifest = storage.HasManifest ? storage.RefreshManifest() : null;
+                    _currentManifestLoaded = true;
+                }
+
+                return _currentManifest;
+            }
+        }
 
         public SegmentManifestEntry PublishSegment<TDocument>(
             IReadOnlyList<TDocument> documents,
@@ -1770,14 +1850,31 @@ internal sealed class CorpusStorage : ISiftStorage
                 cancellationToken);
         }
 
-        public void PublishManifest(CorpusManifest manifest) => storage.PublishManifest(manifest);
+        public void PublishManifest(CorpusManifest manifest)
+        {
+            storage.PublishManifest(manifest);
+            _currentManifest = storage.ReadManifest();
+            _currentManifestLoaded = true;
+        }
 
-        public bool CanReplaceSegments() => storage.CanReplaceSegmentsUnderWriterLock();
+        public bool CanReplaceSegments()
+        {
+            var canReplace = storage.CanReplaceSegmentsUnderWriterLock();
+            ReloadCurrentManifestFromCache();
+            return canReplace;
+        }
 
-        public void EnsureReplacementAllowed() => storage.EnsureReplacementAllowedUnderWriterLock();
+        public void EnsureReplacementAllowed()
+        {
+            storage.EnsureReplacementAllowedUnderWriterLock();
+            ReloadCurrentManifestFromCache();
+        }
 
-        public void PrepareFullBuild(bool discardCorruptState) =>
+        public void PrepareFullBuild(bool discardCorruptState)
+        {
             storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
+            ReloadCurrentManifestFromCache();
+        }
 
         public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
             storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
@@ -1786,6 +1883,12 @@ internal sealed class CorpusStorage : ISiftStorage
         {
             Interlocked.Exchange(ref _indexingWorkspaceLease, null)?.Dispose();
             Interlocked.Exchange(ref _writerLock, null)?.Dispose();
+        }
+
+        private void ReloadCurrentManifestFromCache()
+        {
+            _currentManifest = storage.HasManifest ? storage.ReadManifest() : null;
+            _currentManifestLoaded = true;
         }
     }
 

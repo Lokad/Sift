@@ -21,6 +21,7 @@ internal interface ISiftStorage
 
 internal interface IStorageWriteSession : IDisposable
 {
+    CorpusManifest? CurrentManifest { get; }
     SegmentManifestEntry PublishSegment<TDocument>(
         IReadOnlyList<TDocument> documents,
         ulong segmentId,

@@ -1464,6 +1464,8 @@ public sealed class StorageIntegrityTests
             ManualResetEventSlim segmentPublished,
             ManualResetEventSlim allowManifestPublication) : IStorageWriteSession
         {
+            public CorpusManifest? CurrentManifest => innerSession.CurrentManifest;
+
             public SegmentManifestEntry PublishSegment<TDocument>(
                 IReadOnlyList<TDocument> documents,
                 ulong segmentId,
