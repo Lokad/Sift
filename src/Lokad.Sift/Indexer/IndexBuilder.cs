@@ -498,6 +498,7 @@ internal sealed class IndexBuilder
             rejectedDocuments);
     }
 
+#if SIFT_INTERNAL_VERIFICATION
     public static List<List<StoredDocument>> PartitionDocuments(IReadOnlyList<StoredDocument> documents)
     {
         return PartitionDocuments(documents, new SiftOptions());
@@ -537,6 +538,7 @@ internal sealed class IndexBuilder
 
         return partitions;
     }
+#endif
 
     private static StoredDocument? Normalize(
         SubmittedDocument document,

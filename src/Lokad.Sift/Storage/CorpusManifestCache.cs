@@ -4,9 +4,11 @@ internal sealed class CorpusManifestCache
 {
     private readonly object _sync = new();
     private CacheEntry? _cached;
+#if SIFT_INTERNAL_VERIFICATION
     private long _parseCount;
 
     public long ParseCount => Interlocked.Read(ref _parseCount);
+#endif
 
     public CorpusManifest Read(string manifestPath)
     {
@@ -30,7 +32,9 @@ internal sealed class CorpusManifestCache
     private CorpusManifest Refresh(string manifestPath, ManifestStamp stamp)
     {
         var manifest = CorpusManifestCodec.Read(manifestPath);
+#if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _parseCount);
+#endif
         var currentStamp = ReadStamp(manifestPath);
         if (currentStamp == stamp && manifest.Generation.Value == stamp.Generation)
         {

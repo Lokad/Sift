@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);SIFT_INTERNAL_VERIFICATION</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

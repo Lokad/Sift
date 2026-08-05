@@ -24,10 +24,14 @@ internal sealed class CorpusStorage : ISiftStorage
     private readonly ConcurrentDictionary<SegmentId, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
     private bool _reclamationIntentKnownDurable;
+#if SIFT_INTERNAL_VERIFICATION
     private long _segmentOpenCount;
     private long _checksumValidationCount;
+#endif
     private long _reclamationFailureCount;
+#if SIFT_INTERNAL_VERIFICATION
     private long _corpusPhysicalScanCount;
+#endif
     private string? _lastReclamationFailure;
     private CapacityBudget? _capacityBudget;
 
@@ -47,13 +51,17 @@ internal sealed class CorpusStorage : ISiftStorage
     public string TempPath => Path.Combine(_rootPath, "temp");
     public string LockPath => Path.Combine(_rootPath, "lock");
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
+#if SIFT_INTERNAL_VERIFICATION
     internal long ChecksumValidationCount => Interlocked.Read(ref _checksumValidationCount);
     internal long SegmentOpenCount => Interlocked.Read(ref _segmentOpenCount);
     internal long CorpusPhysicalScanCount => Interlocked.Read(ref _corpusPhysicalScanCount);
     internal long ManifestParseCount => _manifestCache.ParseCount;
+#endif
     private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
     private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
+#if SIFT_INTERNAL_VERIFICATION
     internal PublicationFaultInjector? FaultInjector { get; set; }
+#endif
     public bool HasManifest => File.Exists(ManifestPath);
 
     public void EnsureLayout()
@@ -178,7 +186,9 @@ internal sealed class CorpusStorage : ISiftStorage
             segmentId,
             validateChecksums: false,
             cancellationToken).Dispose();
+#if SIFT_INTERNAL_VERIFICATION
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterSegmentFlushBeforePublish);
+#endif
         var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"));
         var finalSegmentPath = Path.Combine(finalSegmentDirectory, "segment.pack");
         if (File.Exists(finalSegmentPath))
@@ -218,7 +228,9 @@ internal sealed class CorpusStorage : ISiftStorage
 
     public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken)
     {
+#if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _segmentOpenCount);
+#endif
         var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
         return OpenAndValidateIdentity(
             path,
@@ -229,7 +241,9 @@ internal sealed class CorpusStorage : ISiftStorage
 
     public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
     {
+#if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _segmentOpenCount);
+#endif
         var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
         var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
         while (!Monitor.TryEnter(validationGate, millisecondsTimeout: 50))
@@ -244,7 +258,9 @@ internal sealed class CorpusStorage : ISiftStorage
                 segmentId,
                 validateChecksums: true,
                 cancellationToken);
+#if SIFT_INTERNAL_VERIFICATION
             Interlocked.Increment(ref _checksumValidationCount);
+#endif
         }
         finally
         {
@@ -322,7 +338,9 @@ internal sealed class CorpusStorage : ISiftStorage
 
     private long GetCorpusPhysicalBytes()
     {
+#if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _corpusPhysicalScanCount);
+#endif
         if (!Directory.Exists(_rootPath))
         {
             return 0;
@@ -775,7 +793,9 @@ internal sealed class CorpusStorage : ISiftStorage
             RandomAccess.FlushToDisk(stream.SafeFileHandle);
         }
 
+#if SIFT_INTERNAL_VERIFICATION
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterManifestFlushBeforeSwap);
+#endif
 
         if (File.Exists(ManifestPath) && OperatingSystem.IsWindows())
         {
@@ -1536,7 +1556,9 @@ internal sealed class CorpusStorage : ISiftStorage
                     return;
                 }
 
+#if SIFT_INTERNAL_VERIFICATION
                 FaultInjector?.ThrowIfRequested(PublicationStage.BeforeReclamationIntentFlush);
+#endif
                 // An existing marker is not assumed durable until this instance
                 // has flushed both its contents and containing directory.
                 stream.Flush(flushToDisk: true);
@@ -1547,7 +1569,9 @@ internal sealed class CorpusStorage : ISiftStorage
 
             if (isPending)
             {
+#if SIFT_INTERNAL_VERIFICATION
                 FaultInjector?.ThrowIfRequested(PublicationStage.BeforeReclamationIntentFlush);
+#endif
             }
 
             stream.Position = 0;
@@ -1920,6 +1944,7 @@ internal sealed class CorpusStorage : ISiftStorage
     }
 }
 
+#if SIFT_INTERNAL_VERIFICATION
 internal enum PublicationStage
 {
     BeforeReclamationIntentFlush,
@@ -1940,6 +1965,7 @@ internal sealed class PublicationFaultInjector
         }
     }
 }
+#endif
 
 internal interface ISegmentBuildDocument
 {

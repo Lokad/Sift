@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Lokad.Sift</PackageId>
     <Title>Lokad.Sift</Title>
     <Description>Local indexed grep and code search for UTF-8 text on .NET.</Description>

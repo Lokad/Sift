@@ -41,8 +41,6 @@ foreach ($process in $staleBenchmarks) {
     Stop-Process -Id $process.ProcessId -Force
 }
 
-Get-Process -Name VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force
-
 if (-not $SkipBuild) {
     dotnet build Lokad.Sift.slnx --configuration $Configuration --tl:off --nologo -v minimal --no-restore
     if ($LASTEXITCODE -ne 0) {
