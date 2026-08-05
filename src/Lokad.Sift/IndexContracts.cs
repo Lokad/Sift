@@ -329,8 +329,10 @@ public enum SiftWriteActivity
 }
 
 public readonly record struct WriteActivityStats(
-    bool IsWriteBusy,
-    SiftWriteActivity CurrentActivity);
+    SiftWriteActivity CurrentActivity)
+{
+    public bool IsWriteBusy => CurrentActivity != SiftWriteActivity.Idle;
+}
 
 public readonly record struct IndexIdentity(
     // Changes whenever a full build replaces the logical corpus.
@@ -365,7 +367,7 @@ public readonly record struct IndexValidationStats(
     // Lifecycle state of the latest explicit integrity-validation attempt.
     IndexValidationState State,
     // Manifest generation being validated, or null before a manifest is opened.
-    ulong? Generation,
+    StorageGeneration? Generation,
     // Immutable packs referenced by that generation.
     int TotalSegments,
     // Packs whose full checksums have been verified in this attempt.
@@ -402,7 +404,7 @@ public sealed class MaintenanceStats
     }
 
     // Manifest generation observed by this snapshot.
-    public ulong Generation { get; }
+    public StorageGeneration Generation { get; }
     // Packs referenced by the manifest.
     public int SegmentCount { get; }
     // All rows, including superseded and deleted versions.
@@ -431,7 +433,7 @@ public sealed class MaintenanceStats
 
 internal readonly struct MaintenanceStatsData
 {
-    public required ulong Generation { get; init; }
+    public required StorageGeneration Generation { get; init; }
     public required int SegmentCount { get; init; }
     public required int TotalDocuments { get; init; }
     public required int LiveDocuments { get; init; }
@@ -496,7 +498,7 @@ public sealed class StorageStats
     // Non-current generations held open by at least one reader.
     public int LeasedGenerationCount { get; }
     // Lowest held generation, or null when no superseded snapshot remains.
-    public ulong? OldestLeasedGeneration { get; }
+    public StorageGeneration? OldestLeasedGeneration { get; }
     // Retired packs retained solely because a live snapshot can still read them.
     public int SnapshotDeferredSegmentCount { get; }
     // On-disk lengths of the snapshot-protected packs.
@@ -530,7 +532,7 @@ internal readonly struct StorageStatsData
     public required long MaximumPhysicalBytes { get; init; }
     public required long? AvailableBytes { get; init; }
     public required int LeasedGenerationCount { get; init; }
-    public required ulong? OldestLeasedGeneration { get; init; }
+    public required StorageGeneration? OldestLeasedGeneration { get; init; }
     public required int SnapshotDeferredSegmentCount { get; init; }
     public required long SnapshotDeferredSegmentBytes { get; init; }
     public required int PendingDeletionSegmentCount { get; init; }

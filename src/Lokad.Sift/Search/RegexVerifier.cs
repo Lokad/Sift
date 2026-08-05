@@ -53,7 +53,7 @@ internal static class RegexVerifier
             nonBacktrackingRegexInvocations++;
         }
         var matched = false;
-        var isAscii = (document.Flags & (1 << 1)) != 0;
+        var isAscii = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
         var offsetCursor = new Utf8OffsetCursor();
 
         try
@@ -89,7 +89,7 @@ internal static class RegexVerifier
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
                 var shouldContinue = collector.OnHit(
                     new RawHit(
-                        new SegmentId(segment.SegmentId),
+                        segment.SegmentId,
                         new DocumentOrdinal(document.Ordinal),
                         startByte,
                         endByte,

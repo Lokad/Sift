@@ -107,7 +107,7 @@ internal sealed class IndexCompactor
         var watch = Stopwatch.StartNew();
         using var writeSession = _storage.AcquireWriteSession(cancellationToken);
         ensureIndexUsable();
-        var manifest = writeSession.CurrentManifest ?? new CorpusManifest(Guid.NewGuid(), 0, []);
+        var manifest = writeSession.CurrentManifest ?? new CorpusManifest(CorpusId.New(), default, []);
         var selectedSegmentIds = SelectSegments(
             manifest,
             options,
@@ -128,8 +128,8 @@ internal sealed class IndexCompactor
         }
 
         writeSession.EnsureReplacementAllowed();
-        var segmentSeed = (manifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
-        var attemptedSegmentIds = new List<ulong>();
+        var segmentSeed = manifest.Generation.Next().Value ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+        var attemptedSegmentIds = new List<SegmentId>();
         var newSegments = new List<SegmentManifestEntry>();
         CompactionPublication publication;
         try
@@ -158,7 +158,7 @@ internal sealed class IndexCompactor
             var newManifest = new CorpusManifest(
                 manifest.CorpusId,
                 manifest.ContentRevision,
-                manifest.Generation + 1UL,
+                manifest.Generation.Next(),
                 [.. manifest.CommitMetadata],
                 mergedSegments);
             resetValidation();
@@ -255,9 +255,9 @@ internal sealed class IndexCompactor
     private CompactionPublication PublishSegments(
         IStorageWriteSession writeSession,
         CorpusManifest manifest,
-        HashSet<ulong> selectedSegmentIds,
+        HashSet<SegmentId> selectedSegmentIds,
         ulong segmentSeed,
-        List<ulong> attemptedSegmentIds,
+        List<SegmentId> attemptedSegmentIds,
         List<SegmentManifestEntry> published,
         CompactOptions options,
         CancellationToken cancellationToken)
@@ -304,7 +304,7 @@ internal sealed class IndexCompactor
                     (currentPartition.Count >= _options.TargetSegmentDocumentCount ||
                      currentBytes + next.ContentLength > _options.TargetSegmentContentBytes))
                 {
-                    var segmentId = segmentSeed + (ulong)published.Count;
+                    var segmentId = new SegmentId(segmentSeed + (ulong)published.Count);
                     attemptedSegmentIds.Add(segmentId);
                     published.Add(writeSession.PublishSegment(
                         currentPartition,
@@ -328,7 +328,7 @@ internal sealed class IndexCompactor
 
             if (currentPartition.Count > 0)
             {
-                var segmentId = segmentSeed + (ulong)published.Count;
+                var segmentId = new SegmentId(segmentSeed + (ulong)published.Count);
                 attemptedSegmentIds.Add(segmentId);
                 published.Add(writeSession.PublishSegment(
                     currentPartition,
@@ -348,7 +348,7 @@ internal sealed class IndexCompactor
         }
     }
 
-    private HashSet<ulong> SelectSegments(
+    private HashSet<SegmentId> SelectSegments(
         CorpusManifest manifest,
         CompactOptions options,
         CancellationToken cancellationToken)
@@ -376,7 +376,7 @@ internal sealed class IndexCompactor
             .ThenBy(item => item.Entry.SegmentId)
             .ToArray();
 
-        var selected = new HashSet<ulong>();
+        var selected = new HashSet<SegmentId>();
         long selectedSegmentBytes = 0;
         foreach (var item in ordered.Where(item =>
                      item.DeadFraction >= options.DeadFractionThreshold ||
@@ -440,7 +440,7 @@ internal sealed class IndexCompactor
 
     private bool HasEstimatedCapacity(
         CorpusManifest manifest,
-        IReadOnlySet<ulong> selectedSegmentIds,
+        IReadOnlySet<SegmentId> selectedSegmentIds,
         CompactOptions options,
         CancellationToken cancellationToken)
     {
@@ -523,7 +523,7 @@ internal sealed class IndexCompactor
     }
 
     private readonly record struct LegacyMaintenanceKey(
-        ulong SegmentId,
+        SegmentId SegmentId,
         int DocumentCount,
         long ContentBytes,
         int DeadDocumentCount);
@@ -599,7 +599,7 @@ internal readonly record struct CompactionDocument(
     SegmentDocument Document) : ISegmentBuildDocument
 {
     public int LineCount => Document.LineCount;
-    public ushort Flags => Document.Flags;
+    public SegmentDocumentFlags Flags => Document.Flags;
     public long MTimeUtcTicks => Document.MTimeUtcTicks;
     public ulong ContentHash64 => Document.ContentHash64;
     public int ContentLength => Document.ContentLength;

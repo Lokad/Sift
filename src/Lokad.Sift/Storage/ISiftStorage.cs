@@ -7,10 +7,10 @@ internal interface ISiftStorage
     IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken);
     CorpusManifest ReadManifest();
     CorpusManifest RefreshManifest();
-    MappedSegment OpenSegment(ulong segmentId);
-    MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken);
-    void ValidateSegment(ulong segmentId, CancellationToken cancellationToken);
-    long GetSegmentBytes(ulong segmentId);
+    MappedSegment OpenSegment(SegmentId segmentId);
+    MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken);
+    void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken);
+    long GetSegmentBytes(SegmentId segmentId);
     long? GetAvailableBytes();
     void EnsureSnapshotMetadata();
     StorageReadSnapshot OpenReadSnapshot();
@@ -24,7 +24,7 @@ internal interface IStorageWriteSession : IDisposable
     CorpusManifest? CurrentManifest { get; }
     SegmentManifestEntry PublishSegment<TDocument>(
         IReadOnlyList<TDocument> documents,
-        ulong segmentId,
+        SegmentId segmentId,
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument;
@@ -32,5 +32,5 @@ internal interface IStorageWriteSession : IDisposable
     bool CanReplaceSegments();
     void EnsureReplacementAllowed();
     void PrepareFullBuild(bool discardCorruptState);
-    void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds);
+    void CleanupFailedMutation(IReadOnlyCollection<SegmentId> attemptedSegmentIds);
 }

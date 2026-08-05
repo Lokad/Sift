@@ -30,4 +30,4 @@ internal readonly record struct SegmentReclamationStats(
     long BlockedSegmentBytes,
     bool IsBlocked,
     int LeasedGenerationCount,
-    ulong? OldestLeasedGeneration);
+    StorageGeneration? OldestLeasedGeneration);

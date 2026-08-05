@@ -15,7 +15,7 @@ internal sealed class MutationCoordinator : IDisposable
     {
         var isBusy = Volatile.Read(ref _requests) > 0;
         var currentActivity = (SiftWriteActivity)Volatile.Read(ref _currentActivity);
-        return new WriteActivityStats(isBusy, isBusy ? currentActivity : SiftWriteActivity.Idle);
+        return new WriteActivityStats(isBusy ? currentActivity : SiftWriteActivity.Idle);
     }
 
     public async Task<TResult> Run<TResult>(

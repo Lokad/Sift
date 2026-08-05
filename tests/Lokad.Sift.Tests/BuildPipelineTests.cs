@@ -248,7 +248,7 @@ public sealed class BuildPipelineTests
 
         Assert.Throws<OperationCanceledException>(() =>
             SegmentWriter.WriteToBytes(
-                segmentId: 1,
+                segmentId: new SegmentId(1),
                 [document],
                 cancellation.Token));
         Assert.Equal(1, document.ContentReadCount);
@@ -332,7 +332,7 @@ public sealed class BuildPipelineTests
 
         public int ContentReadCount { get; private set; }
         public int LineCount => 1;
-        public ushort Flags => 0;
+        public SegmentDocumentFlags Flags => 0;
         public long MTimeUtcTicks => 0;
         public ulong ContentHash64 => 0;
 

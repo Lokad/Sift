@@ -1879,8 +1879,8 @@ static CompactScenarioMetrics BuildCompactScenarioMetrics(
     CorpusManifest afterManifest,
     long beforeManifestBytes,
     long afterManifestBytes,
-    Dictionary<ulong, long> beforeSegmentSizes,
-    Dictionary<ulong, long> afterSegmentSizes,
+    Dictionary<SegmentId, long> beforeSegmentSizes,
+    Dictionary<SegmentId, long> afterSegmentSizes,
     long peakManagedBytes)
 {
     var bytesPerSecond = stats.ElapsedMilliseconds <= 0 ? 0d : stats.ContentBytes / (stats.ElapsedMilliseconds / 1000d);
@@ -1991,9 +1991,9 @@ static BuildMeasurement MeasureBuildMetrics(Func<BuildStats> run)
     }
 }
 
-static Dictionary<ulong, long> GetSegmentSizes(CorpusStorage storage, CorpusManifest manifest)
+static Dictionary<SegmentId, long> GetSegmentSizes(CorpusStorage storage, CorpusManifest manifest)
 {
-    var sizes = new Dictionary<ulong, long>(manifest.Segments.Count);
+    var sizes = new Dictionary<SegmentId, long>(manifest.Segments.Count);
     for (var i = 0; i < manifest.Segments.Count; i++)
     {
         var entry = manifest.Segments[i];
@@ -2004,9 +2004,9 @@ static Dictionary<ulong, long> GetSegmentSizes(CorpusStorage storage, CorpusMani
     return sizes;
 }
 
-static long SumRemovedSegmentBytes(CorpusManifest beforeManifest, CorpusManifest afterManifest, Dictionary<ulong, long> beforeSegmentSizes)
+static long SumRemovedSegmentBytes(CorpusManifest beforeManifest, CorpusManifest afterManifest, Dictionary<SegmentId, long> beforeSegmentSizes)
 {
-    var afterIds = new HashSet<ulong>(afterManifest.Segments.Count);
+    var afterIds = new HashSet<SegmentId>(afterManifest.Segments.Count);
     for (var i = 0; i < afterManifest.Segments.Count; i++)
     {
         afterIds.Add(afterManifest.Segments[i].SegmentId);
@@ -2025,9 +2025,9 @@ static long SumRemovedSegmentBytes(CorpusManifest beforeManifest, CorpusManifest
     return total;
 }
 
-static long SumAddedSegmentBytes(CorpusManifest beforeManifest, CorpusManifest afterManifest, Dictionary<ulong, long> afterSegmentSizes)
+static long SumAddedSegmentBytes(CorpusManifest beforeManifest, CorpusManifest afterManifest, Dictionary<SegmentId, long> afterSegmentSizes)
 {
-    var beforeIds = new HashSet<ulong>(beforeManifest.Segments.Count);
+    var beforeIds = new HashSet<SegmentId>(beforeManifest.Segments.Count);
     for (var i = 0; i < beforeManifest.Segments.Count; i++)
     {
         beforeIds.Add(beforeManifest.Segments[i].SegmentId);

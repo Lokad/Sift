@@ -1,7 +1,7 @@
 namespace Lokad.Sift.Storage;
 
 internal readonly record struct SegmentManifestEntry(
-    ulong SegmentId,
+    SegmentId SegmentId,
     int DocumentCount,
     long ContentBytes,
     uint[] DeadOrdinals,
@@ -11,17 +11,17 @@ internal readonly record struct SegmentManifestEntry(
 }
 
 internal sealed record CorpusManifest(
-    Guid CorpusId,
-    ulong ContentRevision,
-    ulong Generation,
+    CorpusId CorpusId,
+    ContentRevision ContentRevision,
+    StorageGeneration Generation,
     byte[] CommitMetadata,
     IReadOnlyList<SegmentManifestEntry> Segments)
 {
     public CorpusManifest(
-        Guid corpusId,
-        ulong generation,
+        CorpusId corpusId,
+        StorageGeneration generation,
         IReadOnlyList<SegmentManifestEntry> segments)
-        : this(corpusId, generation, generation, [], segments)
+        : this(corpusId, new ContentRevision(generation.Value), generation, [], segments)
     {
     }
 

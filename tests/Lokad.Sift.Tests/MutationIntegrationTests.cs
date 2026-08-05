@@ -494,7 +494,7 @@ public sealed class MutationIntegrationTests
         Assert.Equal(2, stats.RejectedUpserts);
         Assert.Equal(1, stats.DeletedDocuments);
         Assert.Equal(["src/a.txt", "src/c.txt"], stats.RejectedDocumentDetails.Select(static document => document.Path));
-        Assert.Equal(before.Generation + 1, after.Generation);
+        Assert.Equal(before.Generation.Next(), after.Generation);
 
         using var snapshot = index.OpenSnapshot();
         Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));

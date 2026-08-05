@@ -316,7 +316,7 @@ public sealed class SiftIndex : ISiftIndex
             CancellationToken cancellationToken,
             long validationRevision)
         {
-            long GetSegmentBytes(ulong segmentId)
+            long GetSegmentBytes(SegmentId segmentId)
             {
                 try
                 {
@@ -333,7 +333,7 @@ public sealed class SiftIndex : ISiftIndex
                 }
             }
 
-            void ValidateSegment(ulong segmentId)
+            void ValidateSegment(SegmentId segmentId)
             {
                 try
                 {
@@ -627,9 +627,9 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             var existingManifest = currentManifest ?? new CorpusManifest(
-                Guid.NewGuid(),
-                ContentRevision: 0,
-                Generation: 0,
+                CorpusId.New(),
+                ContentRevision: default,
+                Generation: default,
                 CommitMetadata: [],
                 Segments: []);
 
@@ -645,13 +645,13 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             var publishedSegments = new List<SegmentManifestEntry>();
-            var attemptedSegmentIds = new List<ulong>();
+            var attemptedSegmentIds = new List<SegmentId>();
             var existingUpsertKeys = new Dictionary<string, LiveDocumentKey>(StringComparer.Ordinal);
             var deletedDocuments = 0;
             StreamedDocuments upsertLoad;
             try
             {
-                var segmentSeed = (existingManifest.Generation + 1UL) ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+                var segmentSeed = existingManifest.Generation.Next().Value ^ ((ulong)DateTime.UtcNow.Ticks << 1);
                 upsertLoad = await streamDocuments(
                     deletionSet,
                     options.RejectedUpsertPolicy,
@@ -662,7 +662,7 @@ public sealed class SiftIndex : ISiftIndex
                         cancellationToken),
                     partition =>
                     {
-                        var segmentId = segmentSeed + (ulong)publishedSegments.Count;
+                        var segmentId = new SegmentId(segmentSeed + (ulong)publishedSegments.Count);
                         attemptedSegmentIds.Add(segmentId);
                         publishedSegments.Add(writeSession.PublishSegment(
                             partition,
@@ -737,7 +737,7 @@ public sealed class SiftIndex : ISiftIndex
                 if (contentChanged || requiresManifestMigration || commitMetadataChanged)
                 {
                     var newSegments = new List<SegmentManifestEntry>(existingManifest.Segments.Count + publishedSegments.Count);
-                    var newlyDeadBySegment = new Dictionary<ulong, List<LiveDocumentKey>>();
+                    var newlyDeadBySegment = new Dictionary<SegmentId, List<LiveDocumentKey>>();
 
                     // Retire prior versions replaced or removed by this update.
                     foreach (var path in affectedPaths)
@@ -787,8 +787,10 @@ public sealed class SiftIndex : ISiftIndex
 
                     var manifest = new CorpusManifest(
                         existingManifest.CorpusId,
-                        existingManifest.ContentRevision + (contentChanged ? 1UL : 0UL),
-                        existingManifest.Generation + 1UL,
+                        contentChanged
+                            ? existingManifest.ContentRevision.Next()
+                            : existingManifest.ContentRevision,
+                        existingManifest.Generation.Next(),
                         commitMetadata.ToArray(),
                         newSegments);
                     ResetValidationStats();
@@ -826,9 +828,9 @@ public sealed class SiftIndex : ISiftIndex
     private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)
     {
         return new IndexIdentity(
-            new CorpusId(manifest.CorpusId),
-            new ContentRevision(manifest.ContentRevision),
-            new StorageGeneration(manifest.Generation));
+            manifest.CorpusId,
+            manifest.ContentRevision,
+            manifest.Generation);
     }
 
     public Task<CompactStats> Compact(CompactOptions options, CancellationToken callerCancellationToken)
@@ -1095,7 +1097,7 @@ public sealed class SiftIndex : ISiftIndex
 
     private void PreserveRetainedSegmentFailure(
         long validationRevision,
-        ulong failedSegmentId,
+        SegmentId failedSegmentId,
         Exception exception,
         CancellationToken cancellationToken)
     {
@@ -1488,7 +1490,7 @@ public sealed class SiftIndex : ISiftIndex
     }
 
     private readonly record struct LiveDocumentKey(
-        ulong SegmentId,
+        SegmentId SegmentId,
         uint Ordinal,
         int ContentLength,
         long MTimeUtcTicks,

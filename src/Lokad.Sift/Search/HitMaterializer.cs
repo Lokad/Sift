@@ -30,7 +30,7 @@ internal static class HitMaterializer
             : LineMap.GetLineFromByteOffset(
                 encodedLineIndex,
                 Math.Max(hit.StartByte, hit.EndByte == 0 ? hit.StartByte : hit.EndByte - 1));
-        var asciiDocument = (document.Flags & (1 << 1)) != 0;
+        var asciiDocument = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
         var startColumn = GetUtf16Column(
             contentBytes,
             encodedLineIndex,

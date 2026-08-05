@@ -32,7 +32,7 @@ internal sealed class CorpusManifestCache
         var manifest = CorpusManifestCodec.Read(manifestPath);
         Interlocked.Increment(ref _parseCount);
         var currentStamp = ReadStamp(manifestPath);
-        if (currentStamp == stamp && manifest.Generation == stamp.Generation)
+        if (currentStamp == stamp && manifest.Generation.Value == stamp.Generation)
         {
             lock (_sync)
             {

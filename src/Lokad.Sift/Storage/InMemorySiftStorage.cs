@@ -6,9 +6,9 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 {
     private readonly SemaphoreSlim _writerGate = new(1, 1);
     private readonly object _stateLock = new();
-    private readonly Dictionary<ulong, byte[]> _segments = new();
-    private readonly Dictionary<ulong, int> _snapshotSegmentReferences = new();
-    private readonly Dictionary<ulong, int> _snapshotGenerationReferences = new();
+    private readonly Dictionary<SegmentId, byte[]> _segments = new();
+    private readonly Dictionary<SegmentId, int> _snapshotSegmentReferences = new();
+    private readonly Dictionary<StorageGeneration, int> _snapshotGenerationReferences = new();
     private CorpusManifest? _manifest;
     private bool _reclamationPending;
 
@@ -39,7 +39,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 
     private SegmentManifestEntry PublishSegment<TDocument>(
         IReadOnlyList<TDocument> documents,
-        ulong segmentId,
+        SegmentId segmentId,
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
@@ -54,7 +54,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             _reclamationPending = true;
             if (!_segments.TryAdd(segmentId, bytes))
             {
-                throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
+                throw new IOException($"Sift segment id collision for '{segmentId.Value:X16}'.");
             }
         }
 
@@ -83,19 +83,19 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 
     public CorpusManifest RefreshManifest() => ReadManifest();
 
-    public MappedSegment OpenSegment(ulong segmentId)
+    public MappedSegment OpenSegment(SegmentId segmentId)
     {
         return OpenSegment(segmentId, CancellationToken.None);
     }
 
-    public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken)
+    public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken)
     {
         byte[] bytes;
         lock (_stateLock)
         {
             if (!_segments.TryGetValue(segmentId, out var storedBytes))
             {
-                throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+                throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId.Value:X16}'.");
             }
 
             bytes = storedBytes;
@@ -114,17 +114,17 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         var actualSegmentId = segment.SegmentId;
         segment.Dispose();
         throw new InvalidDataException(
-            $"Sift segment '{segmentId:X16}' contains id '{actualSegmentId:X16}'.");
+            $"Sift segment '{segmentId.Value:X16}' contains id '{actualSegmentId.Value:X16}'.");
     }
 
-    public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
+    public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
     {
         byte[] bytes;
         lock (_stateLock)
         {
             if (!_segments.TryGetValue(segmentId, out var storedBytes))
             {
-                throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+                throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId.Value:X16}'.");
             }
 
             bytes = storedBytes;
@@ -137,17 +137,17 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         if (segment.SegmentId != segmentId)
         {
             throw new InvalidDataException(
-                $"Sift segment '{segmentId:X16}' contains id '{segment.SegmentId:X16}'.");
+                $"Sift segment '{segmentId.Value:X16}' contains id '{segment.SegmentId.Value:X16}'.");
         }
     }
 
-    public long GetSegmentBytes(ulong segmentId)
+    public long GetSegmentBytes(SegmentId segmentId)
     {
         lock (_stateLock)
         {
             return _segments.TryGetValue(segmentId, out var bytes)
                 ? bytes.Length
-                : throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId:X16}'.");
+                : throw new FileNotFoundException($"Missing in-memory Sift segment '{segmentId.Value:X16}'.");
         }
     }
 
@@ -185,7 +185,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
     {
         lock (_stateLock)
         {
-            var manifest = _manifest ?? new CorpusManifest(Guid.Empty, 0, []);
+            var manifest = _manifest ?? new CorpusManifest(CorpusId.Empty, default, []);
             if (manifest.Segments.Count == 0)
             {
                 return new StorageReadSnapshot(manifest, EmptyDisposable.Instance);
@@ -248,7 +248,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    private void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
+    private void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<SegmentId> attemptedSegmentIds)
     {
         lock (_stateLock)
         {
@@ -344,7 +344,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             LeasedGenerationCount: _snapshotGenerationReferences.Keys.Count(generation => generation != _manifest.Generation),
             OldestLeasedGeneration: _snapshotGenerationReferences.Keys
                 .Where(generation => generation != _manifest.Generation)
-                .Select(static generation => (ulong?)generation)
+                .Select(static generation => (StorageGeneration?)generation)
                 .Min());
     }
 
@@ -392,7 +392,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             LeasedGenerationCount: _snapshotGenerationReferences.Keys.Count(generation => generation != _manifest.Generation),
             OldestLeasedGeneration: _snapshotGenerationReferences.Keys
                 .Where(generation => generation != _manifest.Generation)
-                .Select(static generation => (ulong?)generation)
+                .Select(static generation => (StorageGeneration?)generation)
                 .Min());
         _reclamationPending =
             reclamation.DeferredSegmentCount > 0 ||
@@ -432,7 +432,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
 
         public SegmentManifestEntry PublishSegment<TDocument>(
             IReadOnlyList<TDocument> documents,
-            ulong segmentId,
+            SegmentId segmentId,
             long minimumFreeBytesAfterPublication,
             CancellationToken cancellationToken)
             where TDocument : ISegmentBuildDocument
@@ -453,7 +453,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         public void PrepareFullBuild(bool discardCorruptState) =>
             storage.PrepareFullBuildUnderWriterLock(discardCorruptState);
 
-        public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+        public void CleanupFailedMutation(IReadOnlyCollection<SegmentId> attemptedSegmentIds) =>
             storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
 
         public void Dispose()
@@ -473,7 +473,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage
         }
     }
 
-    private sealed class SnapshotLease(InMemorySiftStorage owner, ulong generation, ulong[] segmentIds) : IDisposable
+    private sealed class SnapshotLease(InMemorySiftStorage owner, StorageGeneration generation, SegmentId[] segmentIds) : IDisposable
     {
         private InMemorySiftStorage? _owner = owner;
 

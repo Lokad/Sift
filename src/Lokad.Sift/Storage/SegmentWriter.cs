@@ -7,7 +7,7 @@ internal static unsafe class SegmentWriter
 {
     public static long Write<TDocument>(
         string path,
-        ulong segmentId,
+        SegmentId segmentId,
         IReadOnlyList<TDocument> documents,
         Action<long> ensureCapacity,
         CancellationToken cancellationToken)
@@ -53,7 +53,7 @@ internal static unsafe class SegmentWriter
         return prepared.ContentBlobLength;
     }
 
-    public static (byte[] Bytes, long ContentBytes) WriteToBytes<TDocument>(ulong segmentId, IReadOnlyList<TDocument> documents, CancellationToken cancellationToken)
+    public static (byte[] Bytes, long ContentBytes) WriteToBytes<TDocument>(SegmentId segmentId, IReadOnlyList<TDocument> documents, CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
     {
         SegmentIndexBuilder.ThrowIfWorkspaceLeaseMissing();
@@ -144,7 +144,7 @@ internal static unsafe class SegmentWriter
 
     private static void WritePrepared<TDocument>(
         Span<byte> bytes,
-        ulong segmentId,
+        SegmentId segmentId,
         IReadOnlyList<TDocument> documents,
         PreparedSegment prepared,
         CancellationToken cancellationToken)
@@ -182,7 +182,7 @@ internal static unsafe class SegmentWriter
         var header = bytes[..SegmentFormat.HeaderSize];
         LittleEndianCodec.WriteUInt64(header, SegmentFormat.SegmentMagic);
         LittleEndianCodec.WriteInt32(header[8..], SegmentFormat.FormatVersion);
-        LittleEndianCodec.WriteUInt64(header[12..], segmentId);
+        LittleEndianCodec.WriteUInt64(header[12..], segmentId.Value);
         LittleEndianCodec.WriteInt64(header[20..], DateTime.UtcNow.Ticks);
         LittleEndianCodec.WriteInt32(header[28..], rows.Length);
         LittleEndianCodec.WriteInt64(header[32..], prepared.ContentBlobLength);
@@ -226,7 +226,7 @@ internal static unsafe class SegmentWriter
             LittleEndianCodec.WriteUInt64(documentTable.Slice(rowOffset + 24, 8), row.LineIndexOffset);
             LittleEndianCodec.WriteInt32(documentTable.Slice(rowOffset + 32, 4), row.LineIndexLength);
             LittleEndianCodec.WriteInt32(documentTable.Slice(rowOffset + 36, 4), row.LineCount);
-            LittleEndianCodec.WriteUInt16(documentTable.Slice(rowOffset + 40, 2), row.Flags);
+            LittleEndianCodec.WriteUInt16(documentTable.Slice(rowOffset + 40, 2), (ushort)row.Flags);
             LittleEndianCodec.WriteInt64(documentTable.Slice(rowOffset + 42, 8), row.MTimeUtcTicks);
             LittleEndianCodec.WriteUInt64(documentTable.Slice(rowOffset + 50, 8), row.ContentHash64);
         }
@@ -242,7 +242,7 @@ internal static unsafe class SegmentWriter
         long nonAsciiContentBytes = 0;
         for (var i = 0; i < rows.Length; i++)
         {
-            if ((rows[i].Flags & (1 << 1)) != 0)
+            if ((rows[i].Flags & SegmentDocumentFlags.Ascii) != 0)
             {
                 continue;
             }
@@ -408,7 +408,7 @@ internal static unsafe class SegmentWriter
         ulong LineIndexOffset,
         int LineIndexLength,
         int LineCount,
-        ushort Flags,
+        SegmentDocumentFlags Flags,
         long MTimeUtcTicks,
         ulong ContentHash64);
 }

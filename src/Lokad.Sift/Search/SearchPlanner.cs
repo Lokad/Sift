@@ -295,7 +295,7 @@ internal static class SearchPlanner
 
             acceptedOrdinals.Add(ordinal);
             bytes += document.ContentLength;
-            if ((document.Flags & (1 << 1)) == 0)
+            if ((document.Flags & SegmentDocumentFlags.Ascii) == 0)
             {
                 nonAsciiDocuments++;
                 nonAsciiBytes += document.ContentLength;
@@ -371,7 +371,7 @@ internal static class SearchPlanner
 
                 var document = cache.Segment.GetDocument(ordinal);
                 bytes += document.ContentLength;
-                if ((document.Flags & (1 << 1)) == 0)
+                if ((document.Flags & SegmentDocumentFlags.Ascii) == 0)
                 {
                     nonAsciiDocuments++;
                     nonAsciiBytes += document.ContentLength;

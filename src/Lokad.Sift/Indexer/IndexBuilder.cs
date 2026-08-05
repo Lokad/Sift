@@ -80,11 +80,11 @@ internal sealed class IndexBuilder
         writeSession.PrepareFullBuild(discardCorruptState);
 
         var existing = writeSession.CurrentManifest;
-        var corpusId = Guid.NewGuid();
-        var generation = (existing?.Generation ?? 0UL) + 1UL;
-        var segmentSeed = generation ^ ((ulong)DateTime.UtcNow.Ticks << 1);
+        var corpusId = CorpusId.New();
+        var generation = existing?.Generation.Next() ?? new StorageGeneration(1);
+        var segmentSeed = generation.Value ^ ((ulong)DateTime.UtcNow.Ticks << 1);
         var entries = new List<SegmentManifestEntry>();
-        var attemptedSegmentIds = new List<ulong>();
+        var attemptedSegmentIds = new List<SegmentId>();
         StreamedDocuments load;
         try
         {
@@ -92,7 +92,7 @@ internal sealed class IndexBuilder
                 static _ => { },
                 partition =>
                 {
-                    var segmentId = segmentSeed + (ulong)entries.Count;
+                    var segmentId = new SegmentId(segmentSeed + (ulong)entries.Count);
                     attemptedSegmentIds.Add(segmentId);
                     entries.Add(writeSession.PublishSegment(
                         partition,
@@ -124,7 +124,7 @@ internal sealed class IndexBuilder
 
             writeSession.PublishManifest(new CorpusManifest(
                 CorpusId: corpusId,
-                ContentRevision: 1,
+                ContentRevision: new ContentRevision(1),
                 Generation: generation,
                 CommitMetadata: commitMetadata,
                 Segments: entries));
@@ -150,9 +150,9 @@ internal sealed class IndexBuilder
             PeakManagedBytes = 0,
             RejectedDocumentDetails = load.RejectedDocuments,
             CommittedIdentity = new IndexIdentity(
-                new CorpusId(corpusId),
+                corpusId,
                 new ContentRevision(1),
-                new StorageGeneration(generation))
+                generation)
         });
     }
 
@@ -580,15 +580,15 @@ internal sealed class IndexBuilder
             return null;
         }
 
-        var flags = (ushort)1;
+        var flags = SegmentDocumentFlags.Utf8Text;
         if (span.IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0)
         {
-            flags |= 1 << 1;
+            flags |= SegmentDocumentFlags.Ascii;
         }
 
         if (hasBom)
         {
-            flags |= 1 << 2;
+            flags |= SegmentDocumentFlags.HadUtf8Bom;
         }
 
         // Buffers borrowed until the next read always require a copy. Whole-operation

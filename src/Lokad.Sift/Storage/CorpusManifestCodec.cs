@@ -38,8 +38,8 @@ internal static class CorpusManifestCodec
             throw new InvalidDataException("Invalid Sift manifest length.");
         }
 
-        var corpusId = new Guid(span.Slice(12, 16));
-        var generation = LittleEndianCodec.ReadUInt64(span[28..]);
+        var corpusId = new CorpusId(new Guid(span.Slice(12, 16)));
+        var generation = new StorageGeneration(LittleEndianCodec.ReadUInt64(span[28..]));
         var count = LittleEndianCodec.ReadInt32(span[36..]);
         var segmentTableOffset = LittleEndianCodec.ReadInt32(span[40..]);
         var segmentTableLength = LittleEndianCodec.ReadInt32(span[44..]);
@@ -52,8 +52,8 @@ internal static class CorpusManifestCodec
         var checksumOffset = LittleEndianCodec.ReadInt32(span[(version == SegmentFormat.ManifestFormatVersion ? 56 : 48)..]);
         var checksumLength = LittleEndianCodec.ReadInt32(span[(version == SegmentFormat.ManifestFormatVersion ? 60 : 52)..]);
         var contentRevision = version == SegmentFormat.ManifestFormatVersion
-            ? LittleEndianCodec.ReadUInt64(span[64..])
-            : generation;
+            ? new ContentRevision(LittleEndianCodec.ReadUInt64(span[64..]))
+            : new ContentRevision(generation.Value);
         if (count < 0)
         {
             throw new InvalidDataException("Invalid Sift manifest segment count.");
@@ -108,7 +108,7 @@ internal static class CorpusManifestCodec
                 throw new InvalidDataException("Sift manifest segment table is truncated.");
             }
 
-            var segmentId = LittleEndianCodec.ReadUInt64(span[offset..]);
+            var segmentId = new SegmentId(LittleEndianCodec.ReadUInt64(span[offset..]));
             var documentCount = LittleEndianCodec.ReadInt32(span[(offset + 8)..]);
             var contentBytes = LittleEndianCodec.ReadInt64(span[(offset + 12)..]);
             var deadCount = LittleEndianCodec.ReadInt32(span[(offset + 20)..]);
@@ -211,8 +211,8 @@ internal static class CorpusManifestCodec
         var span = bytes.AsSpan();
         LittleEndianCodec.WriteUInt64(span, SegmentFormat.ManifestMagic);
         LittleEndianCodec.WriteInt32(span[8..], SegmentFormat.ManifestFormatVersion);
-        manifest.CorpusId.TryWriteBytes(span[12..28]);
-        LittleEndianCodec.WriteUInt64(span[28..], manifest.Generation);
+        manifest.CorpusId.Value.TryWriteBytes(span[12..28]);
+        LittleEndianCodec.WriteUInt64(span[28..], manifest.Generation.Value);
         LittleEndianCodec.WriteInt32(span[36..], manifest.Segments.Count);
         LittleEndianCodec.WriteInt32(span[40..], segmentTableOffset);
         LittleEndianCodec.WriteInt32(span[44..], segmentTableLength);
@@ -220,12 +220,12 @@ internal static class CorpusManifestCodec
         LittleEndianCodec.WriteInt32(span[52..], metadataLength);
         LittleEndianCodec.WriteInt32(span[56..], checksumOffset);
         LittleEndianCodec.WriteInt32(span[60..], checksumLength);
-        LittleEndianCodec.WriteUInt64(span[64..], manifest.ContentRevision);
+        LittleEndianCodec.WriteUInt64(span[64..], manifest.ContentRevision.Value);
 
         var offset = segmentTableOffset;
         foreach (var segment in manifest.Segments)
         {
-            LittleEndianCodec.WriteUInt64(span[offset..], segment.SegmentId);
+            LittleEndianCodec.WriteUInt64(span[offset..], segment.SegmentId.Value);
             LittleEndianCodec.WriteInt32(span[(offset + 8)..], segment.DocumentCount);
             LittleEndianCodec.WriteInt64(span[(offset + 12)..], segment.ContentBytes);
             LittleEndianCodec.WriteInt32(span[(offset + 20)..], segment.DeadOrdinals.Length);

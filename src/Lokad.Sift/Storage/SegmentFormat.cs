@@ -1,5 +1,13 @@
 namespace Lokad.Sift.Storage;
 
+[Flags]
+internal enum SegmentDocumentFlags : ushort
+{
+    Utf8Text = 1,
+    Ascii = 1 << 1,
+    HadUtf8Bom = 1 << 2
+}
+
 internal enum SegmentRegionId
 {
     DocumentTable = 1,

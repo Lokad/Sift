@@ -15,9 +15,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly SearchOptions _searchOptions;
     private readonly Dictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
     private readonly HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
-    private readonly HashSet<ulong> _baseSegmentIds;
-    private readonly Dictionary<ulong, ulong> _overlayToSyntheticSegmentIds = [];
-    private readonly Dictionary<ulong, ulong> _syntheticToOverlaySegmentIds = [];
+    private readonly HashSet<SegmentId> _baseSegmentIds;
+    private readonly Dictionary<SegmentId, SegmentId> _overlayToSyntheticSegmentIds = [];
+    private readonly Dictionary<SegmentId, SegmentId> _syntheticToOverlaySegmentIds = [];
     // Collectors may materialize overlay hits recursively while Search holds a read lease.
     private readonly ReaderWriterLockSlim _stateLock = new(LockRecursionPolicy.SupportsRecursion);
     private readonly SemaphoreSlim _updateLock = new(1, 1);
@@ -35,7 +35,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _searchOptions = searchOptions;
         _overlayIndex = SiftIndex.CreateInMemory(options);
         _overlaySnapshot = _overlayIndex.OpenSnapshot(searchOptions);
-        _baseSegmentIds = new HashSet<ulong>(_baseSnapshot.GetSegmentIds());
+        _baseSegmentIds = new HashSet<SegmentId>(_baseSnapshot.GetSegmentIds());
     }
 
     public Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
@@ -312,17 +312,17 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
     {
         using var state = BeginRead();
-        ulong overlaySegmentId;
+        SegmentId overlaySegmentId;
         lock (_syntheticSync)
         {
-            if (!_syntheticToOverlaySegmentIds.TryGetValue(hit.SegmentId.Value, out overlaySegmentId))
+            if (!_syntheticToOverlaySegmentIds.TryGetValue(hit.SegmentId, out overlaySegmentId))
             {
                 return _baseSnapshot.Materialize(hit, contextBefore, contextAfter);
             }
         }
 
         return _overlaySnapshot.Materialize(
-            hit with { SegmentId = new SegmentId(overlaySegmentId) },
+            hit with { SegmentId = overlaySegmentId },
             contextBefore,
             contextAfter);
     }
@@ -389,20 +389,21 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         lock (_syntheticSync)
         {
-            if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId.Value, out var syntheticSegmentId))
+            if (_overlayToSyntheticSegmentIds.TryGetValue(overlaySegmentId, out var syntheticSegmentId))
             {
-                return new SegmentId(syntheticSegmentId);
+                return syntheticSegmentId;
             }
 
-            while (_baseSegmentIds.Contains(_nextSyntheticSegmentId) || _syntheticToOverlaySegmentIds.ContainsKey(_nextSyntheticSegmentId))
+            syntheticSegmentId = new SegmentId(_nextSyntheticSegmentId);
+            while (_baseSegmentIds.Contains(syntheticSegmentId) || _syntheticToOverlaySegmentIds.ContainsKey(syntheticSegmentId))
             {
-                _nextSyntheticSegmentId--;
+                syntheticSegmentId = new SegmentId(--_nextSyntheticSegmentId);
             }
 
-            syntheticSegmentId = _nextSyntheticSegmentId--;
-            _overlayToSyntheticSegmentIds.Add(overlaySegmentId.Value, syntheticSegmentId);
-            _syntheticToOverlaySegmentIds.Add(syntheticSegmentId, overlaySegmentId.Value);
-            return new SegmentId(syntheticSegmentId);
+            _nextSyntheticSegmentId--;
+            _overlayToSyntheticSegmentIds.Add(overlaySegmentId, syntheticSegmentId);
+            _syntheticToOverlaySegmentIds.Add(syntheticSegmentId, overlaySegmentId);
+            return syntheticSegmentId;
         }
     }
 

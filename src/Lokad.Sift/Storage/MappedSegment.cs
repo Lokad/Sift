@@ -92,7 +92,7 @@ internal sealed unsafe class MappedSegment : IDisposable
         }
     }
 
-    public ulong SegmentId { get; private set; }
+    public SegmentId SegmentId { get; private set; }
     public long BuildTimestampTicks { get; private set; }
     public int DocumentCount { get; private set; }
     public long ContentBytes { get; private set; }
@@ -115,7 +115,7 @@ internal sealed unsafe class MappedSegment : IDisposable
             Read<ulong>(offset + 24),
             Read<int>(offset + 32),
             Read<int>(offset + 36),
-            Read<ushort>(offset + 40),
+            (SegmentDocumentFlags)Read<ushort>(offset + 40),
             Read<long>(offset + 42),
             Read<ulong>(offset + 50));
     }
@@ -652,7 +652,7 @@ internal sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException($"Unsupported Sift segment version: {version}.");
         }
 
-        SegmentId = Read<ulong>(12);
+        SegmentId = new SegmentId(Read<ulong>(12));
         BuildTimestampTicks = Read<long>(20);
         DocumentCount = Read<int>(28);
         ContentBytes = Read<long>(32);
@@ -824,7 +824,7 @@ internal readonly record struct SegmentDocument(
     ulong LineIndexOffset,
     int LineIndexLength,
     int LineCount,
-    ushort Flags,
+    SegmentDocumentFlags Flags,
     long MTimeUtcTicks,
     ulong ContentHash64);
 

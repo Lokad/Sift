@@ -26,7 +26,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly SearchPlanExplainer _planExplainer;
     private readonly object _mappedSegmentsSync = new();
     // Reuse mappings across search, path lookup, and hit materialization while the generation is pinned.
-    private readonly Dictionary<ulong, MappedSegment> _mappedSegments = new();
+    private readonly Dictionary<SegmentId, MappedSegment> _mappedSegments = new();
     // Keep the generation lease alive until every operation that may open one
     // of its segment packs has completed.
     // Collectors may materialize hits while Search holds its disposal-exclusion read lease.
@@ -35,9 +35,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly Action<Exception>? _onIndexFailure;
     private int _disposed;
     internal IndexIdentity Identity => new(
-        new CorpusId(_storageSnapshot.Manifest.CorpusId),
-        new ContentRevision(_storageSnapshot.Manifest.ContentRevision),
-        new StorageGeneration(_storageSnapshot.Manifest.Generation));
+        _storageSnapshot.Manifest.CorpusId,
+        _storageSnapshot.Manifest.ContentRevision,
+        _storageSnapshot.Manifest.Generation);
 
     public SearchSnapshot(
         ISiftStorage storage,
@@ -443,7 +443,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId.Value);
+            var cache = OpenSegment(hit.SegmentId);
             return HitMaterializer.Materialize(
                 cache.Segment,
                 hit,
@@ -521,7 +521,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId.Value);
+            var cache = OpenSegment(hit.SegmentId);
             var document = cache.Segment.GetDocument(hit.DocumentOrdinal.Value);
             return cache.Segment.GetPath(document);
         }
@@ -532,10 +532,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    internal ulong[] GetSegmentIds()
+    internal SegmentId[] GetSegmentIds()
     {
         using var operation = BeginOperation();
-        var ids = GC.AllocateUninitializedArray<ulong>(_segments.Count);
+        var ids = GC.AllocateUninitializedArray<SegmentId>(_segments.Count);
         for (var i = 0; i < _segments.Count; i++)
         {
             ids[i] = _segments[i].SegmentId;
@@ -568,7 +568,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private SegmentCache OpenSegment(ulong segmentId)
+    private SegmentCache OpenSegment(SegmentId segmentId)
     {
         foreach (var candidate in _segments)
         {
@@ -578,7 +578,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
         }
 
-        throw new InvalidOperationException($"Unknown segment id {segmentId}.");
+        throw new InvalidOperationException($"Unknown segment id {segmentId.Value}.");
     }
 
     private SegmentCache OpenSegment(SegmentManifestEntry entry)
@@ -629,7 +629,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             foreach (var deadOrdinal in manifestEntry.DeadOrdinals)
             {
                 var deadDocument = segment.GetDocument(deadOrdinal);
-                if ((deadDocument.Flags & (1 << 1)) == 0)
+                if ((deadDocument.Flags & SegmentDocumentFlags.Ascii) == 0)
                 {
                     liveNonAsciiDocuments--;
                     liveNonAsciiBytes -= deadDocument.ContentLength;
@@ -906,7 +906,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 {
                     var shouldContinue = collector.OnHit(
                         new RawHit(
-                            new SegmentId(cache.Segment.SegmentId),
+                            cache.Segment.SegmentId,
                             new DocumentOrdinal(document.Ordinal),
                             0,
                             0,
@@ -1092,7 +1092,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         if (pattern.Length == 0)
         {
             var shouldContinue = collector.OnHit(new RawHit(
-                new SegmentId(segment.SegmentId),
+                segment.SegmentId,
                 new DocumentOrdinal(document.Ordinal),
                 0,
                 0,
@@ -1171,7 +1171,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
             var shouldContinue = collector.OnHit(
                 new RawHit(
-                    new SegmentId(segment.SegmentId),
+                    segment.SegmentId,
                     new DocumentOrdinal(document.Ordinal),
                     startByte,
                     endByte,
@@ -1229,7 +1229,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(start, end - 1));
             var shouldContinue = collector.OnHit(
                 new RawHit(
-                    new SegmentId(segment.SegmentId),
+                    segment.SegmentId,
                     new DocumentOrdinal(document.Ordinal),
                     start,
                     end,
@@ -1578,7 +1578,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private static bool CanUseUtf8RegexForDocument(SegmentDocument document)
     {
-        return (document.Flags & (1 << 1)) != 0;
+        return (document.Flags & SegmentDocumentFlags.Ascii) != 0;
     }
 
     private static bool ShouldIncludeNonAsciiRegexCandidates(

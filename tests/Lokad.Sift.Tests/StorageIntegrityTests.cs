@@ -40,25 +40,25 @@ public sealed class StorageIntegrityTests
             var deadOrdinals = new uint[] { 3 };
             var segments = new[]
             {
-                new SegmentManifestEntry(1, 4, 10, deadOrdinals, DeadContentBytes: 2)
+                new SegmentManifestEntry(new SegmentId(1), 4, 10, deadOrdinals, DeadContentBytes: 2)
             };
             using (var session = storage.AcquireWriteSession(CancellationToken.None))
             {
                 session.PublishManifest(new CorpusManifest(
-                    Guid.NewGuid(),
-                    ContentRevision: 1,
-                    Generation: 1,
+                    new CorpusId(Guid.NewGuid()),
+                    ContentRevision: new ContentRevision(1),
+                    Generation: new StorageGeneration(1),
                     CommitMetadata: commitMetadata,
                     Segments: segments));
             }
 
             commitMetadata[0] = 9;
             deadOrdinals[0] = 9;
-            segments[0] = segments[0] with { SegmentId = 2 };
+            segments[0] = segments[0] with { SegmentId = new SegmentId(2) };
 
             var published = storage.ReadManifest();
             Assert.Equal(7, published.CommitMetadata[0]);
-            Assert.Equal(1UL, published.Segments[0].SegmentId);
+            Assert.Equal(new SegmentId(1), published.Segments[0].SegmentId);
             Assert.Equal(3U, published.Segments[0].DeadOrdinals[0]);
         }
     }
@@ -416,7 +416,7 @@ public sealed class StorageIntegrityTests
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         Directory.CreateDirectory(fixture.CorpusPath);
         var storage = new CorpusStorage(fixture.CorpusPath);
-        var manifest = new CorpusManifest(Guid.NewGuid(), 7, []);
+        var manifest = new CorpusManifest(new CorpusId(Guid.NewGuid()), new StorageGeneration(7), []);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
             writeSession.PublishManifest(manifest);
@@ -428,7 +428,7 @@ public sealed class StorageIntegrityTests
         Assert.True(File.Exists(storage.ManifestPath));
         Assert.False(File.Exists(storage.ManifestPath + ".tmp"));
         var recovered = storage.ReadManifest();
-        Assert.Equal(7UL, recovered.Generation);
+        Assert.Equal(new StorageGeneration(7), recovered.Generation);
     }
 
     [Fact]
@@ -462,7 +462,7 @@ public sealed class StorageIntegrityTests
         {
             abandoned = writeSession.PublishSegment(
                 [CreateStoredDocument("src/abandoned.txt", "abandoned\n")],
-                0x1234UL,
+                new SegmentId(0x1234UL),
                 minimumFreeBytesAfterPublication: 0,
                 CancellationToken.None);
         }
@@ -544,12 +544,12 @@ public sealed class StorageIntegrityTests
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = new CorpusManifest(
-            CorpusId: Guid.NewGuid(),
-            ContentRevision: 2,
-            Generation: 3,
+            CorpusId: new CorpusId(Guid.NewGuid()),
+            ContentRevision: new ContentRevision(2),
+            Generation: new StorageGeneration(3),
             CommitMetadata: "checkpoint"u8.ToArray(),
             Segments: [
-                new SegmentManifestEntry(42, 6000, 100, [1, 2, 3, 1000, 5000], DeadContentBytes: 5)
+                new SegmentManifestEntry(new SegmentId(42), 6000, 100, [1, 2, 3, 1000, 5000], DeadContentBytes: 5)
             ]);
 
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
@@ -1003,7 +1003,7 @@ public sealed class StorageIntegrityTests
             CreateStoredDocument("src/unicode.txt", "café")
         };
         using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
-        var (current, _) = SegmentWriter.WriteToBytes(0x1234UL, documents, CancellationToken.None);
+        var (current, _) = SegmentWriter.WriteToBytes(new SegmentId(0x1234UL), documents, CancellationToken.None);
         var currentChecksumOffset = BinaryPrimitives.ReadInt64LittleEndian(current.AsSpan(52));
         var removedBytes = SegmentFormat.StatsLength - SegmentFormat.LegacyStatsLength;
         var legacy = new byte[current.Length - removedBytes];
@@ -1081,7 +1081,7 @@ public sealed class StorageIntegrityTests
         {
             Assert.Throws<IOException>(() => writeSession.PublishSegment(
                 documents,
-                0x1234UL,
+                new SegmentId(0x1234UL),
                 minimumFreeBytesAfterPublication: 0,
                 CancellationToken.None));
         }
@@ -1110,7 +1110,7 @@ public sealed class StorageIntegrityTests
         {
             Assert.Throws<IOException>(() => writeSession.PublishSegment(
                 [CreateStoredDocument("src/a.txt", "alpha\n")],
-                0x1234UL,
+                new SegmentId(0x1234UL),
                 minimumFreeBytesAfterPublication: 0,
                 CancellationToken.None));
         }
@@ -1141,7 +1141,7 @@ public sealed class StorageIntegrityTests
             ThrowOnStage = PublicationStage.BeforeReclamationIntentFlush
         };
 
-        var next = new CorpusManifest(original.CorpusId, original.Generation + 1, original.Segments);
+        var next = new CorpusManifest(original.CorpusId, original.Generation.Next(), original.Segments);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
             Assert.Throws<IOException>(() => writeSession.PublishManifest(next));
@@ -1165,7 +1165,7 @@ public sealed class StorageIntegrityTests
             ThrowOnStage = PublicationStage.AfterManifestFlushBeforeSwap
         };
 
-        var next = new CorpusManifest(original.CorpusId, original.Generation + 1, original.Segments);
+        var next = new CorpusManifest(original.CorpusId, original.Generation.Next(), original.Segments);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
             Assert.Throws<IOException>(() => writeSession.PublishManifest(next));
@@ -1191,7 +1191,7 @@ public sealed class StorageIntegrityTests
             }
         };
 
-        var manifest = new CorpusManifest(Guid.NewGuid(), 1, []);
+        var manifest = new CorpusManifest(new CorpusId(Guid.NewGuid()), new StorageGeneration(1), []);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
             Assert.Throws<IOException>(() => writeSession.PublishManifest(manifest));
@@ -1223,7 +1223,7 @@ public sealed class StorageIntegrityTests
         {
             compactedEntry = writeSession.PublishSegment(
                 [CreateStoredDocument("src/a.txt", "omega\n")],
-                0x7777UL,
+                new SegmentId(0x7777UL),
                 minimumFreeBytesAfterPublication: 0,
                 CancellationToken.None);
         }
@@ -1233,7 +1233,7 @@ public sealed class StorageIntegrityTests
             ThrowOnStage = PublicationStage.AfterManifestFlushBeforeSwap
         };
 
-        var failedManifest = new CorpusManifest(original.CorpusId, original.Generation + 1, [compactedEntry]);
+        var failedManifest = new CorpusManifest(original.CorpusId, original.Generation.Next(), [compactedEntry]);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
             Assert.Throws<IOException>(() => writeSession.PublishManifest(failedManifest));
@@ -1396,11 +1396,11 @@ public sealed class StorageIntegrityTests
 
         public CorpusManifest ReadManifest() => inner.ReadManifest();
         public CorpusManifest RefreshManifest() => inner.RefreshManifest();
-        public MappedSegment OpenSegment(ulong segmentId) => inner.OpenSegment(segmentId);
-        public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken) =>
+        public MappedSegment OpenSegment(SegmentId segmentId) => inner.OpenSegment(segmentId);
+        public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
             inner.OpenSegment(segmentId, cancellationToken);
 
-        public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
+        public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
         {
             ValidationStarted.Set();
             ReleaseValidation.Wait(cancellationToken);
@@ -1408,7 +1408,7 @@ public sealed class StorageIntegrityTests
             throw new InvalidDataException("Simulated retained segment corruption.");
         }
 
-        public long GetSegmentBytes(ulong segmentId) => inner.GetSegmentBytes(segmentId);
+        public long GetSegmentBytes(SegmentId segmentId) => inner.GetSegmentBytes(segmentId);
         public long? GetAvailableBytes() => inner.GetAvailableBytes();
         public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();
         public StorageReadSnapshot OpenReadSnapshot() => inner.OpenReadSnapshot();
@@ -1444,12 +1444,12 @@ public sealed class StorageIntegrityTests
 
         public CorpusManifest ReadManifest() => inner.ReadManifest();
         public CorpusManifest RefreshManifest() => inner.RefreshManifest();
-        public MappedSegment OpenSegment(ulong segmentId) => inner.OpenSegment(segmentId);
-        public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken) =>
+        public MappedSegment OpenSegment(SegmentId segmentId) => inner.OpenSegment(segmentId);
+        public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
             inner.OpenSegment(segmentId, cancellationToken);
-        public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken) =>
+        public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
             inner.ValidateSegment(segmentId, cancellationToken);
-        public long GetSegmentBytes(ulong segmentId) => inner.GetSegmentBytes(segmentId);
+        public long GetSegmentBytes(SegmentId segmentId) => inner.GetSegmentBytes(segmentId);
         public long? GetAvailableBytes() => inner.GetAvailableBytes();
         public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();
         public StorageReadSnapshot OpenReadSnapshot() => inner.OpenReadSnapshot();
@@ -1468,7 +1468,7 @@ public sealed class StorageIntegrityTests
 
             public SegmentManifestEntry PublishSegment<TDocument>(
                 IReadOnlyList<TDocument> documents,
-                ulong segmentId,
+                SegmentId segmentId,
                 long minimumFreeBytesAfterPublication,
                 CancellationToken cancellationToken)
                 where TDocument : ISegmentBuildDocument
@@ -1488,7 +1488,7 @@ public sealed class StorageIntegrityTests
             public void EnsureReplacementAllowed() => innerSession.EnsureReplacementAllowed();
             public void PrepareFullBuild(bool discardCorruptState) =>
                 innerSession.PrepareFullBuild(discardCorruptState);
-            public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+            public void CleanupFailedMutation(IReadOnlyCollection<SegmentId> attemptedSegmentIds) =>
                 innerSession.CleanupFailedMutation(attemptedSegmentIds);
             public void Dispose() => innerSession.Dispose();
         }

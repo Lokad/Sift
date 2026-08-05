@@ -57,7 +57,7 @@ internal static class CandidateGenerator
         {
             // ASCII-insensitive postings cannot represent the additional Unicode
             // equivalences of RegexOptions.IgnoreCase, so those documents need verification.
-            if ((segment.GetDocument(ordinal).Flags & (1 << 1)) == 0)
+            if ((segment.GetDocument(ordinal).Flags & SegmentDocumentFlags.Ascii) == 0)
             {
                 candidateBits.Set((int)ordinal);
             }

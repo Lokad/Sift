@@ -21,7 +21,7 @@ internal sealed class CorpusStorage : ISiftStorage
     private readonly object _layoutLock = new();
     private readonly object _capacityBudgetLock = new();
     private readonly CorpusManifestCache _manifestCache = new();
-    private readonly ConcurrentDictionary<ulong, object> _segmentValidationGates = new();
+    private readonly ConcurrentDictionary<SegmentId, object> _segmentValidationGates = new();
     private bool _segmentDirectoriesRecovered;
     private bool _reclamationIntentKnownDurable;
     private long _segmentOpenCount;
@@ -154,7 +154,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     private SegmentManifestEntry PublishSegment<TDocument>(
         IReadOnlyList<TDocument> documents,
-        ulong segmentId,
+        SegmentId segmentId,
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
@@ -162,7 +162,7 @@ internal sealed class CorpusStorage : ISiftStorage
         EnsureLayout();
         // A crash can leave this pack published but absent from the manifest; startup must sweep it.
         SetReclamationPending(isPending: true);
-        var tempSegmentDirectory = Path.Combine(TempPath, segmentId.ToString("X16"));
+        var tempSegmentDirectory = Path.Combine(TempPath, segmentId.Value.ToString("X16"));
         Directory.CreateDirectory(tempSegmentDirectory);
         var tempSegmentPath = Path.Combine(tempSegmentDirectory, "segment.pack");
         var contentBytes = SegmentWriter.Write(
@@ -179,11 +179,11 @@ internal sealed class CorpusStorage : ISiftStorage
             validateChecksums: false,
             cancellationToken).Dispose();
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterSegmentFlushBeforePublish);
-        var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.ToString("X16"));
+        var finalSegmentDirectory = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"));
         var finalSegmentPath = Path.Combine(finalSegmentDirectory, "segment.pack");
         if (File.Exists(finalSegmentPath))
         {
-            throw new IOException($"Sift segment id collision for '{segmentId:X16}'.");
+            throw new IOException($"Sift segment id collision for '{segmentId.Value:X16}'.");
         }
 
         Directory.CreateDirectory(finalSegmentDirectory);
@@ -211,15 +211,15 @@ internal sealed class CorpusStorage : ISiftStorage
     }
 
 
-    public MappedSegment OpenSegment(ulong segmentId)
+    public MappedSegment OpenSegment(SegmentId segmentId)
     {
         return OpenSegment(segmentId, CancellationToken.None);
     }
 
-    public MappedSegment OpenSegment(ulong segmentId, CancellationToken cancellationToken)
+    public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _segmentOpenCount);
-        var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
+        var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
         return OpenAndValidateIdentity(
             path,
             segmentId,
@@ -227,10 +227,10 @@ internal sealed class CorpusStorage : ISiftStorage
             cancellationToken);
     }
 
-    public void ValidateSegment(ulong segmentId, CancellationToken cancellationToken)
+    public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _segmentOpenCount);
-        var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
+        var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
         var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
         while (!Monitor.TryEnter(validationGate, millisecondsTimeout: 50))
         {
@@ -252,9 +252,9 @@ internal sealed class CorpusStorage : ISiftStorage
         }
     }
 
-    public long GetSegmentBytes(ulong segmentId)
+    public long GetSegmentBytes(SegmentId segmentId)
     {
-        var path = Path.Combine(SegmentsPath, segmentId.ToString("X16"), "segment.pack");
+        var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
         return new FileInfo(path).Length;
     }
 
@@ -470,7 +470,7 @@ internal sealed class CorpusStorage : ISiftStorage
             if (!HasManifest)
             {
                 return new StorageReadSnapshot(
-                    new CorpusManifest(Guid.Empty, 0, []),
+                    new CorpusManifest(CorpusId.Empty, default, []),
                     EmptyDisposable.Instance);
             }
 
@@ -578,14 +578,14 @@ internal sealed class CorpusStorage : ISiftStorage
         ResetCorruptIndexUnderWriterLock();
     }
 
-    private void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<ulong> attemptedSegmentIds)
+    private void CleanupFailedMutationUnderWriterLock(IReadOnlyCollection<SegmentId> attemptedSegmentIds)
     {
         // With no current manifest, a flushed initial manifest may still name every
         // attempted pack. Roll it back before making those packs unreachable.
         var canDeleteAttemptedPacks =
             HasManifest ||
             TryRemoveUnpublishedManifestArtifactsUnderWriterLock();
-        HashSet<ulong>? referencedSegmentIds;
+        HashSet<SegmentId>? referencedSegmentIds;
         if (!canDeleteAttemptedPacks)
         {
             referencedSegmentIds = null;
@@ -609,13 +609,13 @@ internal sealed class CorpusStorage : ISiftStorage
         var deletedFinalSegment = false;
         foreach (var segmentId in attemptedSegmentIds.Distinct())
         {
-            TryDeleteDirectory(Path.Combine(TempPath, segmentId.ToString("X16")));
+            TryDeleteDirectory(Path.Combine(TempPath, segmentId.Value.ToString("X16")));
             if (referencedSegmentIds is null || referencedSegmentIds.Contains(segmentId))
             {
                 continue;
             }
 
-            if (TryDeleteDirectory(Path.Combine(SegmentsPath, segmentId.ToString("X16"))))
+            if (TryDeleteDirectory(Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"))))
             {
                 deletedFinalSegment = true;
                 _segmentValidationGates.TryRemove(segmentId, out _);
@@ -834,7 +834,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
     private static MappedSegment OpenAndValidateIdentity(
         string path,
-        ulong expectedSegmentId,
+        SegmentId expectedSegmentId,
         bool validateChecksums,
         CancellationToken cancellationToken)
     {
@@ -847,7 +847,7 @@ internal sealed class CorpusStorage : ISiftStorage
         var actualSegmentId = segment.SegmentId;
         segment.Dispose();
         throw new InvalidDataException(
-            $"Sift segment '{expectedSegmentId:X16}' contains id '{actualSegmentId:X16}'.");
+            $"Sift segment '{expectedSegmentId.Value:X16}' contains id '{actualSegmentId.Value:X16}'.");
     }
 
     private void RecoverStaleTempEntries()
@@ -940,14 +940,14 @@ internal sealed class CorpusStorage : ISiftStorage
                     continue;
                 }
 
-                using var _ = OpenSegment(segmentId);
+                using var _ = OpenSegment(new SegmentId(segmentId));
             }
             catch (InvalidDataException)
             {
                 var directoryName = Path.GetFileName(directory);
                 if (directoryName.Length == 16 &&
                     ulong.TryParse(directoryName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var segmentId) &&
-                    referencedSegmentIds.Contains(segmentId))
+                    referencedSegmentIds.Contains(new SegmentId(segmentId)))
                 {
                     throw new InvalidDataException(
                         $"The current Sift manifest references corrupt segment '{segmentId:X16}'.");
@@ -984,12 +984,12 @@ internal sealed class CorpusStorage : ISiftStorage
         var span = bytes.AsSpan();
         LittleEndianCodec.WriteUInt64(span, GenerationLeaseMagic);
         LittleEndianCodec.WriteInt32(span[8..], GenerationLeaseVersion);
-        manifest.CorpusId.TryWriteBytes(span[12..28]);
-        LittleEndianCodec.WriteUInt64(span[28..], manifest.Generation);
+        manifest.CorpusId.Value.TryWriteBytes(span[12..28]);
+        LittleEndianCodec.WriteUInt64(span[28..], manifest.Generation.Value);
         LittleEndianCodec.WriteInt32(span[36..], manifest.Segments.Count);
         for (var i = 0; i < manifest.Segments.Count; i++)
         {
-            LittleEndianCodec.WriteUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..], manifest.Segments[i].SegmentId);
+            LittleEndianCodec.WriteUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..], manifest.Segments[i].SegmentId.Value);
         }
 
         LittleEndianCodec.WriteUInt64(
@@ -1020,9 +1020,9 @@ internal sealed class CorpusStorage : ISiftStorage
         }
     }
 
-    private string GetGenerationLeasePath(ulong generation)
+    private string GetGenerationLeasePath(StorageGeneration generation)
     {
-        return Path.Combine(GenerationLeasesPath, generation.ToString("X16", CultureInfo.InvariantCulture) + ".lease");
+        return Path.Combine(GenerationLeasesPath, generation.Value.ToString("X16", CultureInfo.InvariantCulture) + ".lease");
     }
 
     private static GenerationLeaseData ReadGenerationLease(FileStream stream)
@@ -1079,9 +1079,9 @@ internal sealed class CorpusStorage : ISiftStorage
         }
 
         return new GenerationLeaseData(
-            new Guid(span[12..28]),
-            LittleEndianCodec.ReadUInt64(span[28..]),
-            segmentIds);
+            new CorpusId(new Guid(span[12..28])),
+            new StorageGeneration(LittleEndianCodec.ReadUInt64(span[28..])),
+            segmentIds.Select(static segmentId => new SegmentId(segmentId)).ToArray());
     }
 
     private static void ValidateGenerationLease(FileStream stream, CorpusManifest manifest)
@@ -1122,7 +1122,7 @@ internal sealed class CorpusStorage : ISiftStorage
         }
 
         var leasedGenerationCount = 0;
-        ulong? oldestLeasedGeneration = null;
+        StorageGeneration? oldestLeasedGeneration = null;
         var isBlocked = false;
         foreach (var leasePath in Directory.EnumerateFiles(GenerationLeasesPath, "*.lease"))
         {
@@ -1170,7 +1170,7 @@ internal sealed class CorpusStorage : ISiftStorage
                 var fileName = Path.GetFileNameWithoutExtension(leasePath);
                 if (fileName.Length != 16 ||
                     !ulong.TryParse(fileName, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var fileGeneration) ||
-                    fileGeneration != lease.Generation)
+                    new StorageGeneration(fileGeneration) != lease.Generation)
                 {
                     isBlocked = true;
                     continue;
@@ -1184,7 +1184,9 @@ internal sealed class CorpusStorage : ISiftStorage
                 leasedGenerationCount++;
                 oldestLeasedGeneration = oldestLeasedGeneration is null
                     ? lease.Generation
-                    : Math.Min(oldestLeasedGeneration.Value, lease.Generation);
+                    : new StorageGeneration(Math.Min(
+                        oldestLeasedGeneration.Value.Value,
+                        lease.Generation.Value));
             }
             catch (FileNotFoundException)
             {
@@ -1320,7 +1322,7 @@ internal sealed class CorpusStorage : ISiftStorage
             protection.OldestLeasedGeneration));
     }
 
-    private void ForgetSegmentValidationGate(ulong segmentId)
+    private void ForgetSegmentValidationGate(SegmentId segmentId)
     {
         _segmentValidationGates.TryRemove(segmentId, out _);
     }
@@ -1729,7 +1731,7 @@ internal sealed class CorpusStorage : ISiftStorage
             var packPath = Path.Combine(directoryPath, "segment.pack");
             if (File.Exists(packPath))
             {
-                segments.Add(new PhysicalSegment(segmentId, directoryPath, new FileInfo(packPath).Length));
+                segments.Add(new PhysicalSegment(new SegmentId(segmentId), directoryPath, new FileInfo(packPath).Length));
             }
         }
 
@@ -1765,19 +1767,19 @@ internal sealed class CorpusStorage : ISiftStorage
     }
 
     private readonly record struct PhysicalSegment(
-        ulong SegmentId,
+        SegmentId SegmentId,
         string DirectoryPath,
         long Bytes);
 
     private readonly record struct GenerationLeaseData(
-        Guid CorpusId,
-        ulong Generation,
-        ulong[] SegmentIds);
+        CorpusId CorpusId,
+        StorageGeneration Generation,
+        SegmentId[] SegmentIds);
 
     private readonly record struct LeaseProtection(
-        HashSet<ulong> ProtectedSegmentIds,
+        HashSet<SegmentId> ProtectedSegmentIds,
         int LeasedGenerationCount,
-        ulong? OldestLeasedGeneration,
+        StorageGeneration? OldestLeasedGeneration,
         bool IsBlocked);
 
     private enum GenerationLeaseInspection
@@ -1838,7 +1840,7 @@ internal sealed class CorpusStorage : ISiftStorage
 
         public SegmentManifestEntry PublishSegment<TDocument>(
             IReadOnlyList<TDocument> documents,
-            ulong segmentId,
+            SegmentId segmentId,
             long minimumFreeBytesAfterPublication,
             CancellationToken cancellationToken)
             where TDocument : ISegmentBuildDocument
@@ -1876,7 +1878,7 @@ internal sealed class CorpusStorage : ISiftStorage
             ReloadCurrentManifestFromCache();
         }
 
-        public void CleanupFailedMutation(IReadOnlyCollection<ulong> attemptedSegmentIds) =>
+        public void CleanupFailedMutation(IReadOnlyCollection<SegmentId> attemptedSegmentIds) =>
             storage.CleanupFailedMutationUnderWriterLock(attemptedSegmentIds);
 
         public void Dispose()
@@ -1947,7 +1949,7 @@ internal interface ISegmentBuildDocument
     ReadOnlySpan<byte> GetContentBytes();
     int LineCount { get; }
     ReadOnlySpan<byte> GetEncodedLineIndex();
-    ushort Flags { get; }
+    SegmentDocumentFlags Flags { get; }
     long MTimeUtcTicks { get; }
     ulong ContentHash64 { get; }
 }
@@ -1975,7 +1977,7 @@ internal sealed class StoredDocument : ISegmentBuildDocument
         get => _encodedLineIndex;
         init => _encodedLineIndex = value;
     }
-    public required ushort Flags { get; init; }
+    public required SegmentDocumentFlags Flags { get; init; }
     public required long MTimeUtcTicks { get; init; }
     public required ulong ContentHash64 { get; init; }
 
