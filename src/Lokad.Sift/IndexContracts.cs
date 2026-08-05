@@ -97,7 +97,7 @@ public sealed class StaleIndexStateException : Exception
     public IndexIdentity ActualIdentity { get; }
 }
 
-public abstract class BuildCommitStats
+public class BuildCommitStats
 {
     private readonly RejectedDocument[] _rejectedDocumentDetails;
 
@@ -174,7 +174,7 @@ public sealed class BuildStats : BuildCommitStats
         CommittedIdentity);
 }
 
-public abstract class UpdateCommitStats
+public class UpdateCommitStats
 {
     private readonly RejectedDocument[] _rejectedDocumentDetails;
 

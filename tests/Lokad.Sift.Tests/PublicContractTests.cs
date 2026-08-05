@@ -34,6 +34,9 @@ public sealed class PublicContractTests
         Assert.True(typeof(SubmittedDocument).IsValueType);
         Assert.Throws<InvalidOperationException>(() => _ = default(DocumentKey).Path);
         Assert.Throws<InvalidOperationException>(() => _ = default(SubmittedDocument).Path);
+        Assert.Throws<InvalidOperationException>(() => _ = default(RejectedDocument).Path);
+        Assert.Empty(typeof(RejectedDocument).GetConstructors(BindingFlags.Public | BindingFlags.Instance));
+        Assert.Empty(typeof(RejectedUpsertException).GetConstructors(BindingFlags.Public | BindingFlags.Instance));
     }
 
     [Fact]

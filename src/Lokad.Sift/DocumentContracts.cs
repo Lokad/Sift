@@ -84,7 +84,7 @@ public readonly record struct SubmittedDocument
 
 public sealed class RejectedUpsertException : Exception
 {
-    public RejectedUpsertException(
+    internal RejectedUpsertException(
         int rejectedUpserts,
         long rejectedBytes,
         IReadOnlyList<RejectedDocument> rejectedDocuments)
@@ -114,10 +114,34 @@ public sealed class RejectedUpsertException : Exception
     }
 }
 
-public readonly record struct RejectedDocument(
-    string Path,
-    DocumentRejectionReason Reason,
-    int SubmittedBytes);
+public readonly record struct RejectedDocument
+{
+    private readonly string? _path;
+
+    internal RejectedDocument(
+        string path,
+        DocumentRejectionReason reason,
+        int submittedBytes)
+    {
+        if (!Enum.IsDefined(reason))
+        {
+            throw new ArgumentOutOfRangeException(nameof(reason));
+        }
+
+        if (submittedBytes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(submittedBytes));
+        }
+
+        _path = DocumentPath.Normalize(path);
+        Reason = reason;
+        SubmittedBytes = submittedBytes;
+    }
+
+    public string Path => _path ?? throw new InvalidOperationException("The rejected document is uninitialized.");
+    public DocumentRejectionReason Reason { get; }
+    public int SubmittedBytes { get; }
+}
 
 public interface IDocumentKeyCollector
 {
