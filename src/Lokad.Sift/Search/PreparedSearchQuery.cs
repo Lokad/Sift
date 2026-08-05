@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Lokad.Sift.Search;
 
 internal readonly record struct PreparedQueryKey(
@@ -32,8 +34,6 @@ internal sealed class PreparedSearchQuery
         CaseMode resolvedCaseMode,
         RegexExecutionPlan regexPlan,
         SearchQueryAnchors anchors,
-        string[] mandatoryFragments,
-        string[] advisorySeeds,
         PreparedLiteralQuery? literal,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
         PreparedOrderedAnchor[][] orderedAnchorGroups,
@@ -42,8 +42,6 @@ internal sealed class PreparedSearchQuery
         ResolvedCaseMode = resolvedCaseMode;
         RegexPlan = regexPlan;
         Anchors = anchors;
-        MandatoryFragments = mandatoryFragments;
-        AdvisorySeeds = advisorySeeds;
         Literal = literal;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
         OrderedAnchorGroups = orderedAnchorGroups;
@@ -55,8 +53,6 @@ internal sealed class PreparedSearchQuery
     public CaseMode ResolvedCaseMode { get; }
     public RegexExecutionPlan RegexPlan { get; }
     public SearchQueryAnchors Anchors { get; }
-    public string[] MandatoryFragments { get; }
-    public string[] AdvisorySeeds { get; }
     public PreparedLiteralQuery? Literal { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
     public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
@@ -93,6 +89,29 @@ internal sealed class PreparedLiteralQuery(
     public byte[]? LoweredAsciiNeedle { get; } = loweredAsciiNeedle;
     public int[]? AsciiPrefixTable { get; } = asciiPrefixTable;
     public bool IsAscii { get; } = isAscii;
+
+    public static PreparedLiteralQuery? Create(
+        SearchQuery query,
+        CaseMode resolvedCaseMode,
+        string? literalOverride)
+    {
+        var pattern = literalOverride ?? query.Pattern;
+        if ((query.PatternMode != PatternMode.Literal && literalOverride is null) || pattern.Length == 0)
+        {
+            return null;
+        }
+
+        var needle = Encoding.UTF8.GetBytes(pattern);
+        var isAscii = needle.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
+        var loweredAsciiNeedle = resolvedCaseMode == CaseMode.Insensitive && isAscii
+            ? SearchQueryPreparer.LowerAscii(needle)
+            : null;
+        return new PreparedLiteralQuery(
+            needle,
+            loweredAsciiNeedle,
+            loweredAsciiNeedle is null ? null : SearchQueryPreparer.BuildPrefixTable(loweredAsciiNeedle),
+            isAscii);
+    }
 }
 
 internal sealed class PreparedRegexExecution
@@ -136,6 +155,28 @@ internal sealed class PreparedRegexExecution
 
         return fallback;
     }
+
+    public static PreparedRegexExecution Create(
+        SearchQuery query,
+        CaseMode resolvedCaseMode,
+        in RegexExecutionPlan regexPlan)
+    {
+        if (query.PatternMode != PatternMode.Regex || regexPlan.IsExactLiteral)
+        {
+            return None;
+        }
+
+        if (regexPlan.Utf8RegexProgram is { } utf8RegexProgram)
+        {
+            return new PreparedRegexExecution(
+                Utf8RegexEngine.Prepare(utf8RegexProgram, query.TimeoutPolicy),
+                () => RegexVerifier.Prepare(query, resolvedCaseMode));
+        }
+
+        return regexPlan.PreparedFallbackRegex is { } fallbackRegex
+            ? new PreparedRegexExecution(fallbackRegex)
+            : throw new InvalidOperationException("The regex execution plan has no fallback verifier.");
+    }
 }
 
 internal sealed class PreparedMandatoryFragment(
@@ -150,6 +191,35 @@ internal sealed class PreparedMandatoryFragment(
     public byte[] LoweredAsciiBytes { get; } = loweredAsciiBytes;
     public int[] AsciiPrefixTable { get; } = asciiPrefixTable;
     public bool IsAscii { get; } = isAscii;
+
+    public static PreparedMandatoryFragment[] CreateMany(
+        string[] mandatoryTexts,
+        CaseMode resolvedCaseMode)
+    {
+        if (mandatoryTexts.Length == 0)
+        {
+            return [];
+        }
+
+        var prepared = new PreparedMandatoryFragment[mandatoryTexts.Length];
+        for (var i = 0; i < mandatoryTexts.Length; i++)
+        {
+            var text = mandatoryTexts[i];
+            var utf8Bytes = Encoding.UTF8.GetBytes(text);
+            var isAscii = utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
+            var loweredAsciiBytes = resolvedCaseMode == CaseMode.Insensitive && isAscii
+                ? SearchQueryPreparer.LowerAscii(utf8Bytes)
+                : [];
+            prepared[i] = new PreparedMandatoryFragment(
+                text,
+                utf8Bytes,
+                loweredAsciiBytes,
+                SearchQueryPreparer.BuildPrefixTable(loweredAsciiBytes),
+                isAscii);
+        }
+
+        return prepared;
+    }
 }
 
 internal sealed class PreparedOrderedAnchor(
@@ -164,4 +234,32 @@ internal sealed class PreparedOrderedAnchor(
     public int[] AsciiPrefixTable { get; } = asciiPrefixTable;
     public int? MaxGapBytesFromPrevious { get; } = maxGapBytesFromPrevious;
     public bool SameLineFromPrevious { get; } = sameLineFromPrevious;
+
+    public static PreparedOrderedAnchor[][] CreateGroups(SearchOrderedAnchorGroup[] groups)
+    {
+        if (groups.Length == 0)
+        {
+            return [];
+        }
+
+        var prepared = new PreparedOrderedAnchor[groups.Length][];
+        for (var groupIndex = 0; groupIndex < groups.Length; groupIndex++)
+        {
+            var group = groups[groupIndex].Anchors;
+            prepared[groupIndex] = new PreparedOrderedAnchor[group.Length];
+            for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
+            {
+                var anchor = group[anchorIndex];
+                var lowered = anchor.IgnoreCase ? SearchQueryPreparer.LowerAscii(anchor.Utf8Bytes) : null;
+                prepared[groupIndex][anchorIndex] = new PreparedOrderedAnchor(
+                    anchor.Utf8Bytes,
+                    lowered,
+                    lowered is null ? [] : SearchQueryPreparer.BuildPrefixTable(lowered),
+                    anchor.MaxGapBytesFromPrevious,
+                    anchor.SameLineFromPrevious);
+            }
+        }
+
+        return prepared;
+    }
 }

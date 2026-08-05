@@ -954,7 +954,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     !needsUnicodeCaseFoldVerification &&
                     !PassesMandatoryPrecheck(
                         contentBytes,
-                        preparedQuery.MandatoryFragments,
                         preparedQuery.MandatoryFragmentsForPrecheck,
                         preparedQuery.ResolvedCaseMode,
                         searchCancellationToken,
@@ -1251,10 +1250,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, string[] mandatoryFragments, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken, ref long decodedChars, out string? predecodedText)
+    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken, ref long decodedChars, out string? predecodedText)
     {
         predecodedText = null;
-        if (mandatoryFragments.Length == 0)
+        if (preparedMandatoryFragments.Length == 0)
         {
             return true;
         }
@@ -1287,10 +1286,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             predecodedText = Encoding.UTF8.GetString(contentBytes);
             decodedChars += predecodedText.Length;
-            foreach (var fragment in mandatoryFragments)
+            foreach (var fragment in preparedMandatoryFragments)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (predecodedText.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) < 0)
+                if (predecodedText.IndexOf(fragment.Text, StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     return false;
                 }

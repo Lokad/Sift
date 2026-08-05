@@ -792,19 +792,13 @@ internal static class RegexFragmentAnalyzer
                 return NodeResult.None;
             }
 
-            var current = _pattern[_index++];
-            if (current is >= 'a' and <= 'z')
-            {
-                current = (char)(current - 32);
-            }
-
-            if (current is < 'A' or > 'Z')
+            if (!RegexEscapeDecoder.TryDecodeControl(_pattern[_index++], out var control))
             {
                 _unsupported = true;
                 return NodeResult.None;
             }
 
-            return NodeResult.Literal(((char)(current - 'A' + 1)).ToString());
+            return NodeResult.Literal(control.ToString());
         }
 
         private NodeResult ParseHexEscape(int digits)
@@ -815,26 +809,13 @@ internal static class RegexFragmentAnalyzer
                 return NodeResult.None;
             }
 
-            var value = 0;
-            for (var i = 0; i < digits; i++)
+            if (!RegexEscapeDecoder.TryDecodeHex(_pattern.AsSpan(_index, digits), out var value))
             {
-                var current = _pattern[_index++];
-                var hex = current switch
-                {
-                    >= '0' and <= '9' => current - '0',
-                    >= 'a' and <= 'f' => current - 'a' + 10,
-                    >= 'A' and <= 'F' => current - 'A' + 10,
-                    _ => -1
-                };
-                if (hex < 0)
-                {
-                    _unsupported = true;
-                    return NodeResult.None;
-                }
-
-                value = (value << 4) | hex;
+                _unsupported = true;
+                return NodeResult.None;
             }
 
+            _index += digits;
             if (!Rune.IsValid(value))
             {
                 // Lone UTF-16 surrogates are legal regex input but not Unicode scalars.
@@ -967,29 +948,13 @@ internal static class RegexFragmentAnalyzer
 
         private static bool ParseEscapedChar(char escaped, out char literal)
         {
+            if (RegexEscapeDecoder.TryDecodeSimple(escaped, out literal))
+            {
+                return true;
+            }
+
             switch (escaped)
             {
-                case 'n':
-                    literal = '\n';
-                    return true;
-                case 'r':
-                    literal = '\r';
-                    return true;
-                case 't':
-                    literal = '\t';
-                    return true;
-                case 'a':
-                    literal = '\a';
-                    return true;
-                case 'f':
-                    literal = '\f';
-                    return true;
-                case 'v':
-                    literal = '\v';
-                    return true;
-                case 'e':
-                    literal = '\u001B';
-                    return true;
                 case '\\':
                 case '.':
                 case '+':

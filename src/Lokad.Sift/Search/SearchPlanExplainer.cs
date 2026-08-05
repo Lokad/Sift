@@ -17,8 +17,8 @@ internal sealed class SearchPlanExplainer(
         var matcher = PathFilterMatcher.Prepare(pathFilter);
         var regexPlan = preparedQuery.RegexPlan;
         var anchors = preparedQuery.Anchors;
-        var mandatoryFragments = preparedQuery.MandatoryFragments;
-        var advisorySeeds = preparedQuery.AdvisorySeeds;
+        var mandatoryFragments = preparedQuery.Anchors.MandatoryTexts;
+        var advisorySeeds = preparedQuery.Anchors.AdvisoryTexts;
         var scopeDocuments = 0;
         long scopeBytes = 0;
         var selected = new Dictionary<(string Text, int ByteLength), int>();

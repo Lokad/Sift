@@ -460,15 +460,14 @@ internal static class Utf8RegexEngine
                     return TryReadControlEscape(out value);
             }
 
+            if (RegexEscapeDecoder.TryDecodeSimple(escaped, out var simple))
+            {
+                value = (byte)simple;
+                return true;
+            }
+
             value = escaped switch
             {
-                'a' => (byte)'\a',
-                'e' => 0x1B,
-                'f' => (byte)'\f',
-                'n' => (byte)'\n',
-                'r' => (byte)'\r',
-                't' => (byte)'\t',
-                'v' => (byte)'\v',
                 '\\' => (byte)'\\',
                 '.' => (byte)'.',
                 '+' => (byte)'+',
@@ -499,24 +498,13 @@ internal static class Utf8RegexEngine
                 return false;
             }
 
-            var parsed = 0;
-            for (var i = 0; i < digits; i++)
-            {
-                var hex = ParseHexDigit(_pattern[_index + i]);
-                if (hex < 0)
-                {
-                    return false;
-                }
-
-                parsed = (parsed << 4) | hex;
-            }
-
-            _index += digits;
-            if ((uint)parsed > 0x7F)
+            if (!RegexEscapeDecoder.TryDecodeHex(_pattern.AsSpan(_index, digits), out var parsed) ||
+                (uint)parsed > 0x7F)
             {
                 return false;
             }
 
+            _index += digits;
             value = (byte)parsed;
             return true;
         }
@@ -529,24 +517,13 @@ internal static class Utf8RegexEngine
                 return false;
             }
 
-            var parsed = 0;
-            for (var i = 0; i < 4; i++)
-            {
-                var hex = ParseHexDigit(_pattern[_index + i]);
-                if (hex < 0)
-                {
-                    return false;
-                }
-
-                parsed = (parsed << 4) | hex;
-            }
-
-            _index += 4;
-            if ((uint)parsed > 0x7F)
+            if (!RegexEscapeDecoder.TryDecodeHex(_pattern.AsSpan(_index, 4), out var parsed) ||
+                (uint)parsed > 0x7F)
             {
                 return false;
             }
 
+            _index += 4;
             value = (byte)parsed;
             return true;
         }
@@ -559,31 +536,13 @@ internal static class Utf8RegexEngine
                 return false;
             }
 
-            var current = _pattern[_index++];
-            if (current is >= 'A' and <= 'Z')
+            if (RegexEscapeDecoder.TryDecodeControl(_pattern[_index++], out var control))
             {
-                value = (byte)(current - 'A' + 1);
-                return true;
-            }
-
-            if (current is >= 'a' and <= 'z')
-            {
-                value = (byte)(current - 'a' + 1);
+                value = (byte)control;
                 return true;
             }
 
             return false;
-        }
-
-        private static int ParseHexDigit(char value)
-        {
-            return value switch
-            {
-                >= '0' and <= '9' => value - '0',
-                >= 'a' and <= 'f' => value - 'a' + 10,
-                >= 'A' and <= 'F' => value - 'A' + 10,
-                _ => -1
-            };
         }
 
         private bool TryParseEscapeClass(out bool[]? set, out bool negated)
