@@ -96,7 +96,8 @@ internal sealed class SearchPlanExplainer(
         var needsUnicodeDecode =
             RegexExecutionPlanner.NeedsUnicodeDecode(
                 query,
-                mandatoryFragments,
+                preparedQuery.Pattern,
+                preparedQuery.MandatoryTexts,
                 resolvedCaseMode,
                 regexPlan) ||
             usesUnicodeFallback;

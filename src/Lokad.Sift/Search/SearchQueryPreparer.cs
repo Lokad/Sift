@@ -1,3 +1,4 @@
+using System.Text;
 using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Search;
@@ -92,8 +93,11 @@ internal static class SearchQueryPreparer
                 regexPlan,
                 anchors,
                 PreparedLiteralQuery.Create(query, resolvedCaseMode, regexPlan.ExactLiteral),
+                new PreparedSearchText(query.Pattern, Encoding.UTF8.GetBytes(query.Pattern)),
                 mandatoryTexts,
                 advisoryTexts,
+                PreparedSearchText.CreateMany(
+                    regexPlan.Utf8RegexProgram?.LeadingLiteralSet ?? []),
                 usesLiteralVerifier
                     ? []
                     : PreparedMandatoryFragment.CreateMany(mandatoryTexts, resolvedCaseMode),

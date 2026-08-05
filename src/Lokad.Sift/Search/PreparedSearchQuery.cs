@@ -35,8 +35,10 @@ internal sealed class PreparedSearchQuery
         RegexExecutionPlan regexPlan,
         SearchQueryAnchors anchors,
         PreparedLiteralQuery? literal,
+        PreparedSearchText pattern,
         PreparedSearchText[] mandatoryTexts,
         PreparedSearchText[] advisoryTexts,
+        PreparedSearchText[] leadingLiterals,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
         PreparedOrderedAnchor[][] orderedAnchorGroups,
         Func<PreparedRegexExecution> prepareRegexExecution)
@@ -45,8 +47,10 @@ internal sealed class PreparedSearchQuery
         RegexPlan = regexPlan;
         Anchors = anchors;
         Literal = literal;
+        Pattern = pattern;
         MandatoryTexts = mandatoryTexts;
         AdvisoryTexts = advisoryTexts;
+        LeadingLiterals = leadingLiterals;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
         OrderedAnchorGroups = orderedAnchorGroups;
         _regexExecution = new Lazy<PreparedRegexExecution>(
@@ -58,8 +62,10 @@ internal sealed class PreparedSearchQuery
     public RegexExecutionPlan RegexPlan { get; }
     public SearchQueryAnchors Anchors { get; }
     public PreparedLiteralQuery? Literal { get; }
+    public PreparedSearchText Pattern { get; }
     public PreparedSearchText[] MandatoryTexts { get; }
     public PreparedSearchText[] AdvisoryTexts { get; }
+    public PreparedSearchText[] LeadingLiterals { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
     public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
 
@@ -127,6 +133,8 @@ internal sealed class PreparedSearchText(string text, byte[] utf8Bytes)
 {
     public string Text { get; } = text;
     public byte[] Utf8Bytes { get; } = utf8Bytes;
+    public bool IsAscii { get; } =
+        utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
 
     public static PreparedSearchText[] CreateMany(string[] values)
     {
@@ -134,6 +142,19 @@ internal sealed class PreparedSearchText(string text, byte[] utf8Bytes)
         for (var i = 0; i < values.Length; i++)
         {
             prepared[i] = new PreparedSearchText(values[i], Encoding.UTF8.GetBytes(values[i]));
+        }
+
+        return prepared;
+    }
+
+    public static PreparedSearchText[] CreateMany(byte[][] values)
+    {
+        var prepared = new PreparedSearchText[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            prepared[i] = new PreparedSearchText(
+                Encoding.UTF8.GetString(values[i]),
+                values[i]);
         }
 
         return prepared;

@@ -30,7 +30,7 @@ internal static class LiteralQueryPlanner
             : [direct];
     }
 
-    private static LiteralPlan? TryCreateIndexedCandidate(
+    public static LiteralPlan? TryCreateIndexedCandidate(
         MappedSegment segment,
         int scopeDocuments,
         long scopeBytes,
@@ -68,7 +68,13 @@ internal static class LiteralQueryPlanner
 
             if (!segment.TryGetPostings(pair, gram, out var postings, out var docFreq))
             {
-                return LiteralPlan.Missing(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, pair, gramLength);
+                return LiteralPlan.Missing(
+                    resolvedCaseMode,
+                    scopeDocuments,
+                    scopeBytes,
+                    patternBytes.Length,
+                    pair,
+                    gramLength);
             }
 
             var seen = false;
@@ -98,7 +104,14 @@ internal static class LiteralQueryPlanner
         var selected = selectAllGrams
             ? grams.ToArray()
             : TrimSelectedGrams(grams, scopeDocuments, options);
-        return LiteralPlan.Intersection(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, selected, pair, gramLength);
+        return LiteralPlan.Intersection(
+            resolvedCaseMode,
+            scopeDocuments,
+            scopeBytes,
+            patternBytes.Length,
+            selected,
+            pair,
+            gramLength);
     }
 
     private static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)
@@ -158,7 +171,7 @@ internal readonly record struct LiteralPlan(
     int ScopeDocuments,
     long ScopeBytes,
     LiteralCandidateMode CandidateMode,
-    string MandatoryFragment,
+    int SeedByteLength,
     SelectedGram[] SelectedGrams,
     IndexRegionPair IndexPair,
     int GramLength,
@@ -169,47 +182,47 @@ internal readonly record struct LiteralPlan(
     public bool IsMissingGram => CandidateMode == LiteralCandidateMode.Missing;
 
     public static LiteralPlan Direct(CaseMode resolvedCaseMode, int scopeDocuments, long scopeBytes)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Direct, string.Empty, [], default, 0, null);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Direct, 0, [], default, 0, null);
 
     public static LiteralPlan Missing(
         CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
-        string mandatoryFragment,
+        int seedByteLength,
         IndexRegionPair pair,
         int gramLength)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Missing, mandatoryFragment, [], pair, gramLength, null);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Missing, seedByteLength, [], pair, gramLength, null);
 
     public static LiteralPlan Intersection(
         CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
-        string mandatoryFragment,
+        int seedByteLength,
         SelectedGram[] selectedGrams,
         IndexRegionPair pair,
         int gramLength)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Intersection, mandatoryFragment, selectedGrams, pair, gramLength, null);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Intersection, seedByteLength, selectedGrams, pair, gramLength, null);
 
     public static LiteralPlan Union(
         CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
-        string mandatoryFragment,
+        int seedByteLength,
         SelectedGram[] selectedGrams,
         IndexRegionPair pair,
         int gramLength)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Union, mandatoryFragment, selectedGrams, pair, gramLength, null);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.Union, seedByteLength, selectedGrams, pair, gramLength, null);
 
     public static LiteralPlan UnionOfIntersections(
         CaseMode resolvedCaseMode,
         int scopeDocuments,
         long scopeBytes,
-        string mandatoryFragment,
+        int seedByteLength,
         SelectedGram[] selectedGrams,
         IndexRegionPair pair,
         int gramLength,
         int[] unionGroupLengths)
-        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.UnionOfIntersections, mandatoryFragment, selectedGrams, pair, gramLength, unionGroupLengths);
+        => new(resolvedCaseMode, scopeDocuments, scopeBytes, LiteralCandidateMode.UnionOfIntersections, seedByteLength, selectedGrams, pair, gramLength, unionGroupLengths);
 }
 
 internal enum LiteralCandidateMode

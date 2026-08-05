@@ -1,4 +1,3 @@
-using System.Text;
 using Lokad.Sift;
 
 namespace Lokad.Sift.Search;
@@ -34,7 +33,12 @@ internal static class RegexExecutionPlanner
         return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, resolvedCaseMode));
     }
 
-    public static bool NeedsUnicodeDecode(SearchQuery query, string[] mandatoryFragments, CaseMode resolvedCaseMode, in RegexExecutionPlan regexPlan)
+    public static bool NeedsUnicodeDecode(
+        SearchQuery query,
+        PreparedSearchText pattern,
+        PreparedSearchText[] mandatoryFragments,
+        CaseMode resolvedCaseMode,
+        in RegexExecutionPlan regexPlan)
     {
         if (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral && !regexPlan.UsesUtf8Regex)
         {
@@ -51,11 +55,9 @@ internal static class RegexExecutionPlanner
             return true;
         }
 
-        var patternBytes = Encoding.UTF8.GetBytes(query.Pattern);
-        var asciiPattern = patternBytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
         if (query.WholeLine)
         {
-            return !asciiPattern;
+            return !pattern.IsAscii;
         }
 
         if (resolvedCaseMode == CaseMode.Sensitive)
@@ -65,7 +67,7 @@ internal static class RegexExecutionPlanner
 
         for (var i = 0; i < mandatoryFragments.Length; i++)
         {
-            if (Encoding.UTF8.GetBytes(mandatoryFragments[i]).AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) >= 0)
+            if (!mandatoryFragments[i].IsAscii)
             {
                 return true;
             }

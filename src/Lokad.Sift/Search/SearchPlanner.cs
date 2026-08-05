@@ -112,7 +112,13 @@ internal static class SearchPlanner
         return estimate;
     }
 
-    internal static bool ShouldPreferLiteralDirectScan(int scopeDocuments, long scopeBytes, int patternBytes, ReadOnlySpan<SelectedGram> selected, SiftOptions options)
+    internal static bool ShouldPreferLiteralDirectScan(
+        int scopeDocuments,
+        long scopeBytes,
+        int patternBytes,
+        ReadOnlySpan<SelectedGram> selected,
+        double estimatedCandidates,
+        SiftOptions options)
     {
         if (selected.Length == 0)
         {
@@ -124,7 +130,6 @@ internal static class SearchPlanner
             return true;
         }
 
-        var estimatedCandidates = EstimateCandidateUpperBound(selected, scopeDocuments);
         if (options.DirectScanCandidateDensityThreshold > 0 &&
             estimatedCandidates >= Math.Ceiling(scopeDocuments * options.DirectScanCandidateDensityThreshold))
         {
@@ -408,8 +413,10 @@ internal readonly record struct SearchQueryFeatures(
     public SearchQueryAnchors Anchors => Prepared.Anchors;
     public RegexExecutionPlan RegexPlan => Prepared.RegexPlan;
     public PreparedLiteralQuery? Literal => Prepared.Literal;
+    public PreparedSearchText Pattern => Prepared.Pattern;
     public PreparedSearchText[] MandatoryTexts => Prepared.MandatoryTexts;
     public PreparedSearchText[] AdvisoryTexts => Prepared.AdvisoryTexts;
+    public PreparedSearchText[] LeadingLiterals => Prepared.LeadingLiterals;
     public bool IsLiteralLike => Query.PatternMode == PatternMode.Literal || RegexPlan.IsExactLiteral;
     public bool HasMandatoryFragments => MandatoryTexts.Length > 0;
 }
