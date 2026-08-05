@@ -1,4 +1,3 @@
-using System.Text;
 using Lokad.Sift;
 using Lokad.Sift.Storage;
 
@@ -253,22 +252,5 @@ internal readonly record struct SelectedGram(
     int Gram,
     int GramLength,
     int DocFreq,
-    int PostingsBytes)
-{
-    public string Text
-    {
-        get
-        {
-            Span<byte> bytes = stackalloc byte[GramLength];
-            var value = Gram;
-            for (var i = GramLength - 1; i >= 0; i--)
-            {
-                bytes[i] = (byte)(value & 0xFF);
-                value >>= 8;
-            }
-
-            return Encoding.UTF8.GetString(bytes);
-        }
-    }
-}
+    int PostingsBytes);
 

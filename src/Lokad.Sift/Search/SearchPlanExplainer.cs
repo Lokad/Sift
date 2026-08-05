@@ -21,7 +21,7 @@ internal sealed class SearchPlanExplainer(
         var advisorySeeds = preparedQuery.Anchors.AdvisoryTexts;
         var scopeDocuments = 0;
         long scopeBytes = 0;
-        var selected = new Dictionary<(string Text, int ByteLength), int>();
+        var selected = new Dictionary<(uint PackedValue, int ByteLength), int>();
         var usesIndex = false;
         var usesUnicodeFallback = false;
         SearchCandidateKind? candidateKind = null;
@@ -70,9 +70,7 @@ internal sealed class SearchPlanExplainer(
             estimatedCost += chosenPlan.EstimatedCost;
             foreach (var gram in chosenPlan.SelectedNgrams)
             {
-                var key = (gram.Text, gram.ByteLength);
-                selected.TryGetValue(key, out var documentFrequency);
-                selected[key] = checked(documentFrequency + gram.DocumentFrequency);
+                SelectedNgramMerger.Add(selected, gram);
             }
 
             foreach (var alternative in segmentPlan.ContentPlan.Alternatives)
@@ -105,14 +103,7 @@ internal sealed class SearchPlanExplainer(
             query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral ||
             query.WholeLine ||
             query.Multiline;
-        var selectedNgrams = selected
-            .Select(static pair => new SelectedNgram(
-                pair.Key.Text,
-                pair.Key.ByteLength,
-                pair.Value))
-            .OrderBy(static gram => gram.ByteLength)
-            .ThenBy(static gram => gram.Text, StringComparer.Ordinal)
-            .ToArray();
+        var selectedNgrams = SelectedNgramMerger.Materialize(selected);
         var resolvedCandidateKind = candidateKind ??
             SearchPlanner.GetCandidateKind(selectedNgrams, usesIndex);
         var resolvedCandidateCombination = candidateCombination ??

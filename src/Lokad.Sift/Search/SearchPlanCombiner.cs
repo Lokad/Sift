@@ -171,36 +171,7 @@ internal static class SearchPlanCombiner
         IReadOnlyList<SelectedNgram> left,
         IReadOnlyList<SelectedNgram> right)
         {
-            if (left.Count == 0)
-            {
-                return [.. right];
-            }
-
-            if (right.Count == 0)
-            {
-                return [.. left];
-            }
-
-            var merged = new Dictionary<(string Text, int ByteLength), int>();
-            for (var i = 0; i < left.Count; i++)
-            {
-                var key = (left[i].Text, left[i].ByteLength);
-                merged.TryGetValue(key, out var documentFrequency);
-                merged[key] = checked(documentFrequency + left[i].DocumentFrequency);
-            }
-
-            for (var i = 0; i < right.Count; i++)
-            {
-                var key = (right[i].Text, right[i].ByteLength);
-                merged.TryGetValue(key, out var documentFrequency);
-                merged[key] = checked(documentFrequency + right[i].DocumentFrequency);
-            }
-
-            return merged
-                .Select(static pair => new SelectedNgram(pair.Key.Text, pair.Key.ByteLength, pair.Value))
-                .OrderBy(static gram => gram.ByteLength)
-                .ThenBy(static gram => gram.Text, StringComparer.Ordinal)
-                .ToArray();
+            return SelectedNgramMerger.Merge(left, right);
         }
 
         static double? SumNullable(double? left, double? right)

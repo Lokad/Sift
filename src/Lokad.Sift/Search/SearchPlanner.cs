@@ -15,7 +15,10 @@ internal static class SearchPlanner
         var selected = new SelectedNgram[grams.Length];
         for (var i = 0; i < grams.Length; i++)
         {
-            selected[i] = new SelectedNgram(grams[i].Text, grams[i].GramLength, grams[i].DocFreq);
+            selected[i] = new SelectedNgram(
+                (uint)grams[i].Gram,
+                grams[i].GramLength,
+                grams[i].DocFreq);
         }
 
         return selected;

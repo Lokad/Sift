@@ -9,6 +9,23 @@ namespace Lokad.Sift.Tests;
 public sealed class SearchIntegrationTests
 {
     [Fact]
+    public void SelectedNgramMergingPreservesByteIdentity()
+    {
+        var left = new SelectedNgram(0xA978, byteLength: 2, documentFrequency: 3);
+        var right = new SelectedNgram(0xB178, byteLength: 2, documentFrequency: 5);
+
+        var merged = SelectedNgramMerger.Merge([left], [right]);
+
+        Assert.Equal(left.Text, right.Text);
+        Assert.NotEqual(left.Hex, right.Hex);
+        Assert.Equal(2, merged.Length);
+        Assert.Collection(
+            merged,
+            gram => Assert.Equal(0xA978u, gram.PackedValue),
+            gram => Assert.Equal(0xB178u, gram.PackedValue));
+    }
+
+    [Fact]
     public async Task SearchRejectsInvalidModesAndExcessiveParallelism()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions { MaxSegmentParallelism = 4 });

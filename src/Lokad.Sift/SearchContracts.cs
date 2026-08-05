@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Lokad.Sift;
 
 public enum PatternMode
@@ -242,7 +244,53 @@ public readonly record struct RawHit
         _owner);
 }
 
-public readonly record struct SelectedNgram(string Text, int ByteLength, int DocumentFrequency);
+public readonly record struct SelectedNgram
+{
+    internal SelectedNgram(uint packedValue, int byteLength, int documentFrequency)
+    {
+        PackedValue = packedValue;
+        ByteLength = byteLength;
+        DocumentFrequency = documentFrequency;
+    }
+
+    /// <summary>Gets the n-gram bytes packed in big-endian order.</summary>
+    public uint PackedValue { get; }
+    public int ByteLength { get; }
+    public int DocumentFrequency { get; }
+
+    /// <summary>Gets a best-effort UTF-8 rendering for diagnostics.</summary>
+    /// <remarks>Use <see cref="PackedValue"/> and <see cref="ByteLength"/> as the lossless identity.</remarks>
+    public string Text
+    {
+        get
+        {
+            Span<byte> bytes = stackalloc byte[ByteLength];
+            WriteBytes(bytes);
+            return Encoding.UTF8.GetString(bytes);
+        }
+    }
+
+    /// <summary>Gets a lossless hexadecimal rendering of the n-gram bytes.</summary>
+    public string Hex
+    {
+        get
+        {
+            Span<byte> bytes = stackalloc byte[ByteLength];
+            WriteBytes(bytes);
+            return Convert.ToHexString(bytes);
+        }
+    }
+
+    private void WriteBytes(Span<byte> destination)
+    {
+        var value = PackedValue;
+        for (var i = ByteLength - 1; i >= 0; i--)
+        {
+            destination[i] = (byte)(value & 0xFF);
+            value >>= 8;
+        }
+    }
+}
 
 public enum SearchPatternKind
 {
