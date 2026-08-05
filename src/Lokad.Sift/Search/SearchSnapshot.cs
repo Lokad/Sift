@@ -78,6 +78,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IDocumentKeyCollector collector,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(collector);
         var guardedCollector = new GuardedDocumentKeyCollector(collector);
         try
         {
@@ -155,6 +156,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(collector);
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
         var guardedCollector = new GuardedHitCollector(collector);
@@ -704,6 +706,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private void ValidateQuery(SearchQuery query)
     {
+        ArgumentNullException.ThrowIfNull(query);
         if (!Enum.IsDefined(query.PatternMode))
         {
             throw new ArgumentOutOfRangeException(nameof(query), "PatternMode is invalid.");
@@ -762,6 +765,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private void ValidatePathFilter(PathFilter pathFilter)
     {
+        ArgumentNullException.ThrowIfNull(pathFilter);
         long totalCharacters = 0;
         ValidatePathPattern(pathFilter.PathPrefix);
         ValidatePathPattern(pathFilter.PathRegex);

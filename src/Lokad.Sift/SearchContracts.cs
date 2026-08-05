@@ -73,6 +73,7 @@ public sealed record SearchQuery
         int maxHitsPerDocument,
         long maxElapsedMilliseconds)
     {
+        ArgumentNullException.ThrowIfNull(pattern);
         Pattern = pattern;
         PatternMode = patternMode;
         CaseMode = caseMode;
@@ -153,13 +154,21 @@ public sealed class PathFilter
     public IReadOnlyList<string> IncludeGlobs
     {
         get => _includeGlobs;
-        init => _includeGlobs = PublicResultCollection.CopyOf(value);
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _includeGlobs = PublicResultCollection.CopyOf(value);
+        }
     }
 
     public IReadOnlyList<string> ExcludeGlobs
     {
         get => _excludeGlobs;
-        init => _excludeGlobs = PublicResultCollection.CopyOf(value);
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _excludeGlobs = PublicResultCollection.CopyOf(value);
+        }
     }
 
     public string? PathRegex { get; init; }

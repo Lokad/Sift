@@ -4,6 +4,7 @@ internal static class DocumentPath
 {
     public static string Normalize(string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
         if (path.Length == 0 || path.AsSpan().Trim().IsEmpty)
         {
             throw new ArgumentException("Document path cannot be empty or whitespace.", nameof(path));

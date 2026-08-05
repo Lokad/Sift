@@ -56,12 +56,14 @@ public sealed class SiftIndex : ISiftIndex
     }
 
     public SiftIndex(string rootPath, SiftOptions options)
-        : this(new CorpusStorage(rootPath, options.MaximumPhysicalBytes), options)
+        : this(CreateStorage(rootPath, options), options)
     {
     }
 
     internal SiftIndex(ISiftStorage storage, SiftOptions options)
     {
+        ArgumentNullException.ThrowIfNull(storage);
+        ArgumentNullException.ThrowIfNull(options);
         _options = options;
         SiftOptionsValidator.Validate(_options);
         _retainedIndexingWorkspaceLease = options.RetainIndexingWorkspace
@@ -95,6 +97,7 @@ public sealed class SiftIndex : ISiftIndex
 
     public static SiftIndex CreateInMemory(SiftOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
         return new SiftIndex(new InMemorySiftStorage(), options);
     }
 
@@ -146,6 +149,8 @@ public sealed class SiftIndex : ISiftIndex
         BuildOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
@@ -158,6 +163,8 @@ public sealed class SiftIndex : ISiftIndex
         BuildOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(options);
         return RunBuild(
             operationCancellation => BuildCore(
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
@@ -444,6 +451,7 @@ public sealed class SiftIndex : ISiftIndex
 
     public bool ShouldCompact(CompactOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         IndexCompactor.ValidateOptions(options);
@@ -476,6 +484,7 @@ public sealed class SiftIndex : ISiftIndex
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(upserts);
         return RunUpdate(
             (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
                 new ValueTask<StreamedDocuments>(IndexBuilder.StreamDocuments(
@@ -511,6 +520,7 @@ public sealed class SiftIndex : ISiftIndex
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(upserts);
         return RunUpdate(
             (forbiddenPaths, rejectedUpsertPolicy, preparePartition, publishPartition, operationCancellation) =>
                 IndexBuilder.StreamDocumentsAsync(
@@ -555,6 +565,8 @@ public sealed class SiftIndex : ISiftIndex
         UpdateOptions options,
         CancellationToken callerCancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(deletions);
+        ArgumentNullException.ThrowIfNull(options);
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         ValidateUpdateOptions(options);
@@ -843,6 +855,7 @@ public sealed class SiftIndex : ISiftIndex
 
     public Task<CompactStats> Compact(CompactOptions options, CancellationToken callerCancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(options);
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         IndexCompactor.ValidateOptions(options);
@@ -905,6 +918,13 @@ public sealed class SiftIndex : ISiftIndex
         _validationGate.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
+    }
+
+    private static CorpusStorage CreateStorage(string rootPath, SiftOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(rootPath);
+        ArgumentNullException.ThrowIfNull(options);
+        return new CorpusStorage(rootPath, options.MaximumPhysicalBytes);
     }
 
     private void ScheduleReclamationIfPending()

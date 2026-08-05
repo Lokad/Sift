@@ -89,6 +89,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         OverlayUpdateOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(upserts);
+        ArgumentNullException.ThrowIfNull(deletions);
+        ArgumentNullException.ThrowIfNull(options);
         if (_stateLock.IsReadLockHeld)
         {
             throw new InvalidOperationException(
@@ -349,6 +352,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(baseIndex);
+        ArgumentNullException.ThrowIfNull(options);
         if (options.ExpectedIdentity is { } expectedIdentity &&
             (expectedIdentity.CorpusId != _baseIdentity.CorpusId ||
              expectedIdentity.ContentRevision != _baseIdentity.ContentRevision))
@@ -369,6 +374,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(options);
         return ApplyDeltaToCore(target, options, cancellationToken);
     }
 
@@ -381,6 +388,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         IDocumentKeyCollector collector,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(collector);
         using var state = BeginRead();
         var hiddenPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
         hiddenPaths.UnionWith(_overlayDocuments.Keys);
@@ -421,6 +429,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         IHitCollector collector,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(collector);
         using var state = BeginRead();
         var watch = Stopwatch.StartNew();
 

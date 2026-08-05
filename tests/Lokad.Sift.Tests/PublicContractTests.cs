@@ -97,6 +97,45 @@ public sealed class PublicContractTests
     }
 
     [Fact]
+    public void PublicEntryPointsRejectNullArguments()
+    {
+        Assert.Equal("path", Assert.Throws<ArgumentNullException>(() => new DocumentKey(null!)).ParamName);
+        Assert.Equal("pattern", Assert.Throws<ArgumentNullException>(() => new SearchQuery(null!)).ParamName);
+        Assert.Equal(
+            "value",
+            Assert.Throws<ArgumentNullException>(() => new PathFilter { IncludeGlobs = null! }).ParamName);
+        Assert.Equal(
+            "options",
+            Assert.Throws<ArgumentNullException>(() => SiftIndex.CreateInMemory(null!)).ParamName);
+
+        using var index = SiftIndex.CreateInMemory();
+        Assert.Equal(
+            "documents",
+            Assert.Throws<ArgumentNullException>(() =>
+            {
+                _ = index.Build((IDocumentSource)null!, new BuildOptions(), CancellationToken.None);
+            }).ParamName);
+        Assert.Equal(
+            "options",
+            Assert.Throws<ArgumentNullException>(() =>
+            {
+                _ = index.Build(new InMemoryDocumentSource([]), null!, CancellationToken.None);
+            }).ParamName);
+        using var snapshot = index.OpenSnapshot();
+        Assert.Equal(
+            "query",
+            Assert.Throws<ArgumentNullException>(() => snapshot.Explain(null!, new PathFilter())).ParamName);
+        Assert.Equal(
+            "pathFilter",
+            Assert.Throws<ArgumentNullException>(() =>
+                snapshot.Explain(new SearchQuery("text"), null!)).ParamName);
+        Assert.Equal(
+            "collector",
+            Assert.Throws<ArgumentNullException>(() =>
+                snapshot.Search(new SearchQuery("text"), new PathFilter(), null!)).ParamName);
+    }
+
+    [Fact]
     public void LargeOperationResultsAreReferenceTypes()
     {
         Assert.False(typeof(SearchPlan).IsValueType);
