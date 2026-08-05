@@ -6,7 +6,7 @@ namespace Lokad.Sift.Tests;
 public sealed class CandidateGenerationTests
 {
     [Fact]
-    public async Task PostingsCodecAdaptiveIntersectionMatchesPlainEncoding()
+    public void PostingsCodecAdaptiveIntersectionMatchesPlainEncoding()
     {
         var right = CreateRange(0, 1536, 3);
         var payload = PostingsCodec.Encode(right);
@@ -18,7 +18,7 @@ public sealed class CandidateGenerationTests
     }
 
     [Fact]
-    public async Task PostingsCodecAdaptiveIntersectionMatchesCheckpointedEncoding()
+    public void PostingsCodecAdaptiveIntersectionMatchesCheckpointedEncoding()
     {
         var right = CreateRange(0, 5000, 2);
         var payload = PostingsCodec.Encode(right);
@@ -30,7 +30,7 @@ public sealed class CandidateGenerationTests
     }
 
     [Fact]
-    public async Task PostingsCodecAdaptiveIntersectionRejectsDisjointCheckpointedRanges()
+    public void PostingsCodecAdaptiveIntersectionRejectsDisjointCheckpointedRanges()
     {
         var right = CreateRange(10_000, 5000, 1);
         var payload = PostingsCodec.Encode(right);
