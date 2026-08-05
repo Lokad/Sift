@@ -839,9 +839,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             cache,
             matcher,
             query,
-            preparedQuery.ResolvedCaseMode,
-            preparedQuery.Anchors,
-            preparedQuery.RegexPlan,
+            preparedQuery,
             _options,
             workerCancellationToken);
         var scope = segmentPlan.Scope;

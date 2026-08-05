@@ -9,9 +9,7 @@ internal static class SearchPlanner
         SegmentCache cache,
         PathFilterMatcher matcher,
         SearchQuery query,
-        CaseMode resolvedCaseMode,
-        in SearchQueryAnchors anchors,
-        in RegexExecutionPlan regexPlan,
+        PreparedSearchQuery preparedQuery,
         SiftOptions options,
         CancellationToken cancellationToken)
     {
@@ -23,7 +21,7 @@ internal static class SearchPlanner
             out var prefixDocuments,
             out var pathIndexCandidates,
             out var pathVerificationKind);
-        var contentPlan = CreatePlan(cache.Segment, scope, query, resolvedCaseMode, anchors, regexPlan, options);
+        var contentPlan = CreatePlan(cache.Segment, scope, query, preparedQuery, options);
         return new SegmentSearchPlan(
             scope,
             contentPlan,
@@ -33,15 +31,11 @@ internal static class SearchPlanner
             EstimatePathFilterCost(prefixDocuments, pathIndexCandidates, scope.Count, matcher.UsesPathIndex, pathVerificationKind));
     }
 
-    public static SearchPlannerDecision CreatePlan(MappedSegment segment, SegmentScope scope, SearchQuery query, CaseMode resolvedCaseMode, in SearchQueryAnchors anchors, in RegexExecutionPlan regexPlan, SiftOptions options)
+    public static SearchPlannerDecision CreatePlan(MappedSegment segment, SegmentScope scope, SearchQuery query, PreparedSearchQuery preparedQuery, SiftOptions options)
     {
         var features = new SearchQueryFeatures(
             query,
-            resolvedCaseMode,
-            anchors,
-            regexPlan,
-            query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral,
-            anchors.HasMandatoryTexts);
+            preparedQuery);
         var candidates = SearchPlanCandidateBuilder.Enumerate(segment, scope, in features, options);
         var scored = SearchPlanScorer.Score(candidates);
         var chosen = SearchPlanScorer.ChooseBest(scored);
@@ -408,11 +402,17 @@ internal readonly record struct ScopeMetrics(
 
 internal readonly record struct SearchQueryFeatures(
     SearchQuery Query,
-    CaseMode ResolvedCaseMode,
-    SearchQueryAnchors Anchors,
-    RegexExecutionPlan RegexPlan,
-    bool IsLiteralLike,
-    bool HasMandatoryFragments);
+    PreparedSearchQuery Prepared)
+{
+    public CaseMode ResolvedCaseMode => Prepared.ResolvedCaseMode;
+    public SearchQueryAnchors Anchors => Prepared.Anchors;
+    public RegexExecutionPlan RegexPlan => Prepared.RegexPlan;
+    public PreparedLiteralQuery? Literal => Prepared.Literal;
+    public PreparedSearchText[] MandatoryTexts => Prepared.MandatoryTexts;
+    public PreparedSearchText[] AdvisoryTexts => Prepared.AdvisoryTexts;
+    public bool IsLiteralLike => Query.PatternMode == PatternMode.Literal || RegexPlan.IsExactLiteral;
+    public bool HasMandatoryFragments => MandatoryTexts.Length > 0;
+}
 
 internal readonly record struct SearchPlanCandidate(
     LiteralPlan CandidatePlan,

@@ -35,6 +35,8 @@ internal sealed class PreparedSearchQuery
         RegexExecutionPlan regexPlan,
         SearchQueryAnchors anchors,
         PreparedLiteralQuery? literal,
+        PreparedSearchText[] mandatoryTexts,
+        PreparedSearchText[] advisoryTexts,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
         PreparedOrderedAnchor[][] orderedAnchorGroups,
         Func<PreparedRegexExecution> prepareRegexExecution)
@@ -43,6 +45,8 @@ internal sealed class PreparedSearchQuery
         RegexPlan = regexPlan;
         Anchors = anchors;
         Literal = literal;
+        MandatoryTexts = mandatoryTexts;
+        AdvisoryTexts = advisoryTexts;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
         OrderedAnchorGroups = orderedAnchorGroups;
         _regexExecution = new Lazy<PreparedRegexExecution>(
@@ -54,6 +58,8 @@ internal sealed class PreparedSearchQuery
     public RegexExecutionPlan RegexPlan { get; }
     public SearchQueryAnchors Anchors { get; }
     public PreparedLiteralQuery? Literal { get; }
+    public PreparedSearchText[] MandatoryTexts { get; }
+    public PreparedSearchText[] AdvisoryTexts { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
     public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
 
@@ -80,11 +86,13 @@ internal readonly record struct PreparedRegexExecutionAccess(
 }
 
 internal sealed class PreparedLiteralQuery(
+    string text,
     byte[] needle,
     byte[]? loweredAsciiNeedle,
     int[]? asciiPrefixTable,
     bool isAscii)
 {
+    public string Text { get; } = text;
     public byte[] Needle { get; } = needle;
     public byte[]? LoweredAsciiNeedle { get; } = loweredAsciiNeedle;
     public int[]? AsciiPrefixTable { get; } = asciiPrefixTable;
@@ -107,10 +115,28 @@ internal sealed class PreparedLiteralQuery(
             ? SearchQueryPreparer.LowerAscii(needle)
             : null;
         return new PreparedLiteralQuery(
+            pattern,
             needle,
             loweredAsciiNeedle,
             loweredAsciiNeedle is null ? null : SearchQueryPreparer.BuildPrefixTable(loweredAsciiNeedle),
             isAscii);
+    }
+}
+
+internal sealed class PreparedSearchText(string text, byte[] utf8Bytes)
+{
+    public string Text { get; } = text;
+    public byte[] Utf8Bytes { get; } = utf8Bytes;
+
+    public static PreparedSearchText[] CreateMany(string[] values)
+    {
+        var prepared = new PreparedSearchText[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            prepared[i] = new PreparedSearchText(values[i], Encoding.UTF8.GetBytes(values[i]));
+        }
+
+        return prepared;
     }
 }
 
@@ -193,7 +219,7 @@ internal sealed class PreparedMandatoryFragment(
     public bool IsAscii { get; } = isAscii;
 
     public static PreparedMandatoryFragment[] CreateMany(
-        string[] mandatoryTexts,
+        PreparedSearchText[] mandatoryTexts,
         CaseMode resolvedCaseMode)
     {
         if (mandatoryTexts.Length == 0)
@@ -204,8 +230,8 @@ internal sealed class PreparedMandatoryFragment(
         var prepared = new PreparedMandatoryFragment[mandatoryTexts.Length];
         for (var i = 0; i < mandatoryTexts.Length; i++)
         {
-            var text = mandatoryTexts[i];
-            var utf8Bytes = Encoding.UTF8.GetBytes(text);
+            var text = mandatoryTexts[i].Text;
+            var utf8Bytes = mandatoryTexts[i].Utf8Bytes;
             var isAscii = utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
             var loweredAsciiBytes = resolvedCaseMode == CaseMode.Insensitive && isAscii
                 ? SearchQueryPreparer.LowerAscii(utf8Bytes)

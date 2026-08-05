@@ -2479,7 +2479,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task RegexWithRequiredLiteralSuffixExpandsFragmentGrams()
+    public async Task RegexWithRequiredLiteralSuffixTrimsRedundantFragmentGrams()
     {
         var documents = Enumerable.Range(0, 4000)
             .Select(static i => ($"src/{i:D5}.cs", i % 250 == 0 ? $"public Task M{i}() => GetCustomerAsync();\n" : $"public Task M{i}() => GetCustomer();\n"))
@@ -2503,7 +2503,7 @@ public sealed class SearchIntegrationTests
         Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "Asy");
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "syn");
-        Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "ync");
+        Assert.DoesNotContain(plan.SelectedNgrams, static gram => gram.Text == "ync");
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);

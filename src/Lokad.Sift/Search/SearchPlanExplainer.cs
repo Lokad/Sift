@@ -42,9 +42,7 @@ internal sealed class SearchPlanExplainer(
                 cache,
                 matcher,
                 query,
-                resolvedCaseMode,
-                anchors,
-                regexPlan,
+                preparedQuery,
                 options,
                 CancellationToken.None);
             scopeDocuments += segmentPlan.Scope.Count;

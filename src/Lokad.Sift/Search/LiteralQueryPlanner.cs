@@ -13,7 +13,9 @@ internal static class LiteralQueryPlanner
         int scopeDocuments,
         long scopeBytes,
         string pattern,
+        ReadOnlySpan<byte> patternBytes,
         CaseMode resolvedCaseMode,
+        bool selectAllGrams,
         SiftOptions options)
     {
         var direct = LiteralPlan.Direct(resolvedCaseMode, scopeDocuments, scopeBytes);
@@ -22,37 +24,10 @@ internal static class LiteralQueryPlanner
             return [direct];
         }
 
-        var indexed = TryCreateIndexedCandidate(segment, scopeDocuments, scopeBytes, pattern, resolvedCaseMode, options);
+        var indexed = TryCreateIndexedCandidate(segment, scopeDocuments, scopeBytes, pattern, patternBytes, resolvedCaseMode, selectAllGrams, options);
         return indexed.HasValue
             ? [direct, indexed.Value]
             : [direct];
-    }
-
-    public static LiteralPlan Create(
-        MappedSegment segment,
-        int scopeDocuments,
-        long scopeBytes,
-        string pattern,
-        CaseMode resolvedCaseMode,
-        SiftOptions options)
-    {
-        var candidates = Enumerate(segment, scopeDocuments, scopeBytes, pattern, resolvedCaseMode, options);
-        if (candidates.Length == 1)
-        {
-            return candidates[0];
-        }
-
-        var direct = candidates[0];
-        var indexed = candidates[1];
-        if (indexed.IsMissingGram)
-        {
-            return indexed;
-        }
-
-        var patternBytes = Encoding.UTF8.GetBytes(pattern);
-        return ShouldPreferDirectScan(scopeDocuments, scopeBytes, patternBytes.Length, indexed.SelectedGrams, options)
-            ? direct
-            : indexed;
     }
 
     private static LiteralPlan? TryCreateIndexedCandidate(
@@ -60,7 +35,9 @@ internal static class LiteralQueryPlanner
         int scopeDocuments,
         long scopeBytes,
         string pattern,
+        ReadOnlySpan<byte> patternBytes,
         CaseMode resolvedCaseMode,
+        bool selectAllGrams,
         SiftOptions options)
     {
         if (scopeDocuments <= options.DirectScanScopeDocumentsThreshold && scopeBytes <= options.DirectScanScopeBytesThreshold)
@@ -68,13 +45,12 @@ internal static class LiteralQueryPlanner
             return null;
         }
 
-        var patternBytes = Encoding.UTF8.GetBytes(pattern);
         if (patternBytes.Length < MinIndexedFragmentBytes)
         {
             return null;
         }
 
-        var caseInsensitiveAscii = resolvedCaseMode == CaseMode.Insensitive && patternBytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
+        var caseInsensitiveAscii = resolvedCaseMode == CaseMode.Insensitive && patternBytes.IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
         if (resolvedCaseMode == CaseMode.Insensitive && !caseInsensitiveAscii)
         {
             return null;
@@ -85,7 +61,7 @@ internal static class LiteralQueryPlanner
         var grams = new List<SelectedGram>();
         for (var i = 0; i <= patternBytes.Length - gramLength && grams.Count < options.MaxSelectedNgrams; i++)
         {
-            if (!SegmentIndexBuilder.TryEncodeGram(patternBytes.AsSpan(i, gramLength), caseInsensitiveAscii, out var gram))
+            if (!SegmentIndexBuilder.TryEncodeGram(patternBytes.Slice(i, gramLength), caseInsensitiveAscii, out var gram))
             {
                 return null;
             }
@@ -119,7 +95,9 @@ internal static class LiteralQueryPlanner
         }
 
         grams.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        var selected = TrimSelectedGrams(grams, scopeDocuments, options);
+        var selected = selectAllGrams
+            ? grams.ToArray()
+            : TrimSelectedGrams(grams, scopeDocuments, options);
         return LiteralPlan.Indexed(resolvedCaseMode, scopeDocuments, scopeBytes, pattern, selected, pair, gramLength, isMissing: false);
     }
 
@@ -135,7 +113,7 @@ internal static class LiteralQueryPlanner
             return [grams[0]];
         }
 
-        var targetCandidates = GetTargetCandidateDocuments(scopeDocuments, options);
+        var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(scopeDocuments, options);
         if (targetCandidates == int.MaxValue)
         {
             return grams.ToArray();
@@ -160,75 +138,6 @@ internal static class LiteralQueryPlanner
         }
 
         return [.. selected];
-    }
-
-    private static int GetTargetCandidateDocuments(int scopeDocuments, SiftOptions options)
-    {
-        var target = int.MaxValue;
-        if (options.DirectScanScopeDocumentsThreshold > 0)
-        {
-            target = Math.Min(target, options.DirectScanScopeDocumentsThreshold);
-        }
-
-        if (options.DirectScanCandidateDensityThreshold > 0)
-        {
-            target = Math.Min(target, (int)Math.Ceiling(scopeDocuments * options.DirectScanCandidateDensityThreshold));
-        }
-
-        return target == int.MaxValue ? target : Math.Max(target, 1);
-    }
-
-    private static bool ShouldPreferDirectScan(int scopeDocuments, long scopeBytes, int patternBytes, ReadOnlySpan<SelectedGram> selected, SiftOptions options)
-    {
-        if (selected.Length == 0)
-        {
-            return true;
-        }
-
-        if (scopeDocuments <= options.DirectScanScopeDocumentsThreshold && scopeBytes <= options.DirectScanScopeBytesThreshold)
-        {
-            return true;
-        }
-
-        var estimatedCandidates = EstimateCandidateUpperBound(scopeDocuments, selected);
-        if (options.DirectScanCandidateDensityThreshold > 0 &&
-            estimatedCandidates >= Math.Ceiling(scopeDocuments * options.DirectScanCandidateDensityThreshold))
-        {
-            return true;
-        }
-
-        var directScanCost = (double)Math.Max(scopeBytes, scopeDocuments);
-        var indexedCost = EstimateIndexedCost(patternBytes, estimatedCandidates, selected);
-        return indexedCost >= directScanCost;
-    }
-
-    private static double EstimateCandidateUpperBound(int scopeDocuments, ReadOnlySpan<SelectedGram> selected)
-    {
-        if (scopeDocuments <= 0 || selected.Length == 0)
-        {
-            return 0;
-        }
-
-        var estimate = (double)scopeDocuments;
-        for (var i = 0; i < selected.Length; i++)
-        {
-            var ratio = Math.Clamp((double)selected[i].DocFreq / scopeDocuments, 0d, 1d);
-            estimate *= ratio;
-        }
-
-        return Math.Max(estimate, 1d);
-    }
-
-    private static double EstimateIndexedCost(int patternBytes, double estimatedCandidates, ReadOnlySpan<SelectedGram> selected)
-    {
-        long postingsBytes = 0;
-        for (var i = 0; i < selected.Length; i++)
-        {
-            postingsBytes += selected[i].PostingsBytes;
-        }
-
-        var verifierCost = estimatedCandidates * Math.Max(patternBytes, selected[0].GramLength * 4);
-        return postingsBytes + verifierCost;
     }
 
     private static IndexRegionPair SelectIndexRegionPair(int gramLength, bool caseInsensitiveAscii)

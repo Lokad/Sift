@@ -84,15 +84,19 @@ internal static class SearchQueryPreparer
 
             var regexPlan = RegexExecutionPlanner.Resolve(query, resolvedCaseMode, analysis, utf8Syntax);
             var anchors = SearchQueryAnchors.Create(query, resolvedCaseMode, regexPlan, analysis);
+            var mandatoryTexts = PreparedSearchText.CreateMany(anchors.MandatoryTexts);
+            var advisoryTexts = PreparedSearchText.CreateMany(anchors.AdvisoryTexts);
             var usesLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
             return new PreparedSearchQuery(
                 resolvedCaseMode,
                 regexPlan,
                 anchors,
                 PreparedLiteralQuery.Create(query, resolvedCaseMode, regexPlan.ExactLiteral),
+                mandatoryTexts,
+                advisoryTexts,
                 usesLiteralVerifier
                     ? []
-                    : PreparedMandatoryFragment.CreateMany(anchors.MandatoryTexts, resolvedCaseMode),
+                    : PreparedMandatoryFragment.CreateMany(mandatoryTexts, resolvedCaseMode),
                 PreparedOrderedAnchor.CreateGroups(anchors.OrderedAnchorGroups),
                 () => PreparedRegexExecution.Create(query, resolvedCaseMode, regexPlan));
         }
