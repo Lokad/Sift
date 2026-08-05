@@ -167,250 +167,30 @@ internal static class SearchPlanner
         SiftOptions options,
         CancellationToken cancellationToken)
     {
-        var scope = BuildScope(
+        var pathScope = new SegmentScopeBuilder(
             cache,
             matcher,
             options.MaxSelectedNgrams,
-            cancellationToken,
-            out var prefixDocuments,
-            out var pathIndexCandidates,
-            out var pathVerificationKind);
-        var contentPlan = CreatePlan(cache.Segment, scope, query, preparedQuery, options);
+            cancellationToken).Build();
+        var features = new SearchQueryFeatures(query, preparedQuery);
+        var candidates = SearchPlanCandidateBuilder.Enumerate(
+            cache.Segment,
+            pathScope.Scope,
+            in features,
+            options);
+        var scored = SearchPlanScorer.Score(candidates);
+        var contentPlan = new SearchPlannerDecision(
+            SearchPlanScorer.ChooseBest(scored),
+            [.. candidates]);
         return new SegmentSearchPlan(
-            scope,
+            pathScope.Scope,
             contentPlan,
-            prefixDocuments,
-            pathIndexCandidates,
-            pathVerificationKind,
-            EstimatePathFilterCost(prefixDocuments, pathIndexCandidates, scope.Count, matcher.UsesPathIndex, pathVerificationKind));
-
-        static SearchPlannerDecision CreatePlan(
-            MappedSegment segment,
-            SegmentScope scope,
-            SearchQuery query,
-            PreparedSearchQuery preparedQuery,
-            SiftOptions options)
-        {
-            var features = new SearchQueryFeatures(query, preparedQuery);
-            var candidates = SearchPlanCandidateBuilder.Enumerate(segment, scope, in features, options);
-            var scored = SearchPlanScorer.Score(candidates);
-            var chosen = SearchPlanScorer.ChooseBest(scored);
-            return new SearchPlannerDecision(chosen, [.. candidates]);
-        }
-
-        static SegmentScope BuildScope(
-        SegmentCache cache,
-        PathFilterMatcher matcher,
-        int maxSelectedNgrams,
-        CancellationToken cancellationToken,
-        out int prefixDocuments,
-        out int pathIndexCandidates,
-        out PathVerificationKind pathVerificationKind)
-        {
-            var prefixRange = matcher.PathPrefix is null
-                ? (StartInclusive: 0u, EndExclusive: (uint)cache.Segment.DocumentCount)
-                : cache.Segment.FindPathPrefixRange(matcher.PathPrefix);
-            prefixDocuments = (int)(prefixRange.EndExclusive - prefixRange.StartInclusive);
-
-            OrdinalSet scopedOrdinals;
-            if (matcher.UsesPathIndex)
-            {
-                var indexPair = new IndexRegionPair(
-                    SegmentRegionId.PathTriCsLex,
-                    SegmentRegionId.PathTriCsPost);
-                var selectedPathTrigrams = SelectPathTrigrams(
-                    cache.Segment,
-                    indexPair,
-                    matcher.GetPathTrigrams(),
-                    maxSelectedNgrams);
-                scopedOrdinals = CandidateGenerator.Generate(
-                    cache.Segment,
-                    OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, DeadOrdinalSet.Empty),
-                    indexPair,
-                    selectedPathTrigrams).Ordinals;
-            }
-            else
-            {
-                scopedOrdinals = OrdinalSet.FromRange(prefixRange.StartInclusive, prefixRange.EndExclusive, DeadOrdinalSet.Empty);
-            }
-
-            pathIndexCandidates = scopedOrdinals.Count;
-            pathVerificationKind = matcher.RequiresPathVerification
-                ? matcher.RequiresStringPathVerification ? PathVerificationKind.String : PathVerificationKind.Utf8
-                : PathVerificationKind.None;
-
-            if (!matcher.RequiresPathVerification && !matcher.UsesPathIndex)
-            {
-                var ordinals = OrdinalSet.FromRange(
-                    prefixRange.StartInclusive,
-                    prefixRange.EndExclusive,
-                    cache.DeadOrdinals);
-                if (prefixRange.StartInclusive == 0 &&
-                    prefixRange.EndExclusive == (uint)cache.Segment.DocumentCount)
-                {
-                    return new SegmentScope(
-                        ordinals,
-                        cache.LiveContentBytes,
-                        cache.LiveNonAsciiDocuments,
-                        cache.LiveNonAsciiBytes);
-                }
-
-                var metrics = GetScopeMetrics(cache, ordinals, cancellationToken);
-                return new SegmentScope(
-                    ordinals,
-                    metrics.ContentBytes,
-                    metrics.NonAsciiDocuments,
-                    metrics.NonAsciiBytes);
-            }
-
-            var acceptedOrdinals = new List<uint>(scopedOrdinals.Count);
-            long bytes = 0;
-            var nonAsciiDocuments = 0;
-            long nonAsciiBytes = 0;
-            var deadIndex = 0;
-            var scanned = 0;
-            foreach (var ordinal in scopedOrdinals)
-            {
-                if ((scanned++ & 0xFF) == 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                while (deadIndex < cache.DeadOrdinals.Length && cache.DeadOrdinals[deadIndex] < ordinal)
-                {
-                    deadIndex++;
-                }
-
-                if (deadIndex < cache.DeadOrdinals.Length && cache.DeadOrdinals[deadIndex] == ordinal)
-                {
-                    continue;
-                }
-
-                var document = cache.Segment.GetDocument(ordinal);
-                if (matcher.RequiresPathVerification)
-                {
-                    var isMatch = matcher.RequiresStringPathVerification
-                        ? matcher.IsMatch(cache.Segment.GetPath(document))
-                        : matcher.IsMatch(cache.Segment.GetPathBytes(document));
-                    if (!isMatch)
-                    {
-                        continue;
-                    }
-                }
-
-                acceptedOrdinals.Add(ordinal);
-                bytes += document.ContentLength;
-                if ((document.Flags & SegmentDocumentFlags.Ascii) == 0)
-                {
-                    nonAsciiDocuments++;
-                    nonAsciiBytes += document.ContentLength;
-                }
-            }
-
-            return new SegmentScope(
-                OrdinalSet.FromSorted([.. acceptedOrdinals]),
-                bytes,
-                nonAsciiDocuments,
-                nonAsciiBytes);
-
-            static int[] SelectPathTrigrams(
-                MappedSegment segment,
-                IndexRegionPair indexPair,
-                ReadOnlySpan<int> pathTrigrams,
-                int selectionLimit)
-            {
-                var selected = new List<(int Gram, int DocumentFrequency)>(
-                    Math.Min(pathTrigrams.Length, selectionLimit));
-                for (var i = 0; i < pathTrigrams.Length; i++)
-                {
-                    var gram = pathTrigrams[i];
-                    if (!segment.TryGetPostings(indexPair, gram, out _, out var documentFrequency))
-                    {
-                        // One absent mandatory gram proves that the path scope is empty.
-                        return [gram];
-                    }
-
-                    var insertionIndex = 0;
-                    while (insertionIndex < selected.Count &&
-                        selected[insertionIndex].DocumentFrequency <= documentFrequency)
-                    {
-                        insertionIndex++;
-                    }
-
-                    if (insertionIndex >= selectionLimit)
-                    {
-                        continue;
-                    }
-
-                    selected.Insert(insertionIndex, (gram, documentFrequency));
-                    if (selected.Count > selectionLimit)
-                    {
-                        selected.RemoveAt(selectionLimit);
-                    }
-                }
-
-                var result = new int[selected.Count];
-                for (var i = 0; i < selected.Count; i++)
-                {
-                    result[i] = selected[i].Gram;
-                }
-
-                return result;
-            }
-
-            static ScopeMetrics GetScopeMetrics(
-                SegmentCache cache,
-                OrdinalSet ordinals,
-                CancellationToken cancellationToken)
-            {
-                long bytes = 0;
-                var nonAsciiDocuments = 0;
-                long nonAsciiBytes = 0;
-                var scanned = 0;
-                foreach (var ordinal in ordinals)
-                {
-                    if ((scanned++ & 0xFF) == 0)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
-
-                    var document = cache.Segment.GetDocument(ordinal);
-                    bytes += document.ContentLength;
-                    if ((document.Flags & SegmentDocumentFlags.Ascii) == 0)
-                    {
-                        nonAsciiDocuments++;
-                        nonAsciiBytes += document.ContentLength;
-                    }
-                }
-
-                return new ScopeMetrics(bytes, nonAsciiDocuments, nonAsciiBytes);
-            }
-        }
-
-        static double EstimatePathFilterCost(int prefixDocuments, int pathIndexCandidates, int scopedDocuments, bool usesPathIndex, PathVerificationKind pathVerificationKind)
-        {
-            double cost = prefixDocuments;
-            if (usesPathIndex)
-            {
-                cost += pathIndexCandidates * 0.5d;
-            }
-
-            cost += pathVerificationKind switch
-            {
-                PathVerificationKind.Utf8 => scopedDocuments,
-                PathVerificationKind.String => scopedDocuments * 4d,
-                _ => 0d
-            };
-
-            return cost;
-        }
+            pathScope.PrefixDocuments,
+            pathScope.PathIndexCandidates,
+            pathScope.PathVerificationKind,
+            pathScope.EstimatedCost);
     }
-
 }
-
-internal readonly record struct ScopeMetrics(
-    long ContentBytes,
-    int NonAsciiDocuments,
-    long NonAsciiBytes);
 
 internal readonly record struct SearchQueryFeatures(
     SearchQuery Query,
