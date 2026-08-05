@@ -162,22 +162,20 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
             watch.Stop();
 
-            return new UpdateStats(new UpdateStatsData
-            {
-                SubmittedUpserts = load.Submitted,
-                UpsertedDocuments = overlayUpdate.UpsertedDocuments,
-                SkippedUpserts = overlayUpdate.SkippedUpserts,
-                RejectedUpserts = load.Rejected,
-                DeletedDocuments = deletedDocuments,
-                PublishedSegments = overlayUpdate.PublishedSegments,
-                SubmittedBytes = load.SubmittedBytes,
-                ContentBytes = overlayUpdate.ContentBytes,
-                SkippedBytes = overlayUpdate.SkippedBytes,
-                RejectedBytes = load.RejectedBytes,
-                RejectedDocumentDetails = load.RejectedDocuments,
-                ElapsedMilliseconds = watch.ElapsedMilliseconds,
-                CommittedIdentity = overlayUpdate.CommittedIdentity
-            });
+            return new UpdateStats(
+                submittedUpserts: load.Submitted,
+                upsertedDocuments: overlayUpdate.UpsertedDocuments,
+                skippedUpserts: overlayUpdate.SkippedUpserts,
+                rejectedUpserts: load.Rejected,
+                deletedDocuments: deletedDocuments,
+                publishedSegments: overlayUpdate.PublishedSegments,
+                submittedBytes: load.SubmittedBytes,
+                contentBytes: overlayUpdate.ContentBytes,
+                skippedBytes: overlayUpdate.SkippedBytes,
+                rejectedBytes: load.RejectedBytes,
+                rejectedDocumentDetails: load.RejectedDocuments.ToArray(),
+                elapsedMilliseconds: watch.ElapsedMilliseconds,
+                committedIdentity: overlayUpdate.CommittedIdentity);
         }
     }
 

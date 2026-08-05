@@ -86,6 +86,7 @@ internal sealed class IndexBuilder
         var entries = new List<SegmentManifestEntry>();
         var attemptedSegmentIds = new List<SegmentId>();
         StreamedDocuments load;
+        RejectedDocument[] rejectedDocuments;
         try
         {
             load = await streamDocuments(
@@ -101,20 +102,19 @@ internal sealed class IndexBuilder
                         cancellationToken));
                 }).ConfigureAwait(false);
 
-            var pendingStats = new BuildStats(new BuildStatsData
-            {
-                SubmittedDocuments = load.Submitted,
-                IndexedDocuments = load.Accepted,
-                RejectedDocuments = load.Rejected,
-                SegmentCount = entries.Count,
-                SubmittedBytes = load.SubmittedBytes,
-                ContentBytes = load.AcceptedBytes,
-                RejectedBytes = load.RejectedBytes,
-                ElapsedMilliseconds = watch.ElapsedMilliseconds,
-                PeakManagedBytes = 0,
-                RejectedDocumentDetails = load.RejectedDocuments,
-                CommittedIdentity = default
-            });
+            rejectedDocuments = load.RejectedDocuments.ToArray();
+            var pendingStats = new BuildStats(
+                submittedDocuments: load.Submitted,
+                indexedDocuments: load.Accepted,
+                rejectedDocuments: load.Rejected,
+                segmentCount: entries.Count,
+                submittedBytes: load.SubmittedBytes,
+                contentBytes: load.AcceptedBytes,
+                rejectedBytes: load.RejectedBytes,
+                elapsedMilliseconds: watch.ElapsedMilliseconds,
+                peakManagedBytes: 0,
+                rejectedDocumentDetails: rejectedDocuments,
+                committedIdentity: default);
             var commitMetadata = options.CommitMetadataProvider?.Invoke(pendingStats).ToArray() ?? [];
             if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
             {
@@ -137,23 +137,21 @@ internal sealed class IndexBuilder
 
         watch.Stop();
 
-        return new BuildStats(new BuildStatsData
-        {
-            SubmittedDocuments = load.Submitted,
-            IndexedDocuments = load.Accepted,
-            RejectedDocuments = load.Rejected,
-            SegmentCount = entries.Count,
-            SubmittedBytes = load.SubmittedBytes,
-            ContentBytes = load.AcceptedBytes,
-            RejectedBytes = load.RejectedBytes,
-            ElapsedMilliseconds = watch.ElapsedMilliseconds,
-            PeakManagedBytes = 0,
-            RejectedDocumentDetails = load.RejectedDocuments,
-            CommittedIdentity = new IndexIdentity(
+        return new BuildStats(
+            submittedDocuments: load.Submitted,
+            indexedDocuments: load.Accepted,
+            rejectedDocuments: load.Rejected,
+            segmentCount: entries.Count,
+            submittedBytes: load.SubmittedBytes,
+            contentBytes: load.AcceptedBytes,
+            rejectedBytes: load.RejectedBytes,
+            elapsedMilliseconds: watch.ElapsedMilliseconds,
+            peakManagedBytes: 0,
+            rejectedDocumentDetails: rejectedDocuments,
+            committedIdentity: new IndexIdentity(
                 corpusId,
                 new ContentRevision(1),
-                generation)
-        });
+                generation));
     }
 
     public static StreamedDocuments StreamDocuments(

@@ -92,7 +92,7 @@ public sealed class RejectedUpsertException : Exception
     {
         RejectedUpserts = rejectedUpserts;
         RejectedBytes = rejectedBytes;
-        RejectedDocuments = PublicResultCollection.Freeze(rejectedDocuments);
+        RejectedDocuments = PublicResultCollection.CopyOf(rejectedDocuments);
     }
 
     public int RejectedUpserts { get; }

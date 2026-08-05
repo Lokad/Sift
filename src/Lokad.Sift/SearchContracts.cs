@@ -142,10 +142,10 @@ public sealed class PathFilter
         PathPrefix = pathPrefix;
         _includeGlobs = includeGlobs is null
             ? Array.Empty<string>()
-            : PublicResultCollection.Freeze(includeGlobs);
+            : PublicResultCollection.CopyOf(includeGlobs);
         _excludeGlobs = excludeGlobs is null
             ? Array.Empty<string>()
-            : PublicResultCollection.Freeze(excludeGlobs);
+            : PublicResultCollection.CopyOf(excludeGlobs);
         PathRegex = pathRegex;
     }
 
@@ -153,13 +153,13 @@ public sealed class PathFilter
     public IReadOnlyList<string> IncludeGlobs
     {
         get => _includeGlobs;
-        init => _includeGlobs = PublicResultCollection.Freeze(value);
+        init => _includeGlobs = PublicResultCollection.CopyOf(value);
     }
 
     public IReadOnlyList<string> ExcludeGlobs
     {
         get => _excludeGlobs;
-        init => _excludeGlobs = PublicResultCollection.Freeze(value);
+        init => _excludeGlobs = PublicResultCollection.CopyOf(value);
     }
 
     public string? PathRegex { get; init; }
@@ -264,9 +264,9 @@ public sealed class SearchPlan
         ScopeDocumentCount = data.ScopeDocumentCount;
         ScopeByteCount = data.ScopeByteCount;
         SegmentCount = data.SegmentCount;
-        MandatoryFragments = PublicResultCollection.Freeze(data.MandatoryFragments);
-        AdvisorySeeds = PublicResultCollection.Freeze(data.AdvisorySeeds);
-        SelectedNgrams = PublicResultCollection.Freeze(data.SelectedNgrams);
+        MandatoryFragments = PublicResultCollection.CopyOf(data.MandatoryFragments);
+        AdvisorySeeds = PublicResultCollection.CopyOf(data.AdvisorySeeds);
+        SelectedNgrams = PublicResultCollection.CopyOf(data.SelectedNgrams);
         UsesPathPrefixFilter = data.UsesPathPrefixFilter;
         UsesPathRegexFilter = data.UsesPathRegexFilter;
         UsesIncludeGlobs = data.UsesIncludeGlobs;
@@ -288,7 +288,7 @@ public sealed class SearchPlan
         RunnerUp = data.RunnerUp;
         RunnerUpEstimatedCostDelta = data.RunnerUpEstimatedCostDelta;
         TimeoutPolicy = data.TimeoutPolicy;
-        PlannerAlternatives = PublicResultCollection.Freeze(data.PlannerAlternatives);
+        PlannerAlternatives = PublicResultCollection.CopyOf(data.PlannerAlternatives);
     }
 
     public SearchPatternKind PatternKind { get; }
@@ -462,8 +462,8 @@ public sealed class MaterializedHit
         EndLine = data.EndLine;
         EndColumn = data.EndColumn;
         MatchText = data.MatchText;
-        BeforeContext = PublicResultCollection.Freeze(data.BeforeContext);
-        AfterContext = PublicResultCollection.Freeze(data.AfterContext);
+        BeforeContext = PublicResultCollection.CopyOf(data.BeforeContext);
+        AfterContext = PublicResultCollection.CopyOf(data.AfterContext);
         IsMatchTruncated = data.IsMatchTruncated;
         IsContextTruncated = data.IsContextTruncated;
     }

@@ -2,7 +2,7 @@ namespace Lokad.Sift;
 
 internal static class PublicResultCollection
 {
-    public static IReadOnlyList<T> Freeze<T>(IReadOnlyList<T> values)
+    public static IReadOnlyList<T> CopyOf<T>(IReadOnlyList<T> values)
     {
         if (values.Count == 0)
         {
@@ -17,4 +17,7 @@ internal static class PublicResultCollection
 
         return Array.AsReadOnly(copy);
     }
+
+    public static IReadOnlyList<T> Own<T>(T[] values) =>
+        values.Length == 0 ? Array.Empty<T>() : Array.AsReadOnly(values);
 }

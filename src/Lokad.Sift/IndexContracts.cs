@@ -99,19 +99,33 @@ public sealed class StaleIndexStateException : Exception
 
 public sealed class BuildStats
 {
-    internal BuildStats(in BuildStatsData data)
+    private readonly RejectedDocument[] _rejectedDocumentDetails;
+
+    internal BuildStats(
+        int submittedDocuments,
+        int indexedDocuments,
+        int rejectedDocuments,
+        int segmentCount,
+        long submittedBytes,
+        long contentBytes,
+        long rejectedBytes,
+        long elapsedMilliseconds,
+        long peakManagedBytes,
+        RejectedDocument[] rejectedDocumentDetails,
+        IndexIdentity committedIdentity)
     {
-        SubmittedDocuments = data.SubmittedDocuments;
-        IndexedDocuments = data.IndexedDocuments;
-        RejectedDocuments = data.RejectedDocuments;
-        SegmentCount = data.SegmentCount;
-        SubmittedBytes = data.SubmittedBytes;
-        ContentBytes = data.ContentBytes;
-        RejectedBytes = data.RejectedBytes;
-        ElapsedMilliseconds = data.ElapsedMilliseconds;
-        PeakManagedBytes = data.PeakManagedBytes;
-        RejectedDocumentDetails = PublicResultCollection.Freeze(data.RejectedDocumentDetails);
-        CommittedIdentity = data.CommittedIdentity;
+        SubmittedDocuments = submittedDocuments;
+        IndexedDocuments = indexedDocuments;
+        RejectedDocuments = rejectedDocuments;
+        SegmentCount = segmentCount;
+        SubmittedBytes = submittedBytes;
+        ContentBytes = contentBytes;
+        RejectedBytes = rejectedBytes;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        PeakManagedBytes = peakManagedBytes;
+        _rejectedDocumentDetails = rejectedDocumentDetails;
+        RejectedDocumentDetails = PublicResultCollection.Own(rejectedDocumentDetails);
+        CommittedIdentity = committedIdentity;
     }
 
     public int SubmittedDocuments { get; }
@@ -136,54 +150,50 @@ public sealed class BuildStats
     /// </remarks>
     public IndexIdentity CommittedIdentity { get; }
 
-    internal BuildStats WithPeakManagedBytes(long peakManagedBytes) => new(new BuildStatsData
-    {
-        SubmittedDocuments = SubmittedDocuments,
-        IndexedDocuments = IndexedDocuments,
-        RejectedDocuments = RejectedDocuments,
-        SegmentCount = SegmentCount,
-        SubmittedBytes = SubmittedBytes,
-        ContentBytes = ContentBytes,
-        RejectedBytes = RejectedBytes,
-        ElapsedMilliseconds = ElapsedMilliseconds,
-        PeakManagedBytes = peakManagedBytes,
-        RejectedDocumentDetails = RejectedDocumentDetails,
-        CommittedIdentity = CommittedIdentity
-    });
-}
-
-internal readonly struct BuildStatsData
-{
-    public required int SubmittedDocuments { get; init; }
-    public required int IndexedDocuments { get; init; }
-    public required int RejectedDocuments { get; init; }
-    public required int SegmentCount { get; init; }
-    public required long SubmittedBytes { get; init; }
-    public required long ContentBytes { get; init; }
-    public required long RejectedBytes { get; init; }
-    public required long ElapsedMilliseconds { get; init; }
-    public required long PeakManagedBytes { get; init; }
-    public required IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; init; }
-    public required IndexIdentity CommittedIdentity { get; init; }
+    internal BuildStats WithPeakManagedBytes(long peakManagedBytes) => new(
+        SubmittedDocuments,
+        IndexedDocuments,
+        RejectedDocuments,
+        SegmentCount,
+        SubmittedBytes,
+        ContentBytes,
+        RejectedBytes,
+        ElapsedMilliseconds,
+        peakManagedBytes,
+        _rejectedDocumentDetails,
+        CommittedIdentity);
 }
 
 public sealed class UpdateStats
 {
-    internal UpdateStats(in UpdateStatsData data)
+    internal UpdateStats(
+        int submittedUpserts,
+        int upsertedDocuments,
+        int skippedUpserts,
+        int rejectedUpserts,
+        int deletedDocuments,
+        int publishedSegments,
+        long submittedBytes,
+        long contentBytes,
+        long skippedBytes,
+        long rejectedBytes,
+        RejectedDocument[] rejectedDocumentDetails,
+        long elapsedMilliseconds,
+        IndexIdentity committedIdentity)
     {
-        SubmittedUpserts = data.SubmittedUpserts;
-        UpsertedDocuments = data.UpsertedDocuments;
-        SkippedUpserts = data.SkippedUpserts;
-        RejectedUpserts = data.RejectedUpserts;
-        DeletedDocuments = data.DeletedDocuments;
-        PublishedSegments = data.PublishedSegments;
-        SubmittedBytes = data.SubmittedBytes;
-        ContentBytes = data.ContentBytes;
-        SkippedBytes = data.SkippedBytes;
-        RejectedBytes = data.RejectedBytes;
-        RejectedDocumentDetails = PublicResultCollection.Freeze(data.RejectedDocumentDetails);
-        ElapsedMilliseconds = data.ElapsedMilliseconds;
-        CommittedIdentity = data.CommittedIdentity;
+        SubmittedUpserts = submittedUpserts;
+        UpsertedDocuments = upsertedDocuments;
+        SkippedUpserts = skippedUpserts;
+        RejectedUpserts = rejectedUpserts;
+        DeletedDocuments = deletedDocuments;
+        PublishedSegments = publishedSegments;
+        SubmittedBytes = submittedBytes;
+        ContentBytes = contentBytes;
+        SkippedBytes = skippedBytes;
+        RejectedBytes = rejectedBytes;
+        RejectedDocumentDetails = PublicResultCollection.Own(rejectedDocumentDetails);
+        ElapsedMilliseconds = elapsedMilliseconds;
+        CommittedIdentity = committedIdentity;
     }
 
     public int SubmittedUpserts { get; }
@@ -209,23 +219,6 @@ public sealed class UpdateStats
     ///     have the default identity because the manifest has not yet been committed.
     /// </remarks>
     public IndexIdentity CommittedIdentity { get; }
-}
-
-internal readonly struct UpdateStatsData
-{
-    public required int SubmittedUpserts { get; init; }
-    public required int UpsertedDocuments { get; init; }
-    public required int SkippedUpserts { get; init; }
-    public required int RejectedUpserts { get; init; }
-    public required int DeletedDocuments { get; init; }
-    public required int PublishedSegments { get; init; }
-    public required long SubmittedBytes { get; init; }
-    public required long ContentBytes { get; init; }
-    public required long SkippedBytes { get; init; }
-    public required long RejectedBytes { get; init; }
-    public required IReadOnlyList<RejectedDocument> RejectedDocumentDetails { get; init; }
-    public required long ElapsedMilliseconds { get; init; }
-    public required IndexIdentity CommittedIdentity { get; init; }
 }
 
 public sealed record CompactOptions
@@ -276,15 +269,22 @@ public sealed record CompactOptions
 
 public sealed class CompactStats
 {
-    internal CompactStats(in CompactStatsData data)
+    internal CompactStats(
+        int inputSegments,
+        int outputSegments,
+        int mergedDocuments,
+        long contentBytes,
+        long elapsedMilliseconds,
+        long peakManagedBytes,
+        bool hasMoreWork)
     {
-        InputSegments = data.InputSegments;
-        OutputSegments = data.OutputSegments;
-        MergedDocuments = data.MergedDocuments;
-        ContentBytes = data.ContentBytes;
-        ElapsedMilliseconds = data.ElapsedMilliseconds;
-        PeakManagedBytes = data.PeakManagedBytes;
-        HasMoreWork = data.HasMoreWork;
+        InputSegments = inputSegments;
+        OutputSegments = outputSegments;
+        MergedDocuments = mergedDocuments;
+        ContentBytes = contentBytes;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        PeakManagedBytes = peakManagedBytes;
+        HasMoreWork = hasMoreWork;
     }
 
     public int InputSegments { get; }
@@ -297,27 +297,14 @@ public sealed class CompactStats
     // True when the same policy can make progress in another bounded pass.
     public bool HasMoreWork { get; }
 
-    internal CompactStats WithPeakManagedBytes(long peakManagedBytes) => new(new CompactStatsData
-    {
-        InputSegments = InputSegments,
-        OutputSegments = OutputSegments,
-        MergedDocuments = MergedDocuments,
-        ContentBytes = ContentBytes,
-        ElapsedMilliseconds = ElapsedMilliseconds,
-        PeakManagedBytes = peakManagedBytes,
-        HasMoreWork = HasMoreWork
-    });
-}
-
-internal readonly struct CompactStatsData
-{
-    public required int InputSegments { get; init; }
-    public required int OutputSegments { get; init; }
-    public required int MergedDocuments { get; init; }
-    public required long ContentBytes { get; init; }
-    public required long ElapsedMilliseconds { get; init; }
-    public required long PeakManagedBytes { get; init; }
-    public required bool HasMoreWork { get; init; }
+    internal CompactStats WithPeakManagedBytes(long peakManagedBytes) => new(
+        InputSegments,
+        OutputSegments,
+        MergedDocuments,
+        ContentBytes,
+        ElapsedMilliseconds,
+        peakManagedBytes,
+        HasMoreWork);
 }
 
 public enum SiftWriteActivity
@@ -386,21 +373,34 @@ public readonly record struct IndexValidationStats(
 
 public sealed class MaintenanceStats
 {
-    internal MaintenanceStats(in MaintenanceStatsData data)
+    internal MaintenanceStats(
+        StorageGeneration generation,
+        int segmentCount,
+        int totalDocuments,
+        int liveDocuments,
+        int deadDocuments,
+        double deadDocumentFraction,
+        double deadContentFraction,
+        long contentBytes,
+        long estimatedLiveContentBytes,
+        long estimatedReclaimableContentBytes,
+        long deadOrdinalEntries,
+        int segmentsWithDeletions,
+        int smallSegmentCount)
     {
-        Generation = data.Generation;
-        SegmentCount = data.SegmentCount;
-        TotalDocuments = data.TotalDocuments;
-        LiveDocuments = data.LiveDocuments;
-        DeadDocuments = data.DeadDocuments;
-        DeadDocumentFraction = data.DeadDocumentFraction;
-        DeadContentFraction = data.DeadContentFraction;
-        ContentBytes = data.ContentBytes;
-        EstimatedLiveContentBytes = data.EstimatedLiveContentBytes;
-        EstimatedReclaimableContentBytes = data.EstimatedReclaimableContentBytes;
-        DeadOrdinalEntries = data.DeadOrdinalEntries;
-        SegmentsWithDeletions = data.SegmentsWithDeletions;
-        SmallSegmentCount = data.SmallSegmentCount;
+        Generation = generation;
+        SegmentCount = segmentCount;
+        TotalDocuments = totalDocuments;
+        LiveDocuments = liveDocuments;
+        DeadDocuments = deadDocuments;
+        DeadDocumentFraction = deadDocumentFraction;
+        DeadContentFraction = deadContentFraction;
+        ContentBytes = contentBytes;
+        EstimatedLiveContentBytes = estimatedLiveContentBytes;
+        EstimatedReclaimableContentBytes = estimatedReclaimableContentBytes;
+        DeadOrdinalEntries = deadOrdinalEntries;
+        SegmentsWithDeletions = segmentsWithDeletions;
+        SmallSegmentCount = smallSegmentCount;
     }
 
     // Manifest generation observed by this snapshot.
@@ -431,48 +431,52 @@ public sealed class MaintenanceStats
     public int SmallSegmentCount { get; }
 }
 
-internal readonly struct MaintenanceStatsData
-{
-    public required StorageGeneration Generation { get; init; }
-    public required int SegmentCount { get; init; }
-    public required int TotalDocuments { get; init; }
-    public required int LiveDocuments { get; init; }
-    public required int DeadDocuments { get; init; }
-    public required double DeadDocumentFraction { get; init; }
-    public required double DeadContentFraction { get; init; }
-    public required long ContentBytes { get; init; }
-    public required long EstimatedLiveContentBytes { get; init; }
-    public required long EstimatedReclaimableContentBytes { get; init; }
-    public required long DeadOrdinalEntries { get; init; }
-    public required int SegmentsWithDeletions { get; init; }
-    public required int SmallSegmentCount { get; init; }
-}
-
 public sealed class StorageStats
 {
-    internal StorageStats(in StorageStatsData data)
+    internal StorageStats(
+        int manifestSegmentCount,
+        long manifestSegmentBytes,
+        int physicalSegmentCount,
+        long physicalSegmentBytes,
+        int retiredSegmentCount,
+        long retiredSegmentBytes,
+        long temporaryBytes,
+        long corpusPhysicalBytes,
+        long maximumPhysicalBytes,
+        long? availableBytes,
+        int leasedGenerationCount,
+        StorageGeneration? oldestLeasedGeneration,
+        int snapshotDeferredSegmentCount,
+        long snapshotDeferredSegmentBytes,
+        int pendingDeletionSegmentCount,
+        long pendingDeletionSegmentBytes,
+        int blockedReclamationSegmentCount,
+        long blockedReclamationSegmentBytes,
+        bool isReclamationBlocked,
+        long reclamationFailureCount,
+        string? lastReclamationFailure)
     {
-        ManifestSegmentCount = data.ManifestSegmentCount;
-        ManifestSegmentBytes = data.ManifestSegmentBytes;
-        PhysicalSegmentCount = data.PhysicalSegmentCount;
-        PhysicalSegmentBytes = data.PhysicalSegmentBytes;
-        RetiredSegmentCount = data.RetiredSegmentCount;
-        RetiredSegmentBytes = data.RetiredSegmentBytes;
-        TemporaryBytes = data.TemporaryBytes;
-        CorpusPhysicalBytes = data.CorpusPhysicalBytes;
-        MaximumPhysicalBytes = data.MaximumPhysicalBytes;
-        AvailableBytes = data.AvailableBytes;
-        LeasedGenerationCount = data.LeasedGenerationCount;
-        OldestLeasedGeneration = data.OldestLeasedGeneration;
-        SnapshotDeferredSegmentCount = data.SnapshotDeferredSegmentCount;
-        SnapshotDeferredSegmentBytes = data.SnapshotDeferredSegmentBytes;
-        PendingDeletionSegmentCount = data.PendingDeletionSegmentCount;
-        PendingDeletionSegmentBytes = data.PendingDeletionSegmentBytes;
-        BlockedReclamationSegmentCount = data.BlockedReclamationSegmentCount;
-        BlockedReclamationSegmentBytes = data.BlockedReclamationSegmentBytes;
-        IsReclamationBlocked = data.IsReclamationBlocked;
-        ReclamationFailureCount = data.ReclamationFailureCount;
-        LastReclamationFailure = data.LastReclamationFailure;
+        ManifestSegmentCount = manifestSegmentCount;
+        ManifestSegmentBytes = manifestSegmentBytes;
+        PhysicalSegmentCount = physicalSegmentCount;
+        PhysicalSegmentBytes = physicalSegmentBytes;
+        RetiredSegmentCount = retiredSegmentCount;
+        RetiredSegmentBytes = retiredSegmentBytes;
+        TemporaryBytes = temporaryBytes;
+        CorpusPhysicalBytes = corpusPhysicalBytes;
+        MaximumPhysicalBytes = maximumPhysicalBytes;
+        AvailableBytes = availableBytes;
+        LeasedGenerationCount = leasedGenerationCount;
+        OldestLeasedGeneration = oldestLeasedGeneration;
+        SnapshotDeferredSegmentCount = snapshotDeferredSegmentCount;
+        SnapshotDeferredSegmentBytes = snapshotDeferredSegmentBytes;
+        PendingDeletionSegmentCount = pendingDeletionSegmentCount;
+        PendingDeletionSegmentBytes = pendingDeletionSegmentBytes;
+        BlockedReclamationSegmentCount = blockedReclamationSegmentCount;
+        BlockedReclamationSegmentBytes = blockedReclamationSegmentBytes;
+        IsReclamationBlocked = isReclamationBlocked;
+        ReclamationFailureCount = reclamationFailureCount;
+        LastReclamationFailure = lastReclamationFailure;
     }
 
     // Currently reachable packs that are also present on disk.
@@ -517,31 +521,6 @@ public sealed class StorageStats
     public long ReclamationFailureCount { get; }
     // Most recent exceptional reclamation failure, or null when no sweep has failed.
     public string? LastReclamationFailure { get; }
-}
-
-internal readonly struct StorageStatsData
-{
-    public required int ManifestSegmentCount { get; init; }
-    public required long ManifestSegmentBytes { get; init; }
-    public required int PhysicalSegmentCount { get; init; }
-    public required long PhysicalSegmentBytes { get; init; }
-    public required int RetiredSegmentCount { get; init; }
-    public required long RetiredSegmentBytes { get; init; }
-    public required long TemporaryBytes { get; init; }
-    public required long CorpusPhysicalBytes { get; init; }
-    public required long MaximumPhysicalBytes { get; init; }
-    public required long? AvailableBytes { get; init; }
-    public required int LeasedGenerationCount { get; init; }
-    public required StorageGeneration? OldestLeasedGeneration { get; init; }
-    public required int SnapshotDeferredSegmentCount { get; init; }
-    public required long SnapshotDeferredSegmentBytes { get; init; }
-    public required int PendingDeletionSegmentCount { get; init; }
-    public required long PendingDeletionSegmentBytes { get; init; }
-    public required int BlockedReclamationSegmentCount { get; init; }
-    public required long BlockedReclamationSegmentBytes { get; init; }
-    public required bool IsReclamationBlocked { get; init; }
-    public required long ReclamationFailureCount { get; init; }
-    public required string? LastReclamationFailure { get; init; }
 }
 
 public interface IIndexSnapshot : IDisposable

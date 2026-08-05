@@ -1429,30 +1429,28 @@ internal sealed class CorpusStorage : ISiftStorage
             reclamation.BlockedSegmentBytes);
         var temporaryBytes = GetTemporaryBytes();
         var corpusPhysicalBytes = GetAccountedCorpusPhysicalBytes();
-        return new StorageStats(new StorageStatsData
-        {
-            ManifestSegmentCount = manifestSegmentCount,
-            ManifestSegmentBytes = manifestSegmentBytes,
-            PhysicalSegmentCount = physicalSegments.Count,
-            PhysicalSegmentBytes = physicalSegmentBytes,
-            RetiredSegmentCount = retiredSegmentCount,
-            RetiredSegmentBytes = retiredSegmentBytes,
-            TemporaryBytes = temporaryBytes,
-            CorpusPhysicalBytes = corpusPhysicalBytes,
-            MaximumPhysicalBytes = _maximumPhysicalBytes,
-            AvailableBytes = GetAvailableBytes(corpusPhysicalBytes),
-            LeasedGenerationCount = reclamation.LeasedGenerationCount,
-            OldestLeasedGeneration = reclamation.OldestLeasedGeneration,
-            SnapshotDeferredSegmentCount = deferredSegmentCount,
-            SnapshotDeferredSegmentBytes = deferredSegmentBytes,
-            PendingDeletionSegmentCount = retiredSegmentCount - deferredSegmentCount - blockedSegmentCount,
-            PendingDeletionSegmentBytes = retiredSegmentBytes - deferredSegmentBytes - blockedSegmentBytes,
-            BlockedReclamationSegmentCount = blockedSegmentCount,
-            BlockedReclamationSegmentBytes = blockedSegmentBytes,
-            IsReclamationBlocked = reclamation.IsBlocked,
-            ReclamationFailureCount = Interlocked.Read(ref _reclamationFailureCount),
-            LastReclamationFailure = Volatile.Read(ref _lastReclamationFailure)
-        });
+        return new StorageStats(
+            manifestSegmentCount: manifestSegmentCount,
+            manifestSegmentBytes: manifestSegmentBytes,
+            physicalSegmentCount: physicalSegments.Count,
+            physicalSegmentBytes: physicalSegmentBytes,
+            retiredSegmentCount: retiredSegmentCount,
+            retiredSegmentBytes: retiredSegmentBytes,
+            temporaryBytes: temporaryBytes,
+            corpusPhysicalBytes: corpusPhysicalBytes,
+            maximumPhysicalBytes: _maximumPhysicalBytes,
+            availableBytes: GetAvailableBytes(corpusPhysicalBytes),
+            leasedGenerationCount: reclamation.LeasedGenerationCount,
+            oldestLeasedGeneration: reclamation.OldestLeasedGeneration,
+            snapshotDeferredSegmentCount: deferredSegmentCount,
+            snapshotDeferredSegmentBytes: deferredSegmentBytes,
+            pendingDeletionSegmentCount: retiredSegmentCount - deferredSegmentCount - blockedSegmentCount,
+            pendingDeletionSegmentBytes: retiredSegmentBytes - deferredSegmentBytes - blockedSegmentBytes,
+            blockedReclamationSegmentCount: blockedSegmentCount,
+            blockedReclamationSegmentBytes: blockedSegmentBytes,
+            isReclamationBlocked: reclamation.IsBlocked,
+            reclamationFailureCount: Interlocked.Read(ref _reclamationFailureCount),
+            lastReclamationFailure: Volatile.Read(ref _lastReclamationFailure));
     }
 
     private void TryReclaimAfterPublication()
