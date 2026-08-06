@@ -90,6 +90,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var guardedCollector = new GuardedDocumentKeyCollector(collector);
         try
         {
+            using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
             var visitedDocuments = 0;
             foreach (var entry in _segments)
@@ -171,6 +172,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var ownedCollector = new HitOwnerCollector(_hitOwner, guardedCollector);
         try
         {
+            using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
             var watch = Stopwatch.StartNew();
             var preparedQuery = SearchQueryPreparer.Prepare(query);
@@ -591,7 +593,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     public void Dispose()
     {
-        if (_lifetimeLock.IsReadLockHeld)
+        if (ReentrancyGuard.IsActive(this))
         {
             throw new InvalidOperationException(
                 "A snapshot cannot be disposed from one of its active callbacks.");

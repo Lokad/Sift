@@ -32,6 +32,25 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task MutationCallbacksRejectCrossIndexReentrancyWithoutDeadlocking()
+    {
+        using var first = SiftIndex.CreateInMemory();
+        using var second = SiftIndex.CreateInMemory();
+        Exception? nestedFailure = null;
+        var source = new CallbackDocumentSource(() =>
+            second.Build(new CallbackDocumentSource(() =>
+                nestedFailure = Record.Exception(() =>
+                    first.Update(new InMemoryDocumentSource([]), []).GetAwaiter().GetResult())))
+                .GetAwaiter().GetResult());
+
+        await first.Build(source).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsType<InvalidOperationException>(nestedFailure);
+        first.GetIndexState();
+        second.GetIndexState();
+    }
+
+    [Fact]
     public async Task SnapshotDisposalFromCollectorIsRejectedWithoutPoisoningSnapshot()
     {
         using var index = SiftIndex.CreateInMemory();
@@ -43,7 +62,8 @@ public sealed class ConcurrencyTests
             new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter(),
             new CallbackHitCollector(() =>
-                callbackFailure = Record.Exception(snapshot.Dispose)));
+                callbackFailure = Record.Exception(() =>
+                    Task.Run(snapshot.Dispose).GetAwaiter().GetResult())));
 
         Assert.IsType<InvalidOperationException>(callbackFailure);
         Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
@@ -66,16 +86,46 @@ public sealed class ConcurrencyTests
             new CallbackHitCollector(() =>
             {
                 updateFailure = Record.Exception(() =>
-                    overlay.Update(
-                        new InMemoryDocumentSource([("src/b.txt", "other")]),
-                        []).GetAwaiter().GetResult());
-                disposeFailure = Record.Exception(overlay.Dispose);
+                    Task.Run(() => overlay.Update(
+                            new InMemoryDocumentSource([("src/b.txt", "other")]),
+                            []))
+                        .GetAwaiter().GetResult());
+                disposeFailure = Record.Exception(() =>
+                    Task.Run(overlay.Dispose).GetAwaiter().GetResult());
             }));
 
         Assert.IsType<InvalidOperationException>(updateFailure);
         Assert.IsType<InvalidOperationException>(disposeFailure);
         await overlay.Update(new InMemoryDocumentSource([("src/b.txt", "other")]), []);
         Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+    }
+
+    [Fact]
+    public async Task OverlayCommitCallbackCannotMutateTheSourceOverlay()
+    {
+        using var baseIndex = SiftIndex.CreateInMemory();
+        await baseIndex.Build(new InMemoryDocumentSource([]));
+        using var overlay = baseIndex.OpenOverlaySnapshot();
+        await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "needle")]), []);
+        using var target = SiftIndex.CreateInMemory();
+        await target.Build(new InMemoryDocumentSource([]));
+        Exception? callbackFailure = null;
+
+        await overlay.ApplyDeltaTo(
+            target,
+            new UpdateOptions
+            {
+                CommitMetadataProvider = _ =>
+                {
+                    callbackFailure = Record.Exception(() =>
+                        overlay.Update(new InMemoryDocumentSource([]), []).GetAwaiter().GetResult());
+                    return default;
+                }
+            },
+            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsType<InvalidOperationException>(callbackFailure);
+        Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
     }
 
     [Fact]

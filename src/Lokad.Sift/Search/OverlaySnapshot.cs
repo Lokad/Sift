@@ -92,7 +92,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ArgumentNullException.ThrowIfNull(upserts);
         ArgumentNullException.ThrowIfNull(deletions);
         ArgumentNullException.ThrowIfNull(options);
-        if (_stateLock.IsReadLockHeld)
+        if (ReentrancyGuard.IsActive(this))
         {
             throw new InvalidOperationException(
                 "An overlay cannot be updated from one of its active callbacks.");
@@ -390,6 +390,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(collector);
+        using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
         var hiddenPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
         hiddenPaths.UnionWith(_overlayDocuments.Keys);
@@ -431,6 +432,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(collector);
+        using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
         var watch = Stopwatch.StartNew();
 
@@ -550,7 +552,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public void Dispose()
     {
-        if (_stateLock.IsReadLockHeld)
+        if (ReentrancyGuard.IsActive(this))
         {
             throw new InvalidOperationException(
                 "An overlay cannot be disposed from one of its active callbacks.");
@@ -789,6 +791,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             ThrowIfDisposed();
             var documents = GetSortedOverlayDocumentMetadata();
             var deletions = CreateDeletionKeys(_deletedPaths);
+            using var callbackScope = ReentrancyGuard.Enter(this);
             return await target.Update(
                 new SnapshotDocumentSource(_overlayGeneration.Snapshot, documents),
                 deletions,

@@ -2,7 +2,6 @@ namespace Lokad.Sift;
 
 internal sealed class MutationCoordinator : IDisposable
 {
-    private static readonly AsyncLocal<MutationCoordinator?> Current = new();
     private readonly object _sync = new();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly ManualResetEventSlim _idle = new(initialState: true);
@@ -50,16 +49,8 @@ internal sealed class MutationCoordinator : IDisposable
             return await Task.Run(
                 async () =>
                 {
-                    var previous = Current.Value;
-                    Current.Value = this;
-                    try
-                    {
-                        return await mutation(operationCancellation.Token).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        Current.Value = previous;
-                    }
+                    using var callbackScope = ReentrancyGuard.Enter(this);
+                    return await mutation(operationCancellation.Token).ConfigureAwait(false);
                 },
                 CancellationToken.None).ConfigureAwait(false);
         }
@@ -117,7 +108,7 @@ internal sealed class MutationCoordinator : IDisposable
 
     public void ThrowIfExecutingMutation()
     {
-        if (ReferenceEquals(Current.Value, this))
+        if (ReentrancyGuard.IsActive(this))
         {
             throw new InvalidOperationException(
                 "The index cannot be mutated or disposed from one of its active mutation callbacks.");
