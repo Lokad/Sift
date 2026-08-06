@@ -15,7 +15,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly SiftOptions _options;
     private readonly SearchOptions _searchOptions;
     private SortedDictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
-    private HashSet<string> _deletedPaths = new(StringComparer.Ordinal);
+    private HashSet<string> _baseTombstones = new(StringComparer.Ordinal);
     private readonly BoundedLruCache<string, bool> _baseDocumentExistence = new(
         BaseExistenceCacheCapacity,
         BaseExistenceCacheCharacterCapacity,
@@ -177,9 +177,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
 
             SortedDictionary<string, long> nextOverlayDocuments;
-            HashSet<string> nextDeletedPaths;
+            HashSet<string> nextBaseTombstones;
             IReadOnlyDictionary<string, long> currentOverlayDocuments;
-            IReadOnlySet<string> currentDeletedPaths;
+            IReadOnlySet<string> currentBaseTombstones;
             HiddenPathVisibility currentVisibility;
             ulong currentRevision;
             var deletedDocuments = 0;
@@ -187,11 +187,11 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             try
             {
                 currentOverlayDocuments = _overlayDocuments;
-                currentDeletedPaths = _deletedPaths;
+                currentBaseTombstones = _baseTombstones;
                 nextOverlayDocuments = new SortedDictionary<string, long>(
                     _overlayDocuments,
                     StringComparer.Ordinal);
-                nextDeletedPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
+                nextBaseTombstones = new HashSet<string>(_baseTombstones, StringComparer.Ordinal);
                 currentVisibility = _hiddenPathVisibility;
                 currentRevision = _revision;
             }
@@ -204,14 +204,14 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             {
                 var document = load.Documents[i];
                 nextOverlayDocuments[document.Path] = document.MTimeUtcTicks;
-                nextDeletedPaths.Remove(document.Path);
+                nextBaseTombstones.Remove(document.Path);
             }
 
             foreach (var path in deletionSet)
             {
                 var removedOverlayDocument = nextOverlayDocuments.Remove(path);
                 var baseDocumentExists = baseDocuments[path];
-                var newlyHiddenBaseDocument = baseDocumentExists && nextDeletedPaths.Add(path);
+                var newlyHiddenBaseDocument = baseDocumentExists && nextBaseTombstones.Add(path);
                 if (removedOverlayDocument || newlyHiddenBaseDocument)
                 {
                     deletedDocuments++;
@@ -219,7 +219,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
                 if (!baseDocumentExists)
                 {
-                    nextDeletedPaths.Remove(path);
+                    nextBaseTombstones.Remove(path);
                 }
             }
 
@@ -232,7 +232,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             for (var i = 0; i < load.Documents.Count; i++)
             {
                 var path = load.Documents[i].Path;
-                if (!currentOverlayDocuments.ContainsKey(path) && !currentDeletedPaths.Contains(path))
+                if (!currentOverlayDocuments.ContainsKey(path) && !currentBaseTombstones.Contains(path))
                 {
                     visibilityAdditions.Add(Encoding.UTF8.GetBytes(path));
                 }
@@ -240,8 +240,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
             foreach (var path in deletionSet)
             {
-                var shouldHide = nextOverlayDocuments.ContainsKey(path) || nextDeletedPaths.Contains(path);
-                var isHidden = currentOverlayDocuments.ContainsKey(path) || currentDeletedPaths.Contains(path);
+                var shouldHide = nextOverlayDocuments.ContainsKey(path) || nextBaseTombstones.Contains(path);
+                var isHidden = currentOverlayDocuments.ContainsKey(path) || currentBaseTombstones.Contains(path);
                 if (shouldHide && !isHidden)
                 {
                     visibilityAdditions.Add(Encoding.UTF8.GetBytes(path));
@@ -290,7 +290,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 InvalidateOverlayHits();
                 _overlayGeneration = nextGeneration;
                 _overlayDocuments = nextOverlayDocuments;
-                _deletedPaths = nextDeletedPaths;
+                _baseTombstones = nextBaseTombstones;
                 _hiddenPathVisibility = nextVisibility;
                 _revision = nextRevision;
                 committedRevision = new OverlayRevision(nextRevision);
@@ -390,7 +390,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
         var visibleBaseCollector = new VisibleBaseDocumentCollector(
-            _deletedPaths,
+            _baseTombstones,
             _overlayDocuments,
             collector);
         var baseStats = _baseSnapshot.VisitDocuments(visibleBaseCollector, cancellationToken);
@@ -409,7 +409,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         using var state = BeginRead();
         var basePlan = _baseSnapshot.Explain(query, pathFilter);
-        if (_overlayDocuments.Count == 0 && _deletedPaths.Count == 0)
+        if (_overlayDocuments.Count == 0 && _baseTombstones.Count == 0)
         {
             return basePlan;
         }
@@ -544,7 +544,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return generation.Snapshot.TryGetSnapshotIndependentDocumentBytes(key, out content);
         }
 
-        if (_deletedPaths.Contains(normalizedPath))
+        if (_baseTombstones.Contains(normalizedPath))
         {
             content = default;
             return false;
@@ -823,7 +823,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
     private sealed class VisibleBaseDocumentCollector(
-        IReadOnlySet<string> deletedPaths,
+        IReadOnlySet<string> baseTombstones,
         IReadOnlyDictionary<string, long> overlayDocuments,
         IDocumentKeyCollector inner) : IDocumentKeyCollector
     {
@@ -831,7 +831,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         public bool OnDocument(DocumentKey key)
         {
-            if (deletedPaths.Contains(key.Path) || overlayDocuments.ContainsKey(key.Path))
+            if (baseTombstones.Contains(key.Path) || overlayDocuments.ContainsKey(key.Path))
             {
                 return true;
             }
@@ -882,7 +882,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         {
             ThrowIfUnavailable();
             var documents = GetSortedOverlayDocumentMetadata();
-            var deletions = CreateDeletionKeys(_deletedPaths);
+            var deletions = CreateDeletionKeys(_baseTombstones);
             using var callbackScope = ReentrancyGuard.Enter(this);
             return await target.Update(
                 new SnapshotDocumentSource(_overlayGeneration.Snapshot, documents),
@@ -947,7 +947,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     internal int GetRetainedTombstoneCount()
     {
         using var state = BeginRead();
-        return _deletedPaths.Count;
+        return _baseTombstones.Count;
     }
 
     private sealed class OverlayHitCollector : IHitCollector
