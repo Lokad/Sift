@@ -104,6 +104,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             try
             {
                 ThrowIfDisposed();
+                // Document sources are caller callbacks. Mark the serialized mutation so
+                // synchronous reentry fails instead of waiting on the lock already held here.
+                using var callbackScope = ReentrancyGuard.Enter(this);
                 await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
                 return await ApplyUpdateUnderLock().ConfigureAwait(false);
             }

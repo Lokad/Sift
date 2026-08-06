@@ -101,6 +101,29 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task OverlayMutationSourceRejectsReentrantMutationAndDisposalWithoutDeadlocking()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        Exception? updateFailure = null;
+        Exception? disposeFailure = null;
+        var source = new CallbackDocumentSource(() =>
+        {
+            updateFailure = Record.Exception(() =>
+                overlay.Update(new InMemoryDocumentSource([]), []).GetAwaiter().GetResult());
+            disposeFailure = Record.Exception(overlay.Dispose);
+        });
+
+        await overlay.Update(source, []).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsType<InvalidOperationException>(updateFailure);
+        Assert.IsType<InvalidOperationException>(disposeFailure);
+        await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "alpha")]), []);
+        Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+    }
+
+    [Fact]
     public async Task OverlayCommitCallbackCannotMutateTheSourceOverlay()
     {
         using var baseIndex = SiftIndex.CreateInMemory();
