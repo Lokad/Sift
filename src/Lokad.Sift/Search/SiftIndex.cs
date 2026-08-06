@@ -12,7 +12,7 @@ public sealed class SiftIndex : ISiftIndex
     private delegate ValueTask<StreamedDocuments> UpdateDocumentStreamer(
         IReadOnlySet<string> forbiddenPaths,
         RejectedUpsertPolicy rejectedUpsertPolicy,
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition,
         CancellationToken cancellationToken);
 
@@ -672,10 +672,10 @@ public sealed class SiftIndex : ISiftIndex
                 upsertLoad = await streamDocuments(
                     deletionSet,
                     options.RejectedUpsertPolicy,
-                    partition => liveDocuments.ResolveExistingAndRemoveUnchanged(
-                        partition,
-                        existingUpsertKeys,
-                        cancellationToken),
+                    (partition, _) => liveDocuments.ResolveExistingAndRemoveUnchanged(
+                            partition,
+                            existingUpsertKeys,
+                            cancellationToken),
                     partition =>
                     {
                         var segmentId = new SegmentId(segmentSeed + (ulong)publishedSegments.Count);

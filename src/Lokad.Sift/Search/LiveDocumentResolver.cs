@@ -121,14 +121,14 @@ internal sealed class LiveDocumentResolver(
         return live;
     }
 
-    public void ResolveExistingAndRemoveUnchanged(
+    public long ResolveExistingAndRemoveUnchanged(
         List<StoredDocument> documents,
         IDictionary<string, LiveDocumentKey> existingKeys,
         CancellationToken cancellationToken)
     {
         if (documents.Count == 0)
         {
-            return;
+            return 0;
         }
 
         var states = ArrayPool<byte>.Shared.Rent(documents.Count);
@@ -241,15 +241,19 @@ internal sealed class LiveDocumentResolver(
             }
 
             var retainedCount = 0;
+            long retainedBytes = 0;
             for (var documentIndex = 0; documentIndex < documents.Count; documentIndex++)
             {
                 if (states[documentIndex] != 2)
                 {
-                    documents[retainedCount++] = documents[documentIndex];
+                    var document = documents[documentIndex];
+                    documents[retainedCount++] = document;
+                    retainedBytes = checked(retainedBytes + document.Content.Length);
                 }
             }
 
             documents.RemoveRange(retainedCount, documents.Count - retainedCount);
+            return retainedBytes;
         }
         finally
         {

@@ -331,7 +331,7 @@ internal sealed class IndexCompactor
                     cancellationToken));
             }
 
-            return new CompactionPublication(published, mergedDocuments, contentBytes);
+            return new CompactionPublication(mergedDocuments, contentBytes);
         }
         finally
         {
@@ -584,7 +584,6 @@ internal sealed class IndexCompactor
 }
 
 internal readonly record struct CompactionPublication(
-    List<SegmentManifestEntry> Segments,
     int MergedDocuments,
     long ContentBytes);
 

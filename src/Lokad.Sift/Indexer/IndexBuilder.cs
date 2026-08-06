@@ -6,10 +6,14 @@ using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Indexer;
 
+internal delegate long PrepareDocumentPartition(
+    List<StoredDocument> documents,
+    long contentBytes);
+
 internal sealed class IndexBuilder
 {
     private delegate ValueTask<StreamedDocuments> BuildDocumentStreamer(
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition);
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -90,7 +94,7 @@ internal sealed class IndexBuilder
         try
         {
             load = await streamDocuments(
-                static _ => { },
+                static (_, contentBytes) => contentBytes,
                 partition =>
                 {
                     var segmentId = new SegmentId(segmentSeed + (ulong)entries.Count);
@@ -171,7 +175,7 @@ internal sealed class IndexBuilder
         IReadOnlySet<string>? forbiddenPaths,
         RejectedUpsertPolicy rejectedUpsertPolicy,
         bool collectAcceptedPaths,
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         var accumulator = new StreamedDocumentAccumulator(
@@ -200,7 +204,7 @@ internal sealed class IndexBuilder
         IReadOnlySet<string>? forbiddenPaths,
         RejectedUpsertPolicy rejectedUpsertPolicy,
         bool collectAcceptedPaths,
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         var accumulator = new StreamedDocumentAccumulator(
@@ -227,7 +231,7 @@ internal sealed class IndexBuilder
         SiftOptions options,
         IReadOnlySet<string> forbiddenPaths,
         bool collectAcceptedPaths,
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         var partitioner = new StoredDocumentPartitioner(
@@ -279,7 +283,7 @@ internal sealed class IndexBuilder
         IReadOnlySet<string>? forbiddenPaths,
         RejectedUpsertPolicy rejectedUpsertPolicy,
         bool collectAcceptedPaths,
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         private readonly DocumentIngestionAccumulator _ingestion = new(
@@ -387,7 +391,7 @@ internal sealed class IndexBuilder
         SiftOptions options,
         bool collectAcceptedPaths,
         bool materializeDocuments,
-        Action<List<StoredDocument>> preparePartition,
+        PrepareDocumentPartition preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
         private readonly HashSet<string>? _acceptedPaths = collectAcceptedPaths
@@ -435,8 +439,7 @@ internal sealed class IndexBuilder
             _partition.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
             var candidateCount = _partition.Count;
             var candidateBytes = _partitionBytes;
-            preparePartition(_partition);
-            _partitionBytes = _partition.Sum(static document => (long)document.Content.Length);
+            _partitionBytes = preparePartition(_partition, _partitionBytes);
             _skipped += candidateCount - _partition.Count;
             _skippedBytes = checked(_skippedBytes + candidateBytes - _partitionBytes);
             _accepted += _partition.Count;
@@ -518,7 +521,7 @@ internal sealed class IndexBuilder
             options,
             collectAcceptedPaths: false,
             materializeDocuments: false,
-            static _ => { },
+            static (_, contentBytes) => contentBytes,
             partition => partitions.Add([.. partition]));
         foreach (var document in documents)
         {
