@@ -12,6 +12,32 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageIntegrityTests
 {
     [Fact]
+    public void SnapshotConstructionFailureReleasesGenerationLease()
+    {
+        var entry = new SegmentManifestEntry(
+            new SegmentId(1),
+            DocumentCount: 0,
+            ContentBytes: 0,
+            DeadOrdinalSet.Empty,
+            DeadContentBytes: 0);
+        var manifest = new CorpusManifest(
+            CorpusId.New(),
+            new StorageGeneration(1),
+            [entry, entry]);
+        var lease = new TrackingDisposable();
+        var storage = new SnapshotOnlyStorage(manifest, lease);
+
+        Assert.Throws<ArgumentException>(() => new SearchSnapshot(
+            storage,
+            new SiftOptions(),
+            new SearchOptions(),
+            onDisposed: null,
+            onIndexFailure: null));
+
+        Assert.True(lease.IsDisposed);
+    }
+
+    [Fact]
     public async Task InMemoryStorageSharesFrozenManifestAcrossReaders()
     {
         var storage = new InMemorySiftStorage();
@@ -1484,6 +1510,41 @@ public sealed class StorageIntegrityTests
             {
                 writerLockAllowed.Set();
             }
+        }
+    }
+
+    private sealed class SnapshotOnlyStorage(
+        CorpusManifest manifest,
+        IDisposable lease) : ISiftStorage
+    {
+        public bool HasManifest => true;
+        public bool IsReclamationPending => false;
+        public IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+        public CorpusManifest ReadManifest() => manifest;
+        public CorpusManifest RefreshManifest() => manifest;
+        public MappedSegment OpenSegment(SegmentId segmentId) => throw new NotSupportedException();
+        public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+        public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+        public long GetSegmentBytes(SegmentId segmentId) => throw new NotSupportedException();
+        public long? GetAvailableBytes() => throw new NotSupportedException();
+        public void EnsureSnapshotMetadata() => throw new NotSupportedException();
+        public StorageReadSnapshot OpenReadSnapshot() => new(manifest, lease);
+        public StorageReadSnapshot OpenReadSnapshotForValidation() => throw new NotSupportedException();
+        public StorageStats GetStorageStats() => throw new NotSupportedException();
+        public void ReclaimUnreferencedSegments(CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class TrackingDisposable : IDisposable
+    {
+        public bool IsDisposed { get; private set; }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
         }
     }
 

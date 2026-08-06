@@ -3,6 +3,7 @@ using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Search;
 using Lokad.Sift.Storage;
+using static Lokad.Sift.IndexCorruption;
 
 namespace Lokad.Sift;
 
@@ -1191,11 +1192,6 @@ public sealed class SiftIndex : ISiftIndex
         {
             Interlocked.CompareExchange(ref _rebuildCause, exception, null);
         }
-    }
-
-    private static bool IsIndexCorruption(Exception exception)
-    {
-        return exception is InvalidDataException or FileNotFoundException or DirectoryNotFoundException or EndOfStreamException;
     }
 
     private sealed class ManagedMemoryPeakMeasurement : IDisposable

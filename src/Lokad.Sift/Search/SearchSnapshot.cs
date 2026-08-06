@@ -9,6 +9,7 @@ using Lokad.Sift;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Storage;
+using static Lokad.Sift.IndexCorruption;
 
 namespace Lokad.Sift.Search;
 
@@ -70,11 +71,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         _onDisposed = onDisposed;
         _onIndexFailure = onIndexFailure;
         _storageSnapshot = storage.OpenReadSnapshot();
-        // A snapshot pins the manifest generation, not every segment mapping.
-        // Search operations open only the segment packs they are actively using.
-        _segments = _storageSnapshot.Manifest.Segments;
-        _segmentsById = _segments.ToDictionary(static entry => entry.SegmentId);
-        _planExplainer = new SearchPlanExplainer(_segments, _options, OpenSegment);
+        try
+        {
+            // A snapshot pins the manifest generation, not every segment mapping.
+            // Search operations open only the segment packs they are actively using.
+            _segments = _storageSnapshot.Manifest.Segments;
+            _segmentsById = _segments.ToDictionary(static entry => entry.SegmentId);
+            _planExplainer = new SearchPlanExplainer(_segments, _options, OpenSegment);
+        }
+        catch
+        {
+            _storageSnapshot.Dispose();
+            throw;
+        }
     }
 
     public DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector)
@@ -724,14 +733,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private void ReportIndexFailure(Exception exception)
     {
         _onIndexFailure?.Invoke(exception);
-    }
-
-    private static bool IsIndexCorruption(Exception exception)
-    {
-        return exception is InvalidDataException or
-            FileNotFoundException or
-            DirectoryNotFoundException or
-            EndOfStreamException;
     }
 
     private void ValidateQuery(SearchQuery query)
