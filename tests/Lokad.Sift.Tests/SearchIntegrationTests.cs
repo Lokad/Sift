@@ -985,6 +985,10 @@ public sealed class SearchIntegrationTests
         Assert.Contains("Get>Async>(", groups);
         Assert.Contains("Load>Async>(", groups);
         Assert.Contains("TryGet>Async>(", groups);
+        Assert.All(
+            program.OrderedAnchorGroups,
+            static group => Assert.True(
+                group.Anchors.Length <= Utf8RegexEngine.MaximumOrderedAnchorsPerGroup));
     }
 
     [Fact]

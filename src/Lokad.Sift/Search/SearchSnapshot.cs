@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -1387,13 +1387,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return true;
         }
 
-        var maximumGroupLength = preparedOrderedAnchorGroups.Max(static group => group.Length);
-        Span<int> nextStartsBuffer = stackalloc int[maximumGroupLength];
-        Span<int> latestReachableEndsBuffer = stackalloc int[maximumGroupLength];
+        // The regex compiler enforces this shared bound independently of the public
+        // pattern-length option, so prechecking always uses fixed-size stack storage.
+        Span<int> nextStartsBuffer = stackalloc int[Utf8RegexEngine.MaximumOrderedAnchorsPerGroup];
+        Span<int> latestReachableEndsBuffer = stackalloc int[Utf8RegexEngine.MaximumOrderedAnchorsPerGroup];
         for (var groupIndex = 0; groupIndex < preparedOrderedAnchorGroups.Length; groupIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var group = preparedOrderedAnchorGroups[groupIndex];
+            Debug.Assert(group.Length <= Utf8RegexEngine.MaximumOrderedAnchorsPerGroup);
             var nextStarts = nextStartsBuffer[..group.Length];
             var latestReachableEnds = latestReachableEndsBuffer[..group.Length];
             latestReachableEnds.Fill(-1);

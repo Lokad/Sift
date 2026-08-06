@@ -13,6 +13,7 @@ internal static class Utf8RegexEngine
 {
     internal const int CacheCapacity = 256;
     internal const int CachePatternCharacterCapacity = 256 * 1024;
+    internal const int MaximumOrderedAnchorsPerGroup = 4;
     private static readonly BoundedLruCache<Utf8RegexCacheKey, CompiledUtf8Regex> Cache = new(
         CacheCapacity,
         CachePatternCharacterCapacity,
@@ -740,7 +741,6 @@ internal static class Utf8RegexEngine
         private const int MaxLeadingLiteralSetOptions = 16;
         private const int MaxLeadingLiteralSetBytes = 64;
         private const int MaxOrderedAnchorGroups = 16;
-        private const int MaxOrderedAnchorsPerGroup = 4;
         private const int MaxOrderedAnchorBytes = 32;
 
         public static Utf8RegexProgram Compile(string pattern, Utf8RegexNode root, bool multiline, bool dotAll, bool ignoreCase)
@@ -1023,7 +1023,7 @@ internal static class Utf8RegexEngine
                 appendToExisting = true;
                 pendingSeparator = null;
                 anchorCount = Math.Max(anchorCount, GetMaxAnchorCount(groups));
-                if (anchorCount > MaxOrderedAnchorsPerGroup)
+                if (anchorCount > MaximumOrderedAnchorsPerGroup)
                 {
                     groups = [];
                     return false;
@@ -1132,7 +1132,7 @@ internal static class Utf8RegexEngine
                         }
                     }
 
-                    if (merged.Count > MaxOrderedAnchorsPerGroup)
+                    if (merged.Count > MaximumOrderedAnchorsPerGroup)
                     {
                         combined = [];
                         return false;
