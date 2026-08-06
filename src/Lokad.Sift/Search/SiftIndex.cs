@@ -668,8 +668,7 @@ public sealed class SiftIndex : ISiftIndex
                 upsertLoad = await streamDocuments(
                     deletionSet,
                     options.RejectedUpsertPolicy,
-                    partition => RemoveUnchangedDocuments(
-                        liveDocuments,
+                    partition => liveDocuments.ResolveExistingAndRemoveUnchanged(
                         partition,
                         existingUpsertKeys,
                         cancellationToken),
@@ -1302,33 +1301,6 @@ public sealed class SiftIndex : ISiftIndex
                 }
             }
         }
-    }
-
-    private void RemoveUnchangedDocuments(
-        LiveDocumentResolver liveDocuments,
-        List<StoredDocument> documents,
-        IDictionary<string, LiveDocumentKey> existingKeys,
-        CancellationToken cancellationToken)
-    {
-        if (documents.Count == 0)
-        {
-            return;
-        }
-
-        var byPath = documents.ToDictionary(static document => document.Path, StringComparer.Ordinal);
-        var paths = byPath.Keys.ToHashSet(StringComparer.Ordinal);
-        var unchangedPaths = new HashSet<string>(StringComparer.Ordinal);
-        var current = liveDocuments.ResolveAndFindUnchanged(
-            paths,
-            byPath,
-            unchangedPaths,
-            cancellationToken);
-        foreach (var pair in current)
-        {
-            existingKeys.Add(pair.Key, pair.Value);
-        }
-
-        documents.RemoveAll(document => unchangedPaths.Contains(document.Path));
     }
 
     private sealed class Utf8PathComparer : IComparer<byte[]>

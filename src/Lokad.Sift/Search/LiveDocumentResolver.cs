@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Numerics;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.Storage;
@@ -12,42 +13,6 @@ internal sealed class LiveDocumentResolver(
 
     public Dictionary<string, LiveDocumentKey> Resolve(
         IReadOnlySet<string> affectedPaths,
-        CancellationToken cancellationToken)
-    {
-        return Resolve(
-            affectedPaths,
-            incomingDocuments: null,
-            unchangedPaths: null,
-            cancellationToken);
-    }
-
-    public Dictionary<string, LiveDocumentKey> ResolveAndFindUnchanged(
-        IReadOnlySet<string> affectedPaths,
-        IReadOnlyDictionary<string, StoredDocument> incomingDocuments,
-        ISet<string> unchangedPaths,
-        CancellationToken cancellationToken)
-    {
-        return Resolve(
-            affectedPaths,
-            incomingDocuments,
-            unchangedPaths,
-            cancellationToken);
-    }
-
-    public void Dispose()
-    {
-        foreach (var segment in _openedSegments.Values)
-        {
-            segment.Dispose();
-        }
-
-        _openedSegments.Clear();
-    }
-
-    private Dictionary<string, LiveDocumentKey> Resolve(
-        IReadOnlySet<string> affectedPaths,
-        IReadOnlyDictionary<string, StoredDocument>? incomingDocuments,
-        ISet<string>? unchangedPaths,
         CancellationToken cancellationToken)
     {
         var live = new Dictionary<string, LiveDocumentKey>(affectedPaths.Count, StringComparer.Ordinal);
@@ -86,13 +51,6 @@ internal sealed class LiveDocumentResolver(
                         var document = segment.GetDocument(foundOrdinal);
                         var key = CreateKey(entry.SegmentId, foundOrdinal, document);
                         live.Add(path, key);
-                        RecordUnchangedDocument(
-                            segment,
-                            document,
-                            path,
-                            key,
-                            incomingDocuments,
-                            unchangedPaths);
                     }
                 }
 
@@ -152,13 +110,6 @@ internal sealed class LiveDocumentResolver(
                     var path = sortedPaths[pathIndex];
                     var key = CreateKey(entry.SegmentId, ordinal, document);
                     live.Add(path, key);
-                    RecordUnchangedDocument(
-                        segment,
-                        document,
-                        path,
-                        key,
-                        incomingDocuments,
-                        unchangedPaths);
                 }
 
                 unresolvedPaths.Remove(sortedPaths[pathIndex]);
@@ -168,6 +119,152 @@ internal sealed class LiveDocumentResolver(
         }
 
         return live;
+    }
+
+    public void ResolveExistingAndRemoveUnchanged(
+        List<StoredDocument> documents,
+        IDictionary<string, LiveDocumentKey> existingKeys,
+        CancellationToken cancellationToken)
+    {
+        if (documents.Count == 0)
+        {
+            return;
+        }
+
+        var states = ArrayPool<byte>.Shared.Rent(documents.Count);
+        Array.Clear(states, 0, documents.Count);
+        try
+        {
+            var unresolvedCount = documents.Count;
+            for (var entryIndex = manifest.Segments.Count - 1;
+                 entryIndex >= 0 && unresolvedCount > 0;
+                 entryIndex--)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var entry = manifest.Segments[entryIndex];
+                var segment = OpenSegment(entry.SegmentId, cancellationToken);
+                var binarySearchComparisons = (long)unresolvedCount *
+                    (BitOperations.Log2((uint)Math.Max(segment.DocumentCount, 1)) + 1);
+                if (binarySearchComparisons <= segment.DocumentCount)
+                {
+                    for (var incomingIndex = 0; incomingIndex < documents.Count; incomingIndex++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (states[incomingIndex] != 0 ||
+                            !segment.TryFindDocumentOrdinal(documents[incomingIndex].Path, out var foundOrdinal))
+                        {
+                            continue;
+                        }
+
+                        states[incomingIndex] = 1;
+                        unresolvedCount--;
+                        if (!entry.DeadOrdinals.Contains(foundOrdinal))
+                        {
+                            var indexedDocument = segment.GetDocument(foundOrdinal);
+                            RecordExistingDocument(
+                                segment,
+                                indexedDocument,
+                                entry.SegmentId,
+                                foundOrdinal,
+                                documents[incomingIndex],
+                                existingKeys,
+                                ref states[incomingIndex]);
+                        }
+                    }
+
+                    continue;
+                }
+
+                // Incoming partitions and segment documents are both path-sorted.
+                // Preserve that ordering instead of rebuilding and sorting path sets.
+                var documentIndex = 0;
+                var ordinal = 0u;
+                var deadIndex = 0;
+                var comparisons = 0;
+                while (documentIndex < documents.Count && ordinal < segment.DocumentCount)
+                {
+                    while (documentIndex < documents.Count && states[documentIndex] != 0)
+                    {
+                        documentIndex++;
+                    }
+
+                    if (documentIndex >= documents.Count)
+                    {
+                        break;
+                    }
+
+                    if ((comparisons++ & 0xFFF) == 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    var indexedDocument = segment.GetDocument(ordinal);
+                    var comparison = segment.ComparePathOrdinal(
+                        indexedDocument,
+                        documents[documentIndex].Path);
+                    if (comparison < 0)
+                    {
+                        ordinal++;
+                        continue;
+                    }
+
+                    if (comparison > 0)
+                    {
+                        documentIndex++;
+                        continue;
+                    }
+
+                    while (deadIndex < entry.DeadOrdinals.Length &&
+                           entry.DeadOrdinals[deadIndex] < ordinal)
+                    {
+                        deadIndex++;
+                    }
+
+                    states[documentIndex] = 1;
+                    unresolvedCount--;
+                    if (deadIndex >= entry.DeadOrdinals.Length ||
+                        entry.DeadOrdinals[deadIndex] != ordinal)
+                    {
+                        RecordExistingDocument(
+                            segment,
+                            indexedDocument,
+                            entry.SegmentId,
+                            ordinal,
+                            documents[documentIndex],
+                            existingKeys,
+                            ref states[documentIndex]);
+                    }
+
+                    ordinal++;
+                    documentIndex++;
+                }
+            }
+
+            var retainedCount = 0;
+            for (var documentIndex = 0; documentIndex < documents.Count; documentIndex++)
+            {
+                if (states[documentIndex] != 2)
+                {
+                    documents[retainedCount++] = documents[documentIndex];
+                }
+            }
+
+            documents.RemoveRange(retainedCount, documents.Count - retainedCount);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(states);
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var segment in _openedSegments.Values)
+        {
+            segment.Dispose();
+        }
+
+        _openedSegments.Clear();
     }
 
     private MappedSegment OpenSegment(
@@ -197,29 +294,29 @@ internal sealed class LiveDocumentResolver(
             document.ContentHash64);
     }
 
-    private static void RecordUnchangedDocument(
+    private static void RecordExistingDocument(
         MappedSegment segment,
         SegmentDocument indexedDocument,
-        string path,
-        in LiveDocumentKey indexedKey,
-        IReadOnlyDictionary<string, StoredDocument>? incomingDocuments,
-        ISet<string>? unchangedPaths)
+        SegmentId segmentId,
+        uint ordinal,
+        StoredDocument incomingDocument,
+        IDictionary<string, LiveDocumentKey> existingKeys,
+        ref byte state)
     {
-        if (incomingDocuments is null ||
-            unchangedPaths is null ||
-            !incomingDocuments.TryGetValue(path, out var incoming) ||
-            indexedKey.ContentLength != incoming.Content.Length ||
-            indexedKey.ContentHash64 != incoming.ContentHash64 ||
-            indexedKey.MTimeUtcTicks != incoming.MTimeUtcTicks)
+        var indexedKey = CreateKey(segmentId, ordinal, indexedDocument);
+        existingKeys.Add(incomingDocument.Path, indexedKey);
+        if (indexedKey.ContentLength != incomingDocument.Content.Length ||
+            indexedKey.ContentHash64 != incomingDocument.ContentHash64 ||
+            indexedKey.MTimeUtcTicks != incomingDocument.MTimeUtcTicks)
         {
             return;
         }
 
         // The persisted hash is only a fast rejection filter; byte equality
         // is required before suppressing a replacement.
-        if (segment.GetContentBytes(indexedDocument).SequenceEqual(incoming.Content.Span))
+        if (segment.GetContentBytes(indexedDocument).SequenceEqual(incomingDocument.Content.Span))
         {
-            unchangedPaths.Add(path);
+            state = 2;
         }
     }
 }
