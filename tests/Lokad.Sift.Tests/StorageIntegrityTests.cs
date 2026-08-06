@@ -13,6 +13,45 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageIntegrityTests
 {
     [Fact]
+    public async Task OlderManifestRefreshCannotReplaceNewerStoredGeneration()
+    {
+        using var fixture = new CorpusFixture();
+        Directory.CreateDirectory(fixture.CorpusPath);
+        var path = Path.Combine(fixture.CorpusPath, "manifest-cache-test.bin");
+        var first = new CorpusManifest(
+            CorpusId.New(),
+            new StorageGeneration(1),
+            []);
+        var second = new CorpusManifest(
+            first.CorpusId,
+            new StorageGeneration(2),
+            []);
+        File.WriteAllBytes(path, CorpusManifestCodec.Encode(first));
+        var cache = new CorpusManifestCache();
+        var refreshReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRefresh = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        cache.BeforeRefreshCacheStore = () =>
+        {
+            refreshReady.SetResult();
+            releaseRefresh.Task.GetAwaiter().GetResult();
+        };
+        var olderRefresh = Task.Run(() => cache.Refresh(path));
+        await refreshReady.Task;
+        File.WriteAllBytes(path, CorpusManifestCodec.Encode(second));
+        cache.Store(path, second);
+
+        releaseRefresh.SetResult();
+        Assert.Equal(first.CorpusId, (await olderRefresh).CorpusId);
+        cache.BeforeRefreshCacheStore = null;
+        var parseCount = cache.ParseCount;
+
+        Assert.Same(second, cache.Read(path));
+        Assert.Equal(parseCount, cache.ParseCount);
+    }
+
+    [Fact]
     public void SnapshotConstructionFailureReleasesGenerationLease()
     {
         var entry = new SegmentManifestEntry(

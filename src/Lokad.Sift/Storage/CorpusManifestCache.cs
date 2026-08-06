@@ -8,6 +8,7 @@ internal sealed class CorpusManifestCache
     private long _parseCount;
 
     public long ParseCount => Interlocked.Read(ref _parseCount);
+    internal Action? BeforeRefreshCacheStore { get; set; }
 #endif
 
     public CorpusManifest Read(string manifestPath)
@@ -38,9 +39,17 @@ internal sealed class CorpusManifestCache
         var currentStamp = ReadStamp(manifestPath);
         if (currentStamp == stamp && manifest.Generation.Value == stamp.Generation)
         {
+#if SIFT_INTERNAL_VERIFICATION
+            BeforeRefreshCacheStore?.Invoke();
+#endif
             lock (_sync)
             {
-                _cached = new CacheEntry(stamp, manifest);
+                // Parsing deliberately happens outside the lock. A publisher may have
+                // installed a newer generation meanwhile; never regress that cache entry.
+                if (_cached is not { } cached || cached.Stamp.Generation <= stamp.Generation)
+                {
+                    _cached = new CacheEntry(stamp, manifest);
+                }
             }
         }
 
