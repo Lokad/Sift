@@ -33,6 +33,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private HiddenPathVisibility _hiddenPathVisibility = HiddenPathVisibility.Empty;
     private ulong _nextSyntheticSegmentId = ulong.MaxValue;
     private ulong _revision;
+    private Exception? _failure;
     private int _disposed;
 
     internal OverlaySnapshot(SearchSnapshot baseSnapshot, SiftOptions options, SearchOptions searchOptions)
@@ -41,10 +42,26 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseIdentity = baseSnapshot.Identity;
         _options = options;
         _searchOptions = searchOptions;
-        _overlayIndex = SiftIndex.CreateInMemory(options);
-        _overlayGeneration = new OverlayGeneration(
-            (SearchSnapshot)_overlayIndex.OpenSnapshot(searchOptions));
-        _baseSegmentIds = new HashSet<SegmentId>(_baseSnapshot.GetSegmentIds());
+        var overlayIndex = SiftIndex.CreateInMemory(options);
+        SearchSnapshot? overlaySnapshot = null;
+        try
+        {
+            overlaySnapshot = (SearchSnapshot)overlayIndex.OpenSnapshot(searchOptions);
+            var overlayGeneration = new OverlayGeneration(overlaySnapshot);
+            var baseSegmentIds = new HashSet<SegmentId>(_baseSnapshot.GetSegmentIds());
+            _overlayIndex = overlayIndex;
+            _overlayGeneration = overlayGeneration;
+            _baseSegmentIds = baseSegmentIds;
+        }
+        catch
+        {
+            // Ownership of the base snapshot transfers at entry, so a failed constructor
+            // must release every staged resource that the caller can no longer receive.
+            overlaySnapshot?.Dispose();
+            overlayIndex.Dispose();
+            _baseSnapshot.Dispose();
+            throw;
+        }
     }
 
     public Task<OverlayUpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
@@ -103,7 +120,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                ThrowIfDisposed();
+                ThrowIfUnavailable();
                 // Document sources are caller callbacks. Mark the serialized mutation so
                 // synchronous reentry fails instead of waiting on the lock already held here.
                 using var callbackScope = ReentrancyGuard.Enter(this);
@@ -249,8 +266,22 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 ? incrementedRevision
                 : currentRevision;
 
-            var nextGeneration = new OverlayGeneration(
-                (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions));
+            OverlayGeneration nextGeneration;
+            try
+            {
+#if SIFT_INTERNAL_VERIFICATION
+                BeforeOpeningCommittedSnapshot?.Invoke();
+#endif
+                nextGeneration = new OverlayGeneration(
+                    (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions));
+            }
+            catch (Exception exception)
+            {
+                // The inner manifest is already committed. Keeping the old metadata usable
+                // would let a later mutation combine two different logical generations.
+                Interlocked.CompareExchange(ref _failure, exception, null);
+                throw;
+            }
             OverlayRevision committedRevision;
             OverlayGeneration previousGeneration;
             _stateLock.EnterWriteLock();
@@ -601,6 +632,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
 #if SIFT_INTERNAL_VERIFICATION
+    internal Action? BeforeOpeningCommittedSnapshot { get; set; }
+
     internal int RetainedOverlayHitOriginCount
     {
         get
@@ -618,7 +651,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _stateLock.EnterReadLock();
         try
         {
-            ThrowIfDisposed();
+            ThrowIfUnavailable();
             return new StateReadLease(_stateLock);
         }
         catch
@@ -628,11 +661,17 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
     }
 
-    private void ThrowIfDisposed()
+    private void ThrowIfUnavailable()
     {
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
+        if (Volatile.Read(ref _failure) is { } failure)
+        {
+            throw new InvalidOperationException(
+                "The overlay cannot be used after its committed state failed to open.",
+                failure);
+        }
     }
 
     private List<OverlayDocumentMetadata> GetSortedOverlayDocumentMetadata()
@@ -858,7 +897,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ThrowIfDisposed();
+            ThrowIfUnavailable();
             var documents = GetSortedOverlayDocumentMetadata();
             var deletions = CreateDeletionKeys(_deletedPaths);
             using var callbackScope = ReentrancyGuard.Enter(this);

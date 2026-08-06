@@ -307,6 +307,28 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayFaultsWhenCommittedStateCannotBeOpened()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = Assert.IsType<OverlaySnapshot>(index.OpenOverlaySnapshot());
+        var injectedFailure = new IOException("Injected snapshot-open failure.");
+        overlay.BeforeOpeningCommittedSnapshot = () => throw injectedFailure;
+
+        var failure = await Assert.ThrowsAsync<IOException>(() => overlay.Update(
+            new InMemoryDocumentSource([("src/a.txt", "alpha")]),
+            []));
+
+        Assert.Same(injectedFailure, failure);
+        var unavailable = Assert.Throws<InvalidOperationException>(() =>
+            overlay.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        Assert.Same(injectedFailure, unavailable.InnerException);
+        var updateUnavailable = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            overlay.Update(new InMemoryDocumentSource([]), []));
+        Assert.Same(injectedFailure, updateUnavailable.InnerException);
+    }
+
+    [Fact]
     public async Task OverlayUpdatesBoundHitOriginTrackingToTheCurrentGeneration()
     {
         const int revisions = 8;
