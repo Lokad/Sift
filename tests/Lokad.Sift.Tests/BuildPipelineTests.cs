@@ -177,6 +177,7 @@ public sealed class BuildPipelineTests
             source,
             CancellationToken.None,
             new SiftOptions(),
+            operationName: "build",
             RejectedUpsertPolicy.FailUpdate,
             retainContentBeyondOperation: false);
 

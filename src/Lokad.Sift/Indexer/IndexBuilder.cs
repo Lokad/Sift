@@ -282,28 +282,69 @@ internal sealed class IndexBuilder
         Action<List<StoredDocument>> preparePartition,
         Action<IReadOnlyList<StoredDocument>> publishPartition)
     {
-        private readonly HashSet<string> _submittedPaths = new(StringComparer.Ordinal);
+        private readonly DocumentIngestionAccumulator _ingestion = new(
+            options,
+            operationName,
+            forbiddenPaths,
+            rejectedUpsertPolicy,
+            retainContentBeyondOperation: false);
         private readonly StoredDocumentPartitioner _partitioner = new(
             options,
             collectAcceptedPaths,
             materializeDocuments: true,
             preparePartition,
             publishPartition);
-        private readonly List<RejectedDocument> _rejectedDocuments = [];
-        private int _submitted;
-        private long _submittedBytes;
-        private int _rejected;
-        private long _rejectedBytes;
 
         public void Add(SubmittedDocument submittedDocument)
         {
-            _submitted++;
-            _submittedBytes = checked(_submittedBytes + submittedDocument.Content.Length);
+            var document = _ingestion.Add(submittedDocument);
+            if (document is not null)
+            {
+                _partitioner.Add(document);
+            }
+        }
 
+        public StreamedDocuments Complete()
+        {
+            var partitioning = _partitioner.Complete();
+            return new StreamedDocuments(
+                _ingestion.Submitted,
+                partitioning.Accepted,
+                partitioning.Skipped,
+                _ingestion.Rejected,
+                _ingestion.SubmittedBytes,
+                partitioning.AcceptedBytes,
+                partitioning.SkippedBytes,
+                _ingestion.RejectedBytes,
+                partitioning.AcceptedPaths,
+                _ingestion.RejectedDocuments);
+        }
+    }
+
+    private sealed class DocumentIngestionAccumulator(
+        SiftOptions options,
+        string operationName,
+        IReadOnlySet<string>? forbiddenPaths,
+        RejectedUpsertPolicy rejectedUpsertPolicy,
+        bool retainContentBeyondOperation)
+    {
+        private readonly HashSet<string> _submittedPaths = new(StringComparer.Ordinal);
+        private readonly List<RejectedDocument> _rejectedDocuments = [];
+
+        public int Submitted { get; private set; }
+        public long SubmittedBytes { get; private set; }
+        public int Rejected { get; private set; }
+        public long RejectedBytes { get; private set; }
+        public IReadOnlyList<RejectedDocument> RejectedDocuments => _rejectedDocuments;
+
+        public StoredDocument? Add(SubmittedDocument submittedDocument)
+        {
+            Submitted = checked(Submitted + 1);
+            SubmittedBytes = checked(SubmittedBytes + submittedDocument.Content.Length);
             var document = Normalize(
                 submittedDocument,
                 options,
-                retainContentBeyondOperation: false,
+                retainContentBeyondOperation,
                 out var normalizedPath,
                 out var rejectionReason);
             if (!_submittedPaths.Add(normalizedPath))
@@ -318,43 +359,27 @@ internal sealed class IndexBuilder
                     $"Path '{normalizedPath}' cannot appear in both upserts and deletions.");
             }
 
-            if (document is null)
+            if (document is not null)
             {
-                var rejection = new RejectedDocument(
-                    normalizedPath,
-                    rejectionReason,
-                    submittedDocument.Content.Length);
-                if (rejectedUpsertPolicy == RejectedUpsertPolicy.FailUpdate)
-                {
-                    throw new RejectedUpsertException(
-                        rejectedUpserts: 1,
-                        rejectedBytes: submittedDocument.Content.Length,
-                        [rejection]);
-                }
-
-                _rejected++;
-                _rejectedBytes = checked(_rejectedBytes + submittedDocument.Content.Length);
-                _rejectedDocuments.Add(rejection);
-                return;
+                return document;
             }
 
-            _partitioner.Add(document);
-        }
+            var rejection = new RejectedDocument(
+                normalizedPath,
+                rejectionReason,
+                submittedDocument.Content.Length);
+            if (rejectedUpsertPolicy == RejectedUpsertPolicy.FailUpdate)
+            {
+                throw new RejectedUpsertException(
+                    rejectedUpserts: 1,
+                    rejectedBytes: submittedDocument.Content.Length,
+                    [rejection]);
+            }
 
-        public StreamedDocuments Complete()
-        {
-            var partitioning = _partitioner.Complete();
-            return new StreamedDocuments(
-                _submitted,
-                partitioning.Accepted,
-                partitioning.Skipped,
-                _rejected,
-                _submittedBytes,
-                partitioning.AcceptedBytes,
-                partitioning.SkippedBytes,
-                _rejectedBytes,
-                partitioning.AcceptedPaths,
-                _rejectedDocuments);
+            Rejected = checked(Rejected + 1);
+            RejectedBytes = checked(RejectedBytes + submittedDocument.Content.Length);
+            _rejectedDocuments.Add(rejection);
+            return null;
         }
     }
 
@@ -446,65 +471,36 @@ internal sealed class IndexBuilder
         IDocumentSource source,
         CancellationToken cancellationToken,
         SiftOptions options,
+        string operationName,
         RejectedUpsertPolicy rejectedUpsertPolicy,
         bool retainContentBeyondOperation)
     {
-        var submitted = 0;
-        long submittedBytes = 0;
-        var rejected = 0;
-        long rejectedBytes = 0;
-        var rejectedDocuments = new List<RejectedDocument>();
+        var ingestion = new DocumentIngestionAccumulator(
+            options,
+            operationName,
+            forbiddenPaths: null,
+            rejectedUpsertPolicy,
+            retainContentBeyondOperation);
         var documents = new List<StoredDocument>();
-        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
 
         while (source.TryReadNext(out var submittedDocument))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            submitted++;
-            submittedBytes += submittedDocument.Content.Length;
-
-            var storedDocument = Normalize(
-                submittedDocument,
-                options,
-                retainContentBeyondOperation,
-                out var normalizedPath,
-                out var rejectionReason);
-            if (!seenPaths.Add(normalizedPath))
+            var document = ingestion.Add(submittedDocument);
+            if (document is not null)
             {
-                throw new InvalidOperationException($"Duplicate canonical path in build batch: '{normalizedPath}'.");
+                Materialize(document);
+                documents.Add(document);
             }
-
-            if (storedDocument is null)
-            {
-                var rejection = new RejectedDocument(
-                    normalizedPath,
-                    rejectionReason,
-                    submittedDocument.Content.Length);
-                if (rejectedUpsertPolicy == RejectedUpsertPolicy.FailUpdate)
-                {
-                    throw new RejectedUpsertException(
-                        rejectedUpserts: 1,
-                        rejectedBytes: submittedDocument.Content.Length,
-                        [rejection]);
-                }
-
-                rejected++;
-                rejectedBytes += submittedDocument.Content.Length;
-                rejectedDocuments.Add(rejection);
-                continue;
-            }
-
-            Materialize(storedDocument);
-            documents.Add(storedDocument);
         }
 
         return new LoadedDocuments(
-            submitted,
-            submittedBytes,
-            rejected,
-            rejectedBytes,
+            ingestion.Submitted,
+            ingestion.SubmittedBytes,
+            ingestion.Rejected,
+            ingestion.RejectedBytes,
             documents,
-            rejectedDocuments);
+            ingestion.RejectedDocuments);
     }
 
 #if SIFT_INTERNAL_VERIFICATION
@@ -518,33 +514,18 @@ internal sealed class IndexBuilder
         SiftOptions options)
     {
         var partitions = new List<List<StoredDocument>>();
-        if (documents.Count == 0)
-        {
-            return partitions;
-        }
-
-        var current = new List<StoredDocument>();
-        long currentBytes = 0;
+        var partitioner = new StoredDocumentPartitioner(
+            options,
+            collectAcceptedPaths: false,
+            materializeDocuments: false,
+            static _ => { },
+            partition => partitions.Add([.. partition]));
         foreach (var document in documents)
         {
-            var nextBytes = currentBytes + document.Content.Length;
-            if (current.Count > 0 &&
-                (current.Count >= options.TargetSegmentDocumentCount || nextBytes > options.TargetSegmentContentBytes))
-            {
-                partitions.Add(current);
-                current = new List<StoredDocument>();
-                currentBytes = 0;
-            }
-
-            current.Add(document);
-            currentBytes += document.Content.Length;
+            partitioner.Add(document);
         }
 
-        if (current.Count > 0)
-        {
-            partitions.Add(current);
-        }
-
+        _ = partitioner.Complete();
         return partitions;
     }
 #endif
