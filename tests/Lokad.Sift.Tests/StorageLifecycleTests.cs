@@ -499,6 +499,29 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public async Task ReclamationQueueRejectionDoesNotStrandIndexDisposal()
+    {
+        var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        var oldSnapshot = index.OpenSnapshot();
+        await index.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
+        var schedulingAttempts = 0;
+        index.ReclamationWorkItemScheduler = _ =>
+        {
+            schedulingAttempts++;
+            return false;
+        };
+
+        oldSnapshot.Dispose();
+
+        Assert.Equal(1, schedulingAttempts);
+        await Task.Run(index.Dispose).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task CorruptManifestRequiresExplicitFullRebuild()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));

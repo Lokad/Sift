@@ -48,6 +48,9 @@ public sealed class SiftIndex : ISiftIndex
     private long _validationStatsRevision;
     private Exception? _rebuildCause;
     internal ISiftStorage Storage => _storage;
+#if SIFT_INTERNAL_VERIFICATION
+    internal Func<SiftIndex, bool>? ReclamationWorkItemScheduler { get; set; }
+#endif
     public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;
 
     public SiftIndex(string rootPath)
@@ -960,11 +963,28 @@ public sealed class SiftIndex : ISiftIndex
 
             _reclamationWorkerActive = 1;
             _reclamationIdle.Reset();
-            ThreadPool.UnsafeQueueUserWorkItem(
-                static owner => owner.RunScheduledReclamation(),
-                this,
-                preferLocal: false);
+            if (!QueueReclamationWorkItem())
+            {
+                // Queue rejection transfers no ownership to a worker. Restore the idle
+                // state while leaving the request pending for a later scheduling attempt.
+                _reclamationWorkerActive = 0;
+                _reclamationIdle.Set();
+            }
         }
+    }
+
+    private bool QueueReclamationWorkItem()
+    {
+#if SIFT_INTERNAL_VERIFICATION
+        if (ReclamationWorkItemScheduler is { } scheduler)
+        {
+            return scheduler(this);
+        }
+#endif
+        return ThreadPool.UnsafeQueueUserWorkItem(
+            static owner => owner.RunScheduledReclamation(),
+            this,
+            preferLocal: false);
     }
 
     private void RunScheduledReclamation()

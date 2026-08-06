@@ -42,6 +42,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private int _parallelSearchCount;
     internal int SegmentCacheCreationCount => Volatile.Read(ref _segmentCacheCreationCount);
     internal int ParallelSearchCount => Volatile.Read(ref _parallelSearchCount);
+    internal Action<int>? BeforeParallelWorkerStart { get; set; }
 #endif
     internal IndexIdentity Identity => new(
         _storageSnapshot.Manifest.CorpusId,
@@ -343,58 +344,65 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     var batchFailures = new Exception?[batchLength];
                     var hitBuffers = new BlockingCollection<RawHit>[batchLength];
                     var workers = new Task[batchLength];
-                    for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
-                    {
-                        var segmentIndex = batchStart + batchIndex;
-                        var resultIndex = batchIndex;
-                        var hitBuffer = new BlockingCollection<RawHit>(ParallelHitBufferCapacity);
-                        hitBuffers[resultIndex] = hitBuffer;
-                        workers[resultIndex] = Task.Run(() =>
-                        {
-                            try
-                            {
-                                var cache = OpenSegment(
-                                    _segments[segmentIndex],
-                                    batchCancellation.Token);
-                                var bufferedCollector = new BoundedHitCollector(
-                                    hitBuffer,
-                                    batchCancellation.Token);
-                                batchResults[resultIndex] = ExecuteSegmentSearch(
-                                    cache,
-                                    query,
-                                    matcher,
-                                    preparedQuery,
-                                    preparedRegex,
-                                    pathVisibility,
-                                    watch,
-                                    bufferedCollector,
-                                    SearchLimits.FromQuery(query),
-                                    batchCancellation.Token,
-                                    cancellationToken,
-                                    callerCancellationToken);
-                            }
-                            catch (OperationCanceledException) when (
-                                batchCancellation.IsCancellationRequested &&
-                                !cancellationToken.IsCancellationRequested)
-                            {
-                                // The ordering thread cancels the private batch token when
-                                // the caller collector asks the search to stop.
-                            }
-                            catch (Exception exception)
-                            {
-                                // Transport worker failures to the ordering thread without
-                                // leaving another bounded producer permanently blocked.
-                                batchFailures[resultIndex] = exception;
-                            }
-                            finally
-                            {
-                                hitBuffer.CompleteAdding();
-                            }
-                        });
-                    }
-
+                    var initializedBuffers = 0;
+                    var startedWorkers = 0;
                     try
                     {
+                        for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
+                        {
+                            var segmentIndex = batchStart + batchIndex;
+                            var resultIndex = batchIndex;
+                            var hitBuffer = new BlockingCollection<RawHit>(ParallelHitBufferCapacity);
+                            hitBuffers[resultIndex] = hitBuffer;
+                            initializedBuffers++;
+#if SIFT_INTERNAL_VERIFICATION
+                            BeforeParallelWorkerStart?.Invoke(resultIndex);
+#endif
+                            workers[resultIndex] = Task.Run(() =>
+                            {
+                                try
+                                {
+                                    var cache = OpenSegment(
+                                        _segments[segmentIndex],
+                                        batchCancellation.Token);
+                                    var bufferedCollector = new BoundedHitCollector(
+                                        hitBuffer,
+                                        batchCancellation.Token);
+                                    batchResults[resultIndex] = ExecuteSegmentSearch(
+                                        cache,
+                                        query,
+                                        matcher,
+                                        preparedQuery,
+                                        preparedRegex,
+                                        pathVisibility,
+                                        watch,
+                                        bufferedCollector,
+                                        SearchLimits.FromQuery(query),
+                                        batchCancellation.Token,
+                                        cancellationToken,
+                                        callerCancellationToken);
+                                }
+                                catch (OperationCanceledException) when (
+                                    batchCancellation.IsCancellationRequested &&
+                                    !cancellationToken.IsCancellationRequested)
+                                {
+                                    // The ordering thread cancels the private batch token when
+                                    // the caller collector asks the search to stop.
+                                }
+                                catch (Exception exception)
+                                {
+                                    // Transport worker failures to the ordering thread without
+                                    // leaving another bounded producer permanently blocked.
+                                    batchFailures[resultIndex] = exception;
+                                }
+                                finally
+                                {
+                                    hitBuffer.CompleteAdding();
+                                }
+                            });
+                            startedWorkers++;
+                        }
+
                         for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
                         {
                             foreach (var hit in hitBuffers[batchIndex].GetConsumingEnumerable(cancellationToken))
@@ -464,11 +472,21 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     }
                     finally
                     {
+                        // Setup can fail after an earlier bounded producer has started. Cancel
+                        // first, then join every worker before releasing any of its buffers.
                         batchCancellation.Cancel();
-                        Task.WaitAll(workers);
-                        for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
+                        for (var workerIndex = 0; workerIndex < startedWorkers; workerIndex++)
+                        {
+                            workers[workerIndex].GetAwaiter().GetResult();
+                        }
+
+                        for (var batchIndex = 0; batchIndex < startedWorkers; batchIndex++)
                         {
                             metrics.Add(batchResults[batchIndex].Metrics);
+                        }
+
+                        for (var batchIndex = 0; batchIndex < initializedBuffers; batchIndex++)
+                        {
                             hitBuffers[batchIndex].Dispose();
                         }
                     }

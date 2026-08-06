@@ -9,6 +9,39 @@ namespace Lokad.Sift.Tests;
 public sealed class SearchIntegrationTests
 {
     [Fact]
+    public async Task ParallelSearchCleansUpStartedWorkersWhenBatchSetupFails()
+    {
+        var repeatedHits = string.Concat(Enumerable.Repeat("alpha ", 1000));
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            MaxSegmentParallelism = 2,
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(new InMemoryDocumentSource([
+            ("src/a.txt", repeatedHits),
+            ("src/b.txt", repeatedHits)
+        ]));
+        using var snapshot = Assert.IsType<SearchSnapshot>(
+            index.OpenSnapshot(new SearchOptions(segmentParallelism: 2)));
+        var injectedFailure = new IOException("Injected worker setup failure.");
+        snapshot.BeforeParallelWorkerStart = workerIndex =>
+        {
+            if (workerIndex == 1)
+            {
+                throw injectedFailure;
+            }
+        };
+
+        var failure = await Assert.ThrowsAsync<IOException>(() => Task.Run(() =>
+            snapshot.Search(
+                new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter(),
+                new HitBuffer()))).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Same(injectedFailure, failure);
+    }
+
+    [Fact]
     public void SelectedNgramMergingPreservesByteIdentity()
     {
         var left = new SelectedNgram(0xA978, byteLength: 2, documentFrequency: 3);
