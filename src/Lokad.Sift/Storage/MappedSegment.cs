@@ -10,12 +10,14 @@ namespace Lokad.Sift.Storage;
 
 internal sealed unsafe class MappedSegment : IDisposable
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static long s_mappedBytes;
     private static int s_openSegments;
     private readonly MemoryMappedFile? _mappedFile;
     private readonly MemoryMappedViewAccessor? _view;
     private MemoryHandle _memoryHandle;
     private byte* _pointer;
+    private readonly long _fileLength;
     private readonly long _mappedLength;
     private readonly ReadOnlyMemory<byte> _backingMemory;
     private readonly UnmanagedByteMemoryManager? _mappedContentMemory;
@@ -31,6 +33,7 @@ internal sealed unsafe class MappedSegment : IDisposable
         var accounted = false;
         try
         {
+            _fileLength = new FileInfo(path).Length;
             _mappedFile = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
             _view = _mappedFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
             _view.SafeMemoryMappedViewHandle.AcquirePointer(ref _pointer);
@@ -82,6 +85,7 @@ internal sealed unsafe class MappedSegment : IDisposable
             _backingMemory = bytes;
             _memoryHandle = bytes.Pin();
             _pointer = (byte*)_memoryHandle.Pointer;
+            _fileLength = bytes.Length;
             _mappedLength = bytes.Length;
             Interlocked.Add(ref s_mappedBytes, _mappedLength);
             Interlocked.Increment(ref s_openSegments);
@@ -448,6 +452,11 @@ internal sealed unsafe class MappedSegment : IDisposable
         CancellationToken cancellationToken)
     {
         var region = GetRegion(regionId);
+        if (region.Length > int.MaxValue)
+        {
+            throw new InvalidDataException($"Lexicon region '{regionId}' exceeds the supported length.");
+        }
+
         var lexicon = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
         if (lexicon.Length < SegmentFormat.LexiconHeaderSize)
         {
@@ -457,8 +466,8 @@ internal sealed unsafe class MappedSegment : IDisposable
         var entryCount = LittleEndianCodec.ReadInt32(lexicon);
         var suffixSize = SegmentFormat.GetLexiconSuffixSize(regionId);
         var entrySize = SegmentFormat.GetLexiconEntrySize(regionId);
-        var expectedLength = SegmentFormat.LexiconHeaderSize + entryCount * entrySize;
-        if (entryCount < 0 || lexicon.Length != expectedLength)
+        if (entryCount < 0 ||
+            lexicon.Length != SegmentFormat.LexiconHeaderSize + (long)entryCount * entrySize)
         {
             throw new InvalidDataException($"Invalid lexicon length for region '{regionId}'.");
         }
@@ -509,6 +518,47 @@ internal sealed unsafe class MappedSegment : IDisposable
         }
     }
 
+    private void ValidatePostingsRegion(
+        IndexRegionPair pair,
+        CancellationToken cancellationToken)
+    {
+        var lexiconRegion = GetRegion(pair.Lexicon);
+        var postingsRegion = GetRegion(pair.Postings);
+        if (lexiconRegion.Length > int.MaxValue || postingsRegion.Length > int.MaxValue)
+        {
+            throw new InvalidDataException($"Index regions for '{pair.Lexicon}' exceed the supported length.");
+        }
+
+        var lexicon = new ReadOnlySpan<byte>(BasePointer + lexiconRegion.Offset, (int)lexiconRegion.Length);
+        var entryCount = LittleEndianCodec.ReadInt32(lexicon);
+        var suffixSize = SegmentFormat.GetLexiconSuffixSize(pair.Lexicon);
+        var entrySize = SegmentFormat.GetLexiconEntrySize(pair.Lexicon);
+        for (var entry = 0; entry < entryCount; entry++)
+        {
+            if ((entry & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            var entryOffset = SegmentFormat.LexiconHeaderSize + entry * entrySize;
+            var postingsOffset = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize, 4));
+            var postingsBytes = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4));
+            var documentFrequency = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4));
+            if (postingsOffset < 0 ||
+                postingsBytes < 0 ||
+                postingsOffset > postingsRegion.Length ||
+                postingsBytes > postingsRegion.Length - postingsOffset)
+            {
+                throw new InvalidDataException($"Invalid postings bounds in region '{pair.Postings}'.");
+            }
+
+            PostingsCodec.Validate(
+                new ReadOnlySpan<byte>(BasePointer + postingsRegion.Offset + postingsOffset, postingsBytes),
+                documentFrequency,
+                DocumentCount);
+        }
+    }
+
     private static int ReadLexiconSuffix(ReadOnlySpan<byte> source)
     {
         return source.Length == 1
@@ -527,6 +577,41 @@ internal sealed unsafe class MappedSegment : IDisposable
         }
 
         return LittleEndianCodec.ReadInt32(stats.Slice(bucketOffset, 4));
+    }
+
+    private void ValidateStatsRegion()
+    {
+        var region = GetRegion(SegmentRegionId.Stats);
+        if (region.Length is not SegmentFormat.LegacyStatsLength and not SegmentFormat.StatsLength)
+        {
+            throw new InvalidDataException("Invalid Sift stats region length.");
+        }
+
+        var stats = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
+        if (LittleEndianCodec.ReadInt32(stats) != DocumentCount ||
+            LittleEndianCodec.ReadInt32(stats[4..]) != ContentBytes)
+        {
+            throw new InvalidDataException("Sift statistics do not match segment metadata.");
+        }
+
+        long frequencyTotal = 0;
+        for (var value = 0; value < 256; value++)
+        {
+            var frequency = LittleEndianCodec.ReadInt32(stats.Slice(8 + value * 4, 4));
+            if (frequency < 0)
+            {
+                throw new InvalidDataException("Sift byte frequencies cannot be negative.");
+            }
+
+            frequencyTotal += frequency;
+        }
+
+        if (frequencyTotal != ContentBytes)
+        {
+            throw new InvalidDataException("Sift byte frequencies do not match segment content.");
+        }
+
+        _ = GetNonAsciiDocumentStats();
     }
 
     internal NonAsciiDocumentStats GetNonAsciiDocumentStats()
@@ -622,6 +707,11 @@ internal sealed unsafe class MappedSegment : IDisposable
         CancellationToken cancellationToken)
     {
         var region = GetRegion(regionId);
+        if (region.Length > int.MaxValue)
+        {
+            throw new InvalidDataException($"Region '{regionId}' exceeds the supported checksum length.");
+        }
+
         var span = new ReadOnlySpan<byte>(BasePointer + region.Offset, checked((int)region.Length));
         var actual = Hashing.Fnv1A64(span, cancellationToken);
         if (actual != expected)
@@ -648,10 +738,15 @@ internal sealed unsafe class MappedSegment : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var fileLength = _mappedLength;
+        var fileLength = _fileLength;
         if (fileLength < SegmentFormat.HeaderSize)
         {
             throw new InvalidDataException("Sift segment header is truncated.");
+        }
+
+        if (fileLength > int.MaxValue)
+        {
+            throw new InvalidDataException("Sift segment exceeds the supported length.");
         }
 
         if (Read<ulong>(0) != SegmentFormat.SegmentMagic)
@@ -748,6 +843,8 @@ internal sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException("The Sift segment checksum table is incomplete.");
         }
 
+        ValidateCanonicalLayout(regionDirectoryOffset, checksumTableOffset, fileLength);
+
         var documentTable = GetRegion(SegmentRegionId.DocumentTable);
         var expectedDocumentTableLength = checked((long)DocumentCount * SegmentFormat.DocumentRowSize);
         if (documentTable.Length != expectedDocumentTableLength)
@@ -760,6 +857,8 @@ internal sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException("Invalid Sift content length.");
         }
 
+        ValidateStatsRegion();
+
         ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex, validateChecksums, cancellationToken);
         ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex, validateChecksums, cancellationToken);
         ValidateLexiconRegion(SegmentRegionId.ContentBiCsLex, validateChecksums, cancellationToken);
@@ -769,6 +868,61 @@ internal sealed unsafe class MappedSegment : IDisposable
         if (validateChecksums)
         {
             ValidateDocuments(cancellationToken);
+            ValidatePostingsRegion(
+                new IndexRegionPair(SegmentRegionId.ContentTriCsLex, SegmentRegionId.ContentTriCsPost),
+                cancellationToken);
+            ValidatePostingsRegion(
+                new IndexRegionPair(SegmentRegionId.ContentTriIcLex, SegmentRegionId.ContentTriIcPost),
+                cancellationToken);
+            ValidatePostingsRegion(
+                new IndexRegionPair(SegmentRegionId.ContentBiCsLex, SegmentRegionId.ContentBiCsPost),
+                cancellationToken);
+            ValidatePostingsRegion(
+                new IndexRegionPair(SegmentRegionId.ContentBiIcLex, SegmentRegionId.ContentBiIcPost),
+                cancellationToken);
+            ValidatePostingsRegion(
+                new IndexRegionPair(SegmentRegionId.PathTriCsLex, SegmentRegionId.PathTriCsPost),
+                cancellationToken);
+            ValidatePostingsRegion(
+                new IndexRegionPair(SegmentRegionId.PathTriIcLex, SegmentRegionId.PathTriIcPost),
+                cancellationToken);
+        }
+    }
+
+    private void ValidateCanonicalLayout(
+        long regionDirectoryOffset,
+        long checksumTableOffset,
+        long fileLength)
+    {
+        var expectedOffset = SegmentFormat.HeaderSize +
+            (long)RegionCount * SegmentFormat.RegionDirectoryEntrySize;
+        if (regionDirectoryOffset != SegmentFormat.HeaderSize)
+        {
+            throw new InvalidDataException("Invalid Sift region directory position.");
+        }
+
+        for (var regionId = 1; regionId <= SegmentFormat.RegionCount; regionId++)
+        {
+            var region = _regions[regionId];
+            if (region.Offset != expectedOffset)
+            {
+                throw new InvalidDataException("Sift segment regions are not contiguous and ordered.");
+            }
+
+            expectedOffset = checked(expectedOffset + region.Length);
+        }
+
+        var checksumTableLength = (long)RegionCount * SegmentFormat.ChecksumEntrySize;
+        if (checksumTableOffset != expectedOffset)
+        {
+            throw new InvalidDataException(
+                $"Invalid Sift checksum table position: expected {expectedOffset}, found {checksumTableOffset}.");
+        }
+
+        if (fileLength != checksumTableOffset + checksumTableLength)
+        {
+            throw new InvalidDataException(
+                $"Invalid Sift segment length: expected {checksumTableOffset + checksumTableLength}, found {fileLength}.");
         }
     }
 
@@ -777,6 +931,7 @@ internal sealed unsafe class MappedSegment : IDisposable
         var pathBlob = GetRegion(SegmentRegionId.PathBlob);
         var contentBlob = GetRegion(SegmentRegionId.ContentBlob);
         var lineIndexBlob = GetRegion(SegmentRegionId.LineIndexBlob);
+        string? previousPath = null;
         for (uint ordinal = 0; ordinal < DocumentCount; ordinal++)
         {
             if ((ordinal & 0xFFF) == 0)
@@ -792,6 +947,36 @@ internal sealed unsafe class MappedSegment : IDisposable
             {
                 throw new InvalidDataException($"Invalid line count for document ordinal {ordinal}.");
             }
+
+            string path;
+            try
+            {
+                path = StrictUtf8.GetString(GetPathBytes(document));
+                if (!string.Equals(DocumentPath.Normalize(path), path, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException($"Non-normalized path for document ordinal {ordinal}.");
+                }
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new InvalidDataException($"Invalid UTF-8 path for document ordinal {ordinal}.", exception);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidDataException($"Invalid path for document ordinal {ordinal}.", exception);
+            }
+
+            if (previousPath is not null && string.CompareOrdinal(previousPath, path) >= 0)
+            {
+                throw new InvalidDataException("Sift segment document paths are not strictly ordered.");
+            }
+
+            previousPath = path;
+            LineMap.Validate(
+                GetEncodedLineIndexBytes(document),
+                GetContentBytes(document),
+                document.LineCount,
+                cancellationToken);
         }
     }
 

@@ -45,6 +45,78 @@ internal static class LineMap
         }
     }
 
+    public static void Validate(
+        ReadOnlySpan<byte> encoded,
+        ReadOnlySpan<byte> content,
+        int expectedLineCount,
+        CancellationToken cancellationToken)
+    {
+        if (encoded.Length < 8)
+        {
+            throw new InvalidDataException("Sift line index header is truncated.");
+        }
+
+        var lineCount = BinaryPrimitives.ReadInt32LittleEndian(encoded[..4]);
+        var anchorCount = BinaryPrimitives.ReadInt32LittleEndian(encoded.Slice(4, 4));
+        var expectedAnchorCount = lineCount > 0
+            ? ((lineCount - 1) / AnchorStride) + 1
+            : 0;
+        var expectedLength = 8L + (long)anchorCount * 8 + (long)lineCount * 4;
+        if (lineCount != expectedLineCount ||
+            lineCount <= 0 ||
+            anchorCount != expectedAnchorCount ||
+            encoded.Length != expectedLength)
+        {
+            throw new InvalidDataException("Invalid Sift line index shape.");
+        }
+
+        var countedLines = 1;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if ((i & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            countedLines += content[i] == (byte)'\n' ? 1 : 0;
+        }
+
+        if (countedLines != lineCount)
+        {
+            throw new InvalidDataException("Sift line index does not match its document content.");
+        }
+
+        var anchorsOffset = 8;
+        var deltasOffset = anchorsOffset + anchorCount * 8;
+        var previousStart = -1;
+        for (var line = 0; line < lineCount; line++)
+        {
+            if ((line & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            var anchorIndex = line / AnchorStride;
+            var anchorOffset = anchorsOffset + anchorIndex * 8;
+            var anchorLine = BinaryPrimitives.ReadInt32LittleEndian(encoded.Slice(anchorOffset, 4));
+            var anchorStart = BinaryPrimitives.ReadInt32LittleEndian(encoded.Slice(anchorOffset + 4, 4));
+            var delta = BinaryPrimitives.ReadInt32LittleEndian(encoded.Slice(deltasOffset + line * 4, 4));
+            var start = (long)anchorStart + delta;
+            if (anchorLine != anchorIndex * AnchorStride ||
+                anchorStart < 0 ||
+                delta < 0 ||
+                start > content.Length ||
+                line == 0 && start != 0 ||
+                line > 0 && (start <= previousStart || content[(int)start - 1] != (byte)'\n') ||
+                line % AnchorStride == 0 && (delta != 0 || start != anchorStart))
+            {
+                throw new InvalidDataException("Invalid Sift line index entry.");
+            }
+
+            previousStart = (int)start;
+        }
+    }
+
     public static int GetLineCount(ReadOnlySpan<byte> encoded)
     {
         return encoded.Length >= 4

@@ -84,6 +84,61 @@ internal static class PostingsCodec
         return values.ToArray();
     }
 
+    public static void Validate(
+        ReadOnlySpan<byte> payload,
+        int expectedDocumentFrequency,
+        int documentCount)
+    {
+        if (expectedDocumentFrequency < 0 || expectedDocumentFrequency > documentCount)
+        {
+            throw new InvalidDataException("Invalid Sift postings document frequency.");
+        }
+
+        var view = Parse(payload);
+        var expectedCheckpointCount = expectedDocumentFrequency >= CheckpointThreshold
+            ? (expectedDocumentFrequency + CheckpointInterval - 1) / CheckpointInterval
+            : 0;
+        if (view.IsCheckpointed != (expectedCheckpointCount > 0) ||
+            view.Checkpoints.Length != expectedCheckpointCount * 8)
+        {
+            throw new InvalidDataException("Invalid Sift postings checkpoint shape.");
+        }
+
+        uint current = 0;
+        uint previous = 0;
+        var offset = 0;
+        var count = 0;
+        while (offset < view.Data.Length)
+        {
+            current += VarInt.ReadUInt32(view.Data, ref offset);
+            if (current >= documentCount || count > 0 && current <= previous)
+            {
+                throw new InvalidDataException("Sift postings contain invalid document ordinals.");
+            }
+
+            if (count % CheckpointInterval == 0 && view.IsCheckpointed)
+            {
+                var checkpointOffset = count / CheckpointInterval * 8;
+                var checkpointOrdinal = BinaryPrimitives.ReadUInt32LittleEndian(
+                    view.Checkpoints.Slice(checkpointOffset, 4));
+                var checkpointDataOffset = BinaryPrimitives.ReadInt32LittleEndian(
+                    view.Checkpoints.Slice(checkpointOffset + 4, 4));
+                if (checkpointOrdinal != current || checkpointDataOffset != offset)
+                {
+                    throw new InvalidDataException("Sift postings checkpoints do not match their payload.");
+                }
+            }
+
+            previous = current;
+            count++;
+        }
+
+        if (count != expectedDocumentFrequency)
+        {
+            throw new InvalidDataException("Sift postings do not match their document frequency.");
+        }
+    }
+
     internal static void DecodeIntoBitSet(ReadOnlySpan<byte> payload, PooledBitSet bitSet)
     {
         var view = Parse(payload);

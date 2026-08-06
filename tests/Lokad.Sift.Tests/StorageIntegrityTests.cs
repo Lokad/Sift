@@ -1,6 +1,7 @@
-using System.Text;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Text;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Search;
@@ -272,6 +273,54 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public async Task ExplicitValidationRejectsMalformedLineIndexes()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        RewriteChecksummedRegion(
+            segmentPath,
+            SegmentRegionId.LineIndexBlob,
+            static (region, _) => BinaryPrimitives.WriteInt32LittleEndian(region[4..], int.MaxValue));
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+        Assert.True(reopened.RequiresRebuild);
+    }
+
+    [Fact]
+    public async Task ExplicitValidationRejectsUnorderedDocumentPaths()
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "alpha\n"),
+            ("src/b.txt", "beta\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"),
+            "segment.pack",
+            SearchOption.AllDirectories).Single();
+        RewriteChecksummedRegion(
+            segmentPath,
+            SegmentRegionId.PathBlob,
+            static (region, _) => region[4] = (byte)'z');
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+        Assert.True(reopened.RequiresRebuild);
+    }
+
+    [Fact]
     public async Task OnlineDocumentAccessRejectsInvalidContentBoundsAndRequiresRebuild()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\nbeta\n"));
@@ -401,6 +450,8 @@ public sealed class StorageIntegrityTests
         var manifest = storage.ReadManifest();
         using var segment = storage.OpenSegment(manifest.Segments[0].SegmentId);
         Assert.Throws<InvalidDataException>(() => segment.TryGetPostings(new IndexRegionPair(SegmentRegionId.ContentTriCsLex, SegmentRegionId.ContentTriCsPost), corruptedGram, out _, out _));
+        Assert.Throws<InvalidDataException>(() =>
+            storage.ValidateSegment(manifest.Segments[0], CancellationToken.None));
     }
 
     [Fact]
@@ -1423,6 +1474,30 @@ public sealed class StorageIntegrityTests
             bytes.AsSpan(checksumOffset),
             Hashing.Fnv1A64(bytes.AsSpan(0, checksumOffset)));
         File.WriteAllBytes(manifestPath, bytes);
+    }
+
+    private static void RewriteChecksummedRegion(
+        string segmentPath,
+        SegmentRegionId regionId,
+        SpanAction<byte, object?> rewrite)
+    {
+        var bytes = File.ReadAllBytes(segmentPath);
+        var directoryEntryOffset = SegmentFormat.HeaderSize +
+            ((int)regionId - 1) * SegmentFormat.RegionDirectoryEntrySize;
+        var regionOffset = checked((int)BinaryPrimitives.ReadInt64LittleEndian(
+            bytes.AsSpan(directoryEntryOffset + 4, sizeof(long))));
+        var regionLength = checked((int)BinaryPrimitives.ReadInt64LittleEndian(
+            bytes.AsSpan(directoryEntryOffset + 12, sizeof(long))));
+        rewrite(bytes.AsSpan(regionOffset, regionLength), null);
+
+        var checksumTableOffset = checked((int)BinaryPrimitives.ReadInt64LittleEndian(
+            bytes.AsSpan(52, sizeof(long))));
+        var checksumOffset = checksumTableOffset +
+            ((int)regionId - 1) * SegmentFormat.ChecksumEntrySize + sizeof(int);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(checksumOffset, sizeof(ulong)),
+            Hashing.Fnv1A64(bytes.AsSpan(regionOffset, regionLength)));
+        File.WriteAllBytes(segmentPath, bytes);
     }
 
     private sealed class FailingCollector : IHitCollector
