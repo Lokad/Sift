@@ -21,27 +21,18 @@ internal sealed class BoundedHitCollector(
     }
 }
 
-internal sealed class GuardedHitCollector(IHitCollector inner) : IHitCollector
+internal sealed class GuardedOwnedHitCollector(object owner, IHitCollector inner) : IHitCollector
 {
     public bool OnHit(in RawHit hit)
     {
         try
         {
-            return inner.OnHit(hit);
+            return inner.OnHit(hit.WithOwner(owner));
         }
         catch (Exception exception)
         {
             throw new CollectorFailureException(ExceptionDispatchInfo.Capture(exception));
         }
-    }
-}
-
-internal sealed class HitOwnerCollector(object owner, IHitCollector inner) : IHitCollector
-{
-    public bool OnHit(in RawHit hit)
-    {
-        var ownedHit = hit.WithOwner(owner);
-        return inner.OnHit(ownedHit);
     }
 }
 

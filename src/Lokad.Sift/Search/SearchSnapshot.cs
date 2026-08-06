@@ -178,13 +178,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ArgumentNullException.ThrowIfNull(collector);
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
-        var guardedCollector = new GuardedHitCollector(collector);
-        var ownedCollector = new HitOwnerCollector(_hitOwner, guardedCollector);
+        var ownedCollector = new GuardedOwnedHitCollector(_hitOwner, collector);
         try
         {
             using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
-            var watch = Stopwatch.StartNew();
+            var watch = ValueStopwatch.StartNew();
             var preparedQuery = SearchQueryPreparer.Prepare(query);
             var matcher = PathFilterMatcher.Prepare(pathFilter);
             using var deadlineCancellation = CreateDeadlineCancellation(
@@ -231,7 +230,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken,
         CancellationToken callerCancellationToken,
-        Stopwatch watch)
+        ValueStopwatch watch)
     {
         var preparedRegex = preparedQuery.GetRegexExecution();
         var metrics = SearchMetrics.ForRegex(preparedRegex);
@@ -294,7 +293,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
 
     Done:
-        watch.Stop();
         return metrics.ToSearchStats(watch.ElapsedMilliseconds, hitsReturned, stopReason);
     }
 
@@ -306,7 +304,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IPathVisibility? pathVisibility,
         CancellationToken cancellationToken,
         CancellationToken callerCancellationToken,
-        Stopwatch watch)
+        ValueStopwatch watch)
     {
 #if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _parallelSearchCount);
@@ -505,7 +503,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
 
     Done:
-        watch.Stop();
         return metrics.ToSearchStats(watch.ElapsedMilliseconds, hitsReturned, stopReason);
     }
 
@@ -751,13 +748,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private SnapshotOperation BeginOperation()
+    private ReadLockLease BeginOperation()
     {
         _lifetimeLock.EnterReadLock();
         try
         {
             ThrowIfDisposed();
-            return new SnapshotOperation(_lifetimeLock);
+            return new ReadLockLease(_lifetimeLock);
         }
         catch
         {
@@ -906,7 +903,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             Math.Min(int.MaxValue, (long)hitsReturned + maximumHitsPerDocument));
     }
 
-    private static bool HasElapsed(SearchQuery query, Stopwatch watch)
+    private static bool HasElapsed(SearchQuery query, ValueStopwatch watch)
     {
         return watch.ElapsedMilliseconds >= query.MaxElapsedMilliseconds;
     }
@@ -937,7 +934,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         PreparedSearchQuery preparedQuery,
         PreparedRegexExecutionAccess preparedRegex,
         IPathVisibility? pathVisibility,
-        Stopwatch watch,
+        ValueStopwatch watch,
         IHitCollector collector,
         SearchLimits limits,
         CancellationToken workerCancellationToken,
@@ -1738,11 +1735,11 @@ internal readonly struct SegmentCache
     public long LiveNonAsciiBytes { get; }
 }
 
-internal readonly struct SnapshotOperation : IDisposable
+internal readonly struct ReadLockLease : IDisposable
 {
     private readonly ReaderWriterLockSlim _lifetimeLock;
 
-    public SnapshotOperation(ReaderWriterLockSlim lifetimeLock)
+    public ReadLockLease(ReaderWriterLockSlim lifetimeLock)
     {
         _lifetimeLock = lifetimeLock;
     }

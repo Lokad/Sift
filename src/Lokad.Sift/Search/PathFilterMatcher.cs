@@ -476,7 +476,7 @@ internal enum GlobMatcherKind
     Regex
 }
 
-internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
+internal readonly struct PathFilterCacheKey : IEquatable<PathFilterCacheKey>
 {
     private readonly string? _pathPrefix;
     private readonly string? _pathRegex;
@@ -509,10 +509,9 @@ internal sealed class PathFilterCacheKey : IEquatable<PathFilterCacheKey>
     public IReadOnlyList<string> IncludeGlobs => _includeGlobs;
     public IReadOnlyList<string> ExcludeGlobs => _excludeGlobs;
 
-    public bool Equals(PathFilterCacheKey? other)
+    public bool Equals(PathFilterCacheKey other)
     {
-        return other is not null &&
-            string.Equals(_pathPrefix, other._pathPrefix, StringComparison.Ordinal) &&
+        return string.Equals(_pathPrefix, other._pathPrefix, StringComparison.Ordinal) &&
             string.Equals(_pathRegex, other._pathRegex, StringComparison.Ordinal) &&
             SequenceEqual(_includeGlobs, other._includeGlobs) &&
             SequenceEqual(_excludeGlobs, other._excludeGlobs);

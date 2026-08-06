@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Lokad.Sift;
 using Lokad.Sift.Indexer;
@@ -135,7 +134,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         async Task<OverlayUpdateStats> ApplyUpdateUnderLock()
         {
-            var watch = Stopwatch.StartNew();
+            var watch = ValueStopwatch.StartNew();
             var load = IndexBuilder.LoadDocuments(
                 upserts,
                 cancellationToken,
@@ -302,8 +301,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             }
             previousGeneration.Snapshot.Dispose();
 
-            watch.Stop();
-
             var pendingStats = new PendingOverlayUpdateStats(
                 submittedUpserts: load.Submitted,
                 upsertedDocuments: overlayUpdate.UpsertedDocuments,
@@ -435,7 +432,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ArgumentNullException.ThrowIfNull(collector);
         using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
-        var watch = Stopwatch.StartNew();
+        var watch = ValueStopwatch.StartNew();
 
         var generation = _overlayGeneration;
         var overlayCollector = new OverlayHitCollector(this, generation, collector);
@@ -640,13 +637,13 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 #endif
 
-    private StateReadLease BeginRead()
+    private ReadLockLease BeginRead()
     {
         _stateLock.EnterReadLock();
         try
         {
             ThrowIfUnavailable();
-            return new StateReadLease(_stateLock);
+            return new ReadLockLease(_stateLock);
         }
         catch
         {
@@ -689,16 +686,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
 
         return keys;
-    }
-
-    private sealed class StateReadLease(ReaderWriterLockSlim stateLock) : IDisposable
-    {
-        private ReaderWriterLockSlim? _stateLock = stateLock;
-
-        public void Dispose()
-        {
-            Interlocked.Exchange(ref _stateLock, null)?.ExitReadLock();
-        }
     }
 
     private sealed class HiddenPathVisibility : IPathVisibility
