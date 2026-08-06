@@ -65,6 +65,11 @@ public readonly record struct SubmittedDocument
         DateTimeOffset? lastModifiedUtc,
         DocumentContentLifetime contentLifetime)
     {
+        if (!Enum.IsDefined(contentLifetime))
+        {
+            throw new ArgumentOutOfRangeException(nameof(contentLifetime));
+        }
+
         _path = DocumentPath.Normalize(path);
         Content = content;
         LastModifiedUtc = lastModifiedUtc;

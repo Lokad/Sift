@@ -21,6 +21,28 @@ public sealed class BuildPipelineTests
     }
 
     [Fact]
+    public void DocumentContractsRejectMalformedUtf16Paths()
+    {
+        foreach (var surrogate in new[] { '\uD800', '\uDC00' })
+        {
+            var path = $"src/{surrogate}.txt";
+            Assert.Throws<ArgumentException>(() => new DocumentKey(path));
+            Assert.Throws<ArgumentException>(() =>
+                new SubmittedDocument(path, ReadOnlyMemory<byte>.Empty));
+        }
+    }
+
+    [Fact]
+    public void SubmittedDocumentRejectsInvalidContentLifetime()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SubmittedDocument(
+            "src/a.txt",
+            ReadOnlyMemory<byte>.Empty,
+            lastModifiedUtc: null,
+            contentLifetime: (DocumentContentLifetime)int.MaxValue));
+    }
+
+    [Fact]
     public async Task PartitionDocumentsSplitsOnTargetContentBytes()
     {
         var largeSize = (int)(IndexBuilder.DefaultTargetSegmentContentBytes / 2) + 1;

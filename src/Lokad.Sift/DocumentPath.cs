@@ -1,3 +1,6 @@
+using System.Buffers;
+using System.Text;
+
 namespace Lokad.Sift;
 
 internal static class DocumentPath
@@ -8,6 +11,17 @@ internal static class DocumentPath
         if (path.Length == 0 || path.AsSpan().Trim().IsEmpty)
         {
             throw new ArgumentException("Document path cannot be empty or whitespace.", nameof(path));
+        }
+
+        var remaining = path.AsSpan();
+        while (!remaining.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(remaining, out _, out var consumed) != OperationStatus.Done)
+            {
+                throw new ArgumentException("Document path must contain valid Unicode.", nameof(path));
+            }
+
+            remaining = remaining[consumed..];
         }
 
         path = path.Replace('\\', '/');
