@@ -392,9 +392,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ArgumentNullException.ThrowIfNull(collector);
         using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
-        var hiddenPaths = new HashSet<string>(_deletedPaths, StringComparer.Ordinal);
-        hiddenPaths.UnionWith(_overlayDocuments.Keys);
-        var visibleBaseCollector = new VisibleBaseDocumentCollector(hiddenPaths, collector);
+        var visibleBaseCollector = new VisibleBaseDocumentCollector(
+            _deletedPaths,
+            _overlayDocuments,
+            collector);
         var baseStats = _baseSnapshot.VisitDocuments(visibleBaseCollector, cancellationToken);
         if (!baseStats.Completed)
         {
@@ -732,14 +733,15 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
     private sealed class VisibleBaseDocumentCollector(
-        IReadOnlySet<string> hiddenPaths,
+        IReadOnlySet<string> deletedPaths,
+        IReadOnlyDictionary<string, long> overlayDocuments,
         IDocumentKeyCollector inner) : IDocumentKeyCollector
     {
         public int VisitedDocuments { get; private set; }
 
         public bool OnDocument(DocumentKey key)
         {
-            if (hiddenPaths.Contains(key.Path))
+            if (deletedPaths.Contains(key.Path) || overlayDocuments.ContainsKey(key.Path))
             {
                 return true;
             }
@@ -863,7 +865,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         private readonly OverlaySnapshot _owner;
         private readonly OverlayGeneration _generation;
         private readonly IHitCollector _inner;
-        private readonly HashSet<(SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)> _documentsWithHits = [];
+        private SegmentId _sourceSegmentId;
+        private SegmentId _syntheticSegmentId;
+        private DocumentOrdinal _lastDocumentOrdinal;
+        private int _hitDocuments;
+        private bool _hasSourceSegment;
+        private bool _hasHitDocument;
 
         public OverlayHitCollector(
             OverlaySnapshot owner,
@@ -875,14 +882,28 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             _inner = inner;
         }
 
-        public int HitDocuments => _documentsWithHits.Count;
+        public int HitDocuments => _hitDocuments;
 
         public bool OnHit(in RawHit hit)
         {
-            var syntheticSegmentId = _owner.CaptureHit(_generation, hit);
-            _documentsWithHits.Add((syntheticSegmentId, hit.DocumentOrdinal));
+            if (!_hasSourceSegment || hit.SegmentId != _sourceSegmentId)
+            {
+                _sourceSegmentId = hit.SegmentId;
+                _syntheticSegmentId = _owner.CaptureHit(_generation, hit);
+                _hasSourceSegment = true;
+                _hasHitDocument = false;
+            }
+
+            // Segment search emits every hit for a document contiguously.
+            if (!_hasHitDocument || hit.DocumentOrdinal != _lastDocumentOrdinal)
+            {
+                _lastDocumentOrdinal = hit.DocumentOrdinal;
+                _hitDocuments++;
+                _hasHitDocument = true;
+            }
+
             var syntheticHit = hit
-                .WithSegmentId(syntheticSegmentId)
+                .WithSegmentId(_syntheticSegmentId)
                 .WithOwner(_owner._hitOwner);
             return _inner.OnHit(syntheticHit);
         }
