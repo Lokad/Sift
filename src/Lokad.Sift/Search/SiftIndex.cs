@@ -631,11 +631,11 @@ public sealed class SiftIndex : ISiftIndex
             var hadManifest = currentManifest is not null;
             var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
             var committedIdentity = actualIdentity;
-            if (options.ExpectedIdentity is { } expectedIdentity &&
-                (expectedIdentity.CorpusId != actualIdentity.CorpusId ||
-                 expectedIdentity.ContentRevision != actualIdentity.ContentRevision))
+            var actualRevision = actualIdentity.Revision;
+            if (options.ExpectedRevision is { } expectedRevision &&
+                expectedRevision != actualRevision)
             {
-                throw new StaleIndexStateException(expectedIdentity, actualIdentity);
+                throw new StaleIndexRevisionException(expectedRevision, actualRevision);
             }
 
             var existingManifest = currentManifest ?? new CorpusManifest(

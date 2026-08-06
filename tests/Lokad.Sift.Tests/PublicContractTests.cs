@@ -42,6 +42,10 @@ public sealed class PublicContractTests
     [Fact]
     public void IdentityAndHitCoordinatesUseDomainTypes()
     {
+        Assert.Equal(typeof(CorpusId), GetPropertyType<IndexRevision>(nameof(IndexRevision.CorpusId)));
+        Assert.Equal(
+            typeof(ContentRevision),
+            GetPropertyType<IndexRevision>(nameof(IndexRevision.ContentRevision)));
         Assert.Equal(typeof(CorpusId), GetPropertyType<IndexIdentity>(nameof(IndexIdentity.CorpusId)));
         Assert.Equal(
             typeof(ContentRevision),

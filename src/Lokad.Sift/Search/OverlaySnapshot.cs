@@ -321,18 +321,18 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     {
         ArgumentNullException.ThrowIfNull(baseIndex);
         ArgumentNullException.ThrowIfNull(options);
-        if (options.ExpectedIdentity is { } expectedIdentity &&
-            (expectedIdentity.CorpusId != _baseIdentity.CorpusId ||
-             expectedIdentity.ContentRevision != _baseIdentity.ContentRevision))
+        var baseRevision = _baseIdentity.Revision;
+        if (options.ExpectedRevision is { } expectedRevision &&
+            expectedRevision != baseRevision)
         {
             throw new ArgumentException(
-                "ExpectedIdentity must identify the overlay's base revision.",
+                "ExpectedRevision must identify the overlay's base revision.",
                 nameof(options));
         }
 
         return ApplyDeltaToCore(
             baseIndex,
-            options with { ExpectedIdentity = _baseIdentity },
+            options with { ExpectedRevision = baseRevision },
             cancellationToken);
     }
 

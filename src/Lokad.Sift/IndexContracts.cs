@@ -64,7 +64,7 @@ public sealed record UpdateOptions
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
     // When present, the update is rejected unless this logical corpus revision is still current.
     // Physical generation changes caused by compaction do not invalidate the expectation.
-    public IndexIdentity? ExpectedIdentity { get; init; }
+    public IndexRevision? ExpectedRevision { get; init; }
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest. The callback must not
     // dispose or synchronously start another mutation on the consuming index.
@@ -86,17 +86,17 @@ public sealed record OverlayUpdateOptions
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
 }
 
-public sealed class StaleIndexStateException : Exception
+public sealed class StaleIndexRevisionException : Exception
 {
-    public StaleIndexStateException(IndexIdentity expectedIdentity, IndexIdentity actualIdentity)
-        : base("The Sift index changed after the caller read its state.")
+    public StaleIndexRevisionException(IndexRevision expectedRevision, IndexRevision actualRevision)
+        : base("The Sift index changed after the caller read its revision.")
     {
-        ExpectedIdentity = expectedIdentity;
-        ActualIdentity = actualIdentity;
+        ExpectedRevision = expectedRevision;
+        ActualRevision = actualRevision;
     }
 
-    public IndexIdentity ExpectedIdentity { get; }
-    public IndexIdentity ActualIdentity { get; }
+    public IndexRevision ExpectedRevision { get; }
+    public IndexRevision ActualRevision { get; }
 }
 
 public class BuildCommitStats
@@ -383,13 +383,20 @@ public readonly record struct WriteActivityStats
     public SiftWriteActivity CurrentActivity { get; }
 }
 
-public readonly record struct IndexIdentity(
+public readonly record struct IndexRevision(
     // Changes whenever a full build replaces the logical corpus.
     CorpusId CorpusId,
     // Changes only when the visible document set or content changes.
+    ContentRevision ContentRevision);
+
+public readonly record struct IndexIdentity(
+    CorpusId CorpusId,
     ContentRevision ContentRevision,
     // Changes whenever a manifest is published, including compaction and metadata-only commits.
-    StorageGeneration StorageGeneration);
+    StorageGeneration StorageGeneration)
+{
+    public IndexRevision Revision => new(CorpusId, ContentRevision);
+}
 
 public sealed class IndexState
 {

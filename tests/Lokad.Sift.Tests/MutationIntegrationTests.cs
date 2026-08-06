@@ -109,52 +109,50 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
-    public async Task ExpectedIdentityRejectsAStaleUpdateBeforeConsumingItsSource()
+    public async Task ExpectedRevisionRejectsAStaleUpdateBeforeConsumingItsSource()
     {
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
-        var staleIdentity = index.GetIndexIdentity();
+        var staleRevision = index.GetIndexIdentity().Revision;
         var committed = await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
         Assert.Equal(index.GetIndexIdentity(), committed.CommittedIdentity);
-        Assert.NotEqual(staleIdentity, committed.CommittedIdentity);
+        Assert.NotEqual(staleRevision, committed.CommittedIdentity.Revision);
         var source = new SubmittedDocumentSource([
             new SubmittedDocument("src/c.txt", "gamma"u8.ToArray())
         ]);
 
-        var exception = await Assert.ThrowsAsync<StaleIndexStateException>(() => index.Update(
+        var exception = await Assert.ThrowsAsync<StaleIndexRevisionException>(() => index.Update(
             source,
             [],
             new UpdateOptions
             {
-                ExpectedIdentity = staleIdentity
+                ExpectedRevision = staleRevision
             }));
 
-        Assert.Equal(staleIdentity, exception.ExpectedIdentity);
-        Assert.Equal(index.GetIndexIdentity(), exception.ActualIdentity);
+        Assert.Equal(staleRevision, exception.ExpectedRevision);
+        Assert.Equal(index.GetIndexIdentity().Revision, exception.ActualRevision);
         Assert.Equal(0, source.ConsumedDocuments);
         using var snapshot = index.OpenSnapshot();
         Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/c.txt"), out _));
     }
 
     [Fact]
-    public async Task ExpectedIdentityRemainsValidAcrossCompaction()
+    public async Task ExpectedRevisionRemainsValidAcrossCompaction()
     {
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
-        var expectedIdentity = index.GetIndexIdentity();
+        var expectedRevision = index.GetIndexIdentity().Revision;
 
         var compaction = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
         var compactedIdentity = index.GetIndexIdentity();
         Assert.True(compaction.InputSegments > 0);
-        Assert.Equal(expectedIdentity.CorpusId, compactedIdentity.CorpusId);
-        Assert.Equal(expectedIdentity.ContentRevision, compactedIdentity.ContentRevision);
-        Assert.NotEqual(expectedIdentity.StorageGeneration, compactedIdentity.StorageGeneration);
+        Assert.Equal(expectedRevision, compactedIdentity.Revision);
 
         var update = await index.Update(
             new InMemoryDocumentSource([]),
             [],
-            new UpdateOptions { ExpectedIdentity = expectedIdentity });
+            new UpdateOptions { ExpectedRevision = expectedRevision });
 
         Assert.Equal(compactedIdentity, update.CommittedIdentity);
     }
@@ -531,15 +529,15 @@ public sealed class MutationIntegrationTests
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
         using var overlay = index.OpenOverlaySnapshot();
         await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
-        var expectedIdentity = index.GetIndexIdentity();
+        var baseIdentity = index.GetIndexIdentity();
 
         var update = await overlay.CommitToBase(index, new UpdateOptions
         {
-            ExpectedIdentity = expectedIdentity,
+            ExpectedRevision = baseIdentity.Revision,
             CommitMetadataProvider = static _ => "overlay-commit"u8.ToArray()
         });
 
-        Assert.NotEqual(expectedIdentity, update.CommittedIdentity);
+        Assert.NotEqual(baseIdentity, update.CommittedIdentity);
         Assert.Equal("overlay-commit"u8.ToArray(), index.GetIndexState().CommitMetadata.ToArray());
     }
 
@@ -552,7 +550,7 @@ public sealed class MutationIntegrationTests
         await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
 
-        await Assert.ThrowsAsync<StaleIndexStateException>(() => overlay.CommitToBase(index));
+        await Assert.ThrowsAsync<StaleIndexRevisionException>(() => overlay.CommitToBase(index));
 
         using var snapshot = index.OpenSnapshot();
         Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var content));
