@@ -20,6 +20,12 @@ internal interface ISiftStorage
     void ReclaimUnreferencedSegments(CancellationToken cancellationToken);
 }
 
+// The returned ReadOnlyMemory carries its managed owner, so it remains valid after
+// the storage snapshot and mapped-segment facade that produced it are disposed.
+internal interface ISnapshotIndependentContentMemoryStorage
+{
+}
+
 internal static class SiftStorageExtensions
 {
     public static MappedSegment OpenSegment(

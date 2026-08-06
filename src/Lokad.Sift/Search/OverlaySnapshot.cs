@@ -533,13 +533,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         if (_overlayDocuments.ContainsKey(normalizedPath))
         {
             var generation = _overlayGeneration;
-            var found = generation.Snapshot.TryGetDocumentBytes(key, out content);
-            if (found)
-            {
-                content = content.ToArray();
-            }
-
-            return found;
+            return generation.Snapshot.TryGetSnapshotIndependentDocumentBytes(key, out content);
         }
 
         if (_deletedPaths.Contains(normalizedPath))

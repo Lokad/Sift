@@ -2,7 +2,7 @@ using Lokad.Sift;
 
 namespace Lokad.Sift.Storage;
 
-internal sealed class InMemorySiftStorage : ISiftStorage
+internal sealed class InMemorySiftStorage : ISiftStorage, ISnapshotIndependentContentMemoryStorage
 {
     private readonly SemaphoreSlim _writerGate = new(1, 1);
     private readonly object _stateLock = new();

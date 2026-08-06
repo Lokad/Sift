@@ -571,6 +571,19 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
+    internal bool TryGetSnapshotIndependentDocumentBytes(
+        DocumentKey key,
+        out ReadOnlyMemory<byte> content)
+    {
+        if (_storage is not ISnapshotIndependentContentMemoryStorage)
+        {
+            throw new InvalidOperationException(
+                "The snapshot storage does not provide snapshot-independent content memory.");
+        }
+
+        return TryGetDocumentBytes(key, out content);
+    }
+
     internal bool ContainsDocument(DocumentKey key)
     {
         try

@@ -307,6 +307,27 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task OverlayDocumentRetrievalDoesNotCopyTheDocumentBody()
+    {
+        var body = new string('a', 128 * 1024);
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(new InMemoryDocumentSource([("src/a.txt", body)]), []);
+        var key = new DocumentKey("src/a.txt");
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+        for (var iteration = 0; iteration < 5; iteration++)
+        {
+            Assert.True(overlay.TryGetDocumentBytes(key, out var content));
+            Assert.Equal(body.Length, content.Length);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        Assert.True(allocated < body.Length, $"Document retrieval allocated {allocated} bytes.");
+    }
+
+    [Fact]
     public async Task OverlayFaultsWhenCommittedStateCannotBeOpened()
     {
         using var index = SiftIndex.CreateInMemory();
