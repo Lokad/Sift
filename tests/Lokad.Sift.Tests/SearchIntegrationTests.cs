@@ -2481,9 +2481,11 @@ public sealed class SearchIntegrationTests
             new PathFilter(),
             collector);
 
-        var hit = snapshot.Materialize(collector.Hits.Single(), 1, 1);
+        var materialized = snapshot.MaterializeWithMatchingLine(collector.Hits.Single(), 1, 1);
+        var hit = materialized.Hit;
 
         Assert.Equal("abcde", hit.MatchText);
+        Assert.Equal("abcdefghij", materialized.MatchingLine);
         Assert.Equal(["1234"], hit.BeforeContext);
         Assert.Empty(hit.AfterContext);
         Assert.True(hit.IsMatchTruncated);

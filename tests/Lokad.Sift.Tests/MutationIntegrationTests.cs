@@ -536,9 +536,11 @@ public sealed class MutationIntegrationTests
 
         var overlayCollector = new HitBuffer();
         overlay.Search(new SearchQuery("Mul", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), overlayCollector);
-        var overlayHit = overlay.Materialize(overlayCollector.Hits[0], 0, 0);
+        var overlayMaterialized = overlay.MaterializeWithMatchingLine(overlayCollector.Hits[0], 0, 0);
+        var overlayHit = overlayMaterialized.Hit;
         Assert.Equal("src/lib/math.cs", overlayHit.Path);
         Assert.Contains("Mul", overlayHit.MatchText, StringComparison.Ordinal);
+        Assert.Contains("Mul", overlayMaterialized.MatchingLine, StringComparison.Ordinal);
 
         var commit = await overlay.CommitToBase(index);
         Assert.Equal(1, commit.UpsertedDocuments);

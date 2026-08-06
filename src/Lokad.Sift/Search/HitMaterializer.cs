@@ -25,6 +25,38 @@ internal static class HitMaterializer
             options);
     }
 
+    public static MaterializedHitWithLine MaterializeWithMatchingLine(
+        MappedSegment segment,
+        in RawHit hit,
+        int contextBefore,
+        int contextAfter,
+        SiftOptions options)
+    {
+        var document = segment.GetDocument(hit.DocumentOrdinal.Value);
+        var contentBytes = segment.GetContentBytes(document);
+        var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
+        var asciiDocument = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
+        var materialized = Materialize(
+            segment.GetPath(document),
+            contentBytes,
+            encodedLineIndex,
+            asciiDocument,
+            hit,
+            contextBefore,
+            contextAfter,
+            options);
+        var matchingLineStart = LineMap.GetLineStart(encodedLineIndex, materialized.StartLine);
+        var matchingLineEnd = LineMap.GetLineEndExclusive(
+            encodedLineIndex,
+            materialized.StartLine,
+            contentBytes.Length);
+        var matchingLine = DecodeText(
+            contentBytes[matchingLineStart..matchingLineEnd],
+            asciiDocument,
+            trimLineEnd: true);
+        return new MaterializedHitWithLine(materialized, matchingLine);
+    }
+
     private static MaterializedHit Materialize(
         string path,
         ReadOnlySpan<byte> contentBytes,

@@ -667,6 +667,19 @@ public sealed class MaterializedHit
     public bool IsContextTruncated { get; }
 }
 
+/// <summary>A materialized hit together with the complete line containing its start.</summary>
+public sealed class MaterializedHitWithLine
+{
+    internal MaterializedHitWithLine(MaterializedHit hit, string matchingLine)
+    {
+        Hit = hit;
+        MatchingLine = matchingLine;
+    }
+
+    public MaterializedHit Hit { get; }
+    public string MatchingLine { get; }
+}
+
 public interface IHitCollector
 {
     /// <remarks>

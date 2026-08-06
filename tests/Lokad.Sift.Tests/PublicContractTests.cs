@@ -155,6 +155,7 @@ public sealed class PublicContractTests
         Assert.False(typeof(IndexValidationStats).IsValueType);
         Assert.False(typeof(IndexState).IsValueType);
         Assert.False(typeof(MaterializedHit).IsValueType);
+        Assert.False(typeof(MaterializedHitWithLine).IsValueType);
     }
 
     [Fact]
@@ -174,7 +175,8 @@ public sealed class PublicContractTests
             typeof(StorageStats),
             typeof(IndexValidationStats),
             typeof(IndexState),
-            typeof(MaterializedHit)
+            typeof(MaterializedHit),
+            typeof(MaterializedHitWithLine)
         ];
 
         foreach (var resultType in resultTypes)

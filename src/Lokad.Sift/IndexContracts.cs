@@ -636,6 +636,16 @@ public interface IIndexSnapshot : IDisposable
     /// </remarks>
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
 
+    /// <summary>Materializes a raw hit and the complete line containing its start.</summary>
+    /// <remarks>
+    ///     The matching line is not subject to context byte limits; callers should use
+    ///     ordinary <see cref="Materialize"/> when they do not need that allocation.
+    /// </remarks>
+    MaterializedHitWithLine MaterializeWithMatchingLine(
+        in RawHit hit,
+        int contextBefore,
+        int contextAfter);
+
     /// <summary>Gets a document body owned by this snapshot.</summary>
     /// <remarks>The returned memory remains valid until this snapshot is disposed.</remarks>
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);

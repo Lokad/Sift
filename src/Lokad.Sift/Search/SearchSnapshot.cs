@@ -554,6 +554,34 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
+    public MaterializedHitWithLine MaterializeWithMatchingLine(
+        in RawHit hit,
+        int contextBefore,
+        int contextAfter)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(contextBefore);
+        ArgumentOutOfRangeException.ThrowIfNegative(contextAfter);
+        if (!hit.IsOwnedBy(_hitOwner))
+            throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
+
+        try
+        {
+            using var operation = BeginOperation();
+            var cache = OpenSegment(hit.SegmentId);
+            return HitMaterializer.MaterializeWithMatchingLine(
+                cache.Segment,
+                hit,
+                contextBefore,
+                contextAfter,
+                _options);
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
     internal MaterializedHit MaterializeOverlayHit(
         in RawHit hit,
         SegmentId segmentId,
@@ -564,6 +592,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             .WithSegmentId(segmentId)
             .WithOwner(_hitOwner);
         return Materialize(ownedHit, contextBefore, contextAfter);
+    }
+
+    internal MaterializedHitWithLine MaterializeOverlayHitWithMatchingLine(
+        in RawHit hit,
+        SegmentId segmentId,
+        int contextBefore,
+        int contextAfter)
+    {
+        var ownedHit = hit
+            .WithSegmentId(segmentId)
+            .WithOwner(_hitOwner);
+        return MaterializeWithMatchingLine(ownedHit, contextBefore, contextAfter);
     }
 
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
