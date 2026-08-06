@@ -112,6 +112,44 @@ public sealed class CacheTests
     }
 
     [Fact]
+    public async Task BoundedLruCacheDoesNotEvictAnInFlightFactory()
+    {
+        var cache = new BoundedLruCache<int, string>(capacity: 1);
+        var factoryStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFactory = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var creations = 0;
+        var first = Task.Run(() => cache.GetOrAdd(
+            1,
+            _ =>
+            {
+                Interlocked.Increment(ref creations);
+                factoryStarted.SetResult();
+                releaseFactory.Task.GetAwaiter().GetResult();
+                return "one";
+            },
+            out _));
+        await factoryStarted.Task;
+        Assert.Equal("two", cache.GetOrAdd(2, static _ => "two", out _));
+        var second = Task.Run(() => cache.GetOrAdd(
+            1,
+            _ =>
+            {
+                Interlocked.Increment(ref creations);
+                return "duplicate";
+            },
+            out _));
+
+        releaseFactory.SetResult();
+        var values = await Task.WhenAll(first, second);
+
+        Assert.Equal(["one", "one"], values);
+        Assert.Equal(1, creations);
+        Assert.True(cache.Count <= 1);
+    }
+
+    [Fact]
     public void BoundedLruCacheRemovesFaultedCreation()
     {
         var cache = new BoundedLruCache<int, string>(capacity: 2);

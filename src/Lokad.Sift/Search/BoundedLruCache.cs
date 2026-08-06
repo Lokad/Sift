@@ -72,14 +72,7 @@ internal sealed class BoundedLruCache<TKey, TValue>
                 var node = _recency.AddFirst(new Entry(key, value, weight));
                 _entries.Add(key, node);
                 _weight = checked(_weight + weight);
-                while (_entries.Count > _capacity || _weight > _maximumWeight)
-                {
-                    var expired = _recency.Last ??
-                        throw new InvalidOperationException("The cache recency list is unexpectedly empty.");
-                    _recency.RemoveLast();
-                    _entries.Remove(expired.Value.Key);
-                    _weight -= expired.Value.Weight;
-                }
+                TrimCompletedValuesUnderLock();
 
                 cacheHit = false;
             }
@@ -87,12 +80,41 @@ internal sealed class BoundedLruCache<TKey, TValue>
 
         try
         {
-            return value.Value;
+            var result = value.Value;
+            lock (_sync)
+            {
+                TrimCompletedValuesUnderLock();
+            }
+
+            return result;
         }
         catch
         {
             RemoveFaultedValue(key, value);
             throw;
+        }
+    }
+
+    private void TrimCompletedValuesUnderLock()
+    {
+        while (_entries.Count > _capacity || _weight > _maximumWeight)
+        {
+            var expired = _recency.Last;
+            while (expired is not null && !expired.Value.Value.IsValueCreated)
+            {
+                expired = expired.Previous;
+            }
+
+            if (expired is null)
+            {
+                // An in-flight factory is the coalescing point for its key. Temporarily
+                // exceed the bound rather than evict it and duplicate expensive work.
+                return;
+            }
+
+            _recency.Remove(expired);
+            _entries.Remove(expired.Value.Key);
+            _weight -= expired.Value.Weight;
         }
     }
 
