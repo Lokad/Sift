@@ -18,6 +18,7 @@ internal sealed unsafe class MappedSegment : IDisposable
     private byte* _pointer;
     private readonly long _mappedLength;
     private readonly ReadOnlyMemory<byte> _backingMemory;
+    private readonly UnmanagedByteMemoryManager? _mappedContentMemory;
     private readonly (long Offset, long Length)[] _regions =
         new (long Offset, long Length)[SegmentFormat.ReservedRegionIdEnd + 1];
     private int _disposed;
@@ -39,6 +40,14 @@ internal sealed unsafe class MappedSegment : IDisposable
             Interlocked.Increment(ref s_openSegments);
             accounted = true;
             Initialize(validateChecksums, cancellationToken);
+            var contentRegion = GetRegion(SegmentRegionId.ContentBlob);
+            if (contentRegion.Length <= int.MaxValue)
+            {
+                _mappedContentMemory = new UnmanagedByteMemoryManager(
+                    this,
+                    BasePointer + contentRegion.Offset,
+                    (int)contentRegion.Length);
+            }
         }
         catch
         {
@@ -169,9 +178,19 @@ internal sealed unsafe class MappedSegment : IDisposable
         var region = GetRegion(SegmentRegionId.ContentBlob);
         ValidateDocumentSlice(document.ContentOffset, document.ContentLength, region.Length, "content");
         var offset = checked((int)(region.Offset + (long)document.ContentOffset));
-        return _mappedFile is null
-            ? _backingMemory.Slice(offset, document.ContentLength)
-            : new UnmanagedByteMemoryManager(this, BasePointer + offset, document.ContentLength).Memory;
+        if (_mappedFile is null)
+        {
+            return _backingMemory.Slice(offset, document.ContentLength);
+        }
+
+        return _mappedContentMemory is not null
+            ? _mappedContentMemory.Memory.Slice(
+                checked((int)document.ContentOffset),
+                document.ContentLength)
+            : new UnmanagedByteMemoryManager(
+                this,
+                BasePointer + offset,
+                document.ContentLength).Memory;
     }
 
     public bool TryFindDocumentOrdinal(string normalizedPath, out uint ordinal)
@@ -830,6 +849,7 @@ internal readonly record struct SegmentDocument(
 
 internal sealed unsafe class UnmanagedByteMemoryManager : MemoryManager<byte>
 {
+    // ReadOnlyMemory must keep the mapped segment alive for as long as its view is reachable.
     private readonly object _owner;
     private readonly byte* _pointer;
     private readonly int _length;

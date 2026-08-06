@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Lokad.Sift.LowLevel;
 
-internal sealed class PooledBitSet : IDisposable
+internal ref struct PooledBitSet
 {
     private readonly uint[] _words;
     private readonly int _count;

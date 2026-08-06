@@ -2,7 +2,7 @@ using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Search;
 
-internal sealed class SegmentScopeBuilder(
+internal ref struct SegmentScopeBuilder(
     SegmentCache cache,
     PathFilterMatcher matcher,
     int maxSelectedNgrams,

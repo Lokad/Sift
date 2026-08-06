@@ -366,6 +366,26 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
+    public async Task RepeatedMappedDocumentLookupsReuseTheContentView()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot();
+        var key = new DocumentKey("src/a.txt");
+        Assert.True(snapshot.TryGetDocumentBytes(key, out _));
+
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 128; i++)
+        {
+            _ = snapshot.TryGetDocumentBytes(key, out _);
+        }
+        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        Assert.InRange(allocatedBytes, 0, 4608);
+    }
+
+    [Fact]
     public async Task InMemoryDocumentBytesAreAViewOverTheSegmentPack()
     {
         using var index = SiftIndex.CreateInMemory();
