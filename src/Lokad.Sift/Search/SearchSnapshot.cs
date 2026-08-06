@@ -165,49 +165,68 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         IHitCollector collector,
         CancellationToken cancellationToken)
     {
-        return Search(query, pathFilter, collector, pathVisibility: null, cancellationToken);
+        ArgumentNullException.ThrowIfNull(collector);
+        var prepared = PrepareSearch(query, pathFilter);
+        var watch = ValueStopwatch.StartNew();
+        using var deadlineCancellation = CreateDeadlineCancellation(
+            query.MaxElapsedMilliseconds,
+            cancellationToken);
+        return SearchPrepared(
+            query,
+            prepared,
+            collector,
+            pathVisibility: null,
+            SearchLimits.FromQuery(query),
+            deadlineCancellation?.Token ?? cancellationToken,
+            cancellationToken,
+            watch);
     }
 
-    internal SearchStats Search(
-        SearchQuery query,
-        PathFilter pathFilter,
-        IHitCollector collector,
-        IPathVisibility? pathVisibility,
-        CancellationToken cancellationToken)
+    internal PreparedSearch PrepareSearch(SearchQuery query, PathFilter pathFilter)
     {
-        ArgumentNullException.ThrowIfNull(collector);
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
+        return new PreparedSearch(
+            SearchQueryPreparer.Prepare(query),
+            PathFilterMatcher.Prepare(pathFilter));
+    }
+
+    internal SearchStats SearchPrepared(
+        SearchQuery query,
+        in PreparedSearch prepared,
+        IHitCollector collector,
+        IPathVisibility? pathVisibility,
+        SearchLimits limits,
+        CancellationToken cancellationToken,
+        CancellationToken callerCancellationToken,
+        ValueStopwatch watch)
+    {
+        ArgumentNullException.ThrowIfNull(collector);
         var ownedCollector = new GuardedOwnedHitCollector(_hitOwner, collector);
         try
         {
             using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
-            var watch = ValueStopwatch.StartNew();
-            var preparedQuery = SearchQueryPreparer.Prepare(query);
-            var matcher = PathFilterMatcher.Prepare(pathFilter);
-            using var deadlineCancellation = CreateDeadlineCancellation(
-                query.MaxElapsedMilliseconds,
-                cancellationToken);
-            var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
-            return CanUseSegmentParallelSearch(query)
+            return CanUseSegmentParallelSearch(limits)
                 ? SearchParallel(
                     query,
-                    matcher,
-                    preparedQuery,
+                    prepared.Matcher,
+                    prepared.Query,
                     ownedCollector,
                     pathVisibility,
-                    effectiveCancellationToken,
+                    limits,
                     cancellationToken,
+                    callerCancellationToken,
                     watch)
                 : SearchSequential(
                     query,
-                    matcher,
-                    preparedQuery,
+                    prepared.Matcher,
+                    prepared.Query,
                     ownedCollector,
                     pathVisibility,
-                    effectiveCancellationToken,
+                    limits,
                     cancellationToken,
+                    callerCancellationToken,
                     watch);
         }
         catch (CollectorFailureException exception)
@@ -228,6 +247,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         PreparedSearchQuery preparedQuery,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
+        in SearchLimits limits,
         CancellationToken cancellationToken,
         CancellationToken callerCancellationToken,
         ValueStopwatch watch)
@@ -265,9 +285,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     watch,
                     collector,
                     new SearchLimits(
-                        query.MaxHits - hitsReturned,
-                        query.MaxMatchedDocuments - matchedDocuments,
-                        query.MaxBytesScanned - metrics.BytesScanned),
+                        limits.MaximumHits - hitsReturned,
+                        limits.MaximumMatchedDocuments - matchedDocuments,
+                        limits.MaximumBytesScanned - metrics.BytesScanned),
                     cancellationToken,
                     cancellationToken,
                     callerCancellationToken);
@@ -302,6 +322,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         PreparedSearchQuery preparedQuery,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
+        SearchLimits limits,
         CancellationToken cancellationToken,
         CancellationToken callerCancellationToken,
         ValueStopwatch watch)
@@ -375,7 +396,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                         pathVisibility,
                                         watch,
                                         bufferedCollector,
-                                        SearchLimits.FromQuery(query),
+                                        limits,
                                         batchCancellation.Token,
                                         cancellationToken,
                                         callerCancellationToken);
@@ -408,7 +429,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                 var hitDocument = (hit.SegmentId, hit.DocumentOrdinal);
                                 if (lastMatchedDocument != hitDocument)
                                 {
-                                    if (matchedDocuments >= query.MaxMatchedDocuments)
+                                    if (matchedDocuments >= limits.MaximumMatchedDocuments)
                                     {
                                         stopReason = SearchStopReason.MaxMatchedDocuments;
                                         batchCancellation.Cancel();
@@ -428,7 +449,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                     break;
                                 }
 
-                                if (hitsReturned >= query.MaxHits)
+                                if (hitsReturned >= limits.MaximumHits)
                                 {
                                     stopReason = SearchStopReason.MaxHits;
                                     batchCancellation.Cancel();
@@ -449,7 +470,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                 goto Done;
                             }
 
-                            if (matchedDocuments >= query.MaxMatchedDocuments)
+                            if (matchedDocuments >= limits.MaximumMatchedDocuments)
                             {
                                 stopReason = SearchStopReason.MaxMatchedDocuments;
                                 goto Done;
@@ -908,7 +929,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return watch.ElapsedMilliseconds >= query.MaxElapsedMilliseconds;
     }
 
-    private static CancellationTokenSource? CreateDeadlineCancellation(
+    internal static CancellationTokenSource? CreateDeadlineCancellation(
         long maxElapsedMilliseconds,
         CancellationToken cancellationToken)
     {
@@ -1689,11 +1710,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             plan.CandidatePlan.UsesIndex;
     }
 
-    private bool CanUseSegmentParallelSearch(SearchQuery query)
+    private bool CanUseSegmentParallelSearch(in SearchLimits limits)
     {
         return _searchOptions.SegmentParallelism > 1 &&
                _segments.Count > 1 &&
-               query.MaxBytesScanned == long.MaxValue;
+               limits.MaximumBytesScanned == long.MaxValue;
     }
 }
 
@@ -1763,6 +1784,10 @@ internal readonly record struct SearchLimits(
             query.MaxBytesScanned);
     }
 }
+
+internal readonly record struct PreparedSearch(
+    PreparedSearchQuery Query,
+    PathFilterMatcher Matcher);
 
 internal struct SearchMetrics
 {

@@ -433,10 +433,25 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
         var watch = ValueStopwatch.StartNew();
+        // Overlay and base are two generations of one logical search: prepare once and
+        // enforce one absolute deadline while carrying the remaining result budgets.
+        var prepared = _baseSnapshot.PrepareSearch(query, pathFilter);
+        using var deadlineCancellation = SearchSnapshot.CreateDeadlineCancellation(
+            query.MaxElapsedMilliseconds,
+            cancellationToken);
+        var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
 
         var generation = _overlayGeneration;
         var overlayCollector = new OverlayHitCollector(this, generation, collector);
-        var overlayStats = generation.Snapshot.Search(query, pathFilter, overlayCollector, cancellationToken);
+        var overlayStats = generation.Snapshot.SearchPrepared(
+            query,
+            prepared,
+            overlayCollector,
+            pathVisibility: null,
+            SearchLimits.FromQuery(query),
+            effectiveCancellationToken,
+            cancellationToken,
+            watch);
         if (overlayStats.StopReason != SearchStopReason.None)
         {
             return overlayStats;
@@ -460,33 +475,29 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             return overlayStats.WithStopReason(SearchStopReason.MaxBytesScanned);
         }
 
-        var remainingElapsedMilliseconds = query.MaxElapsedMilliseconds - watch.ElapsedMilliseconds;
-        if (remainingElapsedMilliseconds <= 0)
+        if (watch.ElapsedMilliseconds >= query.MaxElapsedMilliseconds)
         {
             return overlayStats.WithStopReason(SearchStopReason.MaxElapsedTime);
         }
 
-        var baseStats = _baseSnapshot.Search(
-            query with
-            {
-                MaxHits = remainingHits,
-                MaxMatchedDocuments = remainingDocuments,
-                MaxBytesScanned = remainingBytes,
-                MaxElapsedMilliseconds = remainingElapsedMilliseconds
-            },
-            pathFilter,
+        var baseStats = _baseSnapshot.SearchPrepared(
+            query,
+            prepared,
             collector,
             _hiddenPathVisibility,
-            cancellationToken);
+            new SearchLimits(remainingHits, remainingDocuments, remainingBytes),
+            effectiveCancellationToken,
+            cancellationToken,
+            watch);
 
-        return CombineStats(overlayStats, baseStats);
+        return CombineStats(overlayStats, baseStats, watch.ElapsedMilliseconds);
 
-        static SearchStats CombineStats(SearchStats overlay, SearchStats @base)
+        static SearchStats CombineStats(SearchStats overlay, SearchStats @base, long elapsedMilliseconds)
         {
             var metrics = SearchMetrics.FromSearchStats(overlay);
             metrics.Add(SearchMetrics.FromSearchStats(@base));
             return metrics.ToSearchStats(
-                overlay.ElapsedMilliseconds + @base.ElapsedMilliseconds,
+                elapsedMilliseconds,
                 overlay.HitsReturned + @base.HitsReturned,
                 @base.StopReason);
         }
