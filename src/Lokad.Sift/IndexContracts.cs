@@ -447,7 +447,7 @@ public sealed class IndexValidationStats
     public StorageGeneration? Generation { get; }
     // Immutable packs referenced by that generation.
     public int TotalSegments { get; }
-    // Packs whose full checksums have been verified in this attempt.
+    // Packs whose checksums and persisted structures have been verified in this attempt.
     public int ValidatedSegments { get; }
     // Physical bytes across all packs in the generation.
     public long TotalBytes { get; }
@@ -652,12 +652,19 @@ public interface IOverlaySnapshot : IIndexSnapshot
         IReadOnlyList<DocumentKey> deletions,
         OverlayUpdateOptions options,
         CancellationToken cancellationToken);
+    /// <summary>Applies this overlay to its captured base if that logical revision is still current.</summary>
+    /// <remarks>Any supplied expected revision must identify the same captured base revision.</remarks>
     Task<UpdateStats> CommitToBase(ISiftIndex baseIndex, UpdateOptions options, CancellationToken cancellationToken);
+
+    /// <summary>Applies this overlay's upserts and deletions to an arbitrary target.</summary>
+    /// <remarks>The supplied update options, including any expected revision, are forwarded unchanged.</remarks>
     Task<UpdateStats> ApplyDeltaTo(ISiftIndex target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
 public interface ISiftIndex : IDisposable
 {
+    /// <summary>Gets whether discovered storage corruption requires a full replacement build.</summary>
+    /// <remarks>Online operations defer full pack checksums, so false is not an integrity proof.</remarks>
     bool RequiresRebuild { get; }
     IndexIdentity GetIndexIdentity();
     IndexState GetIndexState();
@@ -669,6 +676,7 @@ public interface ISiftIndex : IDisposable
     StorageStats GetStorageStats();
     // Reports whether the current generation contains work selectable by this policy.
     bool ShouldCompact(CompactOptions options);
+    /// <summary>Checks every referenced pack's checksums and persisted structures.</summary>
     Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
     Task<BuildStats> Build(
         IDocumentSource documents,

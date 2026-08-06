@@ -182,6 +182,10 @@ public sealed class PathFilter
     public string? PathRegex { get; init; }
 }
 
+/// <remarks>
+///     Equality compares the public coordinates. The producing snapshot used for
+///     materialization is a separate lifetime constraint.
+/// </remarks>
 public readonly struct RawHit : IEquatable<RawHit>
 {
     private readonly object? _owner;

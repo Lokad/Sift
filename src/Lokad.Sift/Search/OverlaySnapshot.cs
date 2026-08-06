@@ -549,6 +549,9 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         {
             _updateLock.Release();
         }
+
+        // Pre-existing waiters still acquire these primitives to observe _disposed and exit.
+        // Disposing either primitive here would race their cleanup paths.
     }
 
     private void RefreshOverlaySnapshot()

@@ -7,6 +7,7 @@ internal interface ISiftStorage
     IStorageWriteSession AcquireWriteSession(CancellationToken cancellationToken);
     CorpusManifest ReadManifest();
     CorpusManifest RefreshManifest();
+    // Opens perform cheap shape checks; ValidateSegment adds full checksums and cross-region validation.
     MappedSegment OpenSegment(SegmentId segmentId);
     MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken);
     void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken);

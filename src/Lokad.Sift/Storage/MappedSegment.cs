@@ -33,6 +33,7 @@ internal sealed unsafe class MappedSegment : IDisposable
         var accounted = false;
         try
         {
+            // Mapped-view capacity is page-rounded on Windows; persisted bounds use the exact file length.
             _fileLength = new FileInfo(path).Length;
             _mappedFile = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
             _view = _mappedFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);

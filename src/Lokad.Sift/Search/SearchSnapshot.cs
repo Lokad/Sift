@@ -628,6 +628,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             _lifetimeLock.ExitWriteLock();
         }
+
+        // A caller queued before disposal must still acquire the lock and observe _disposed.
+        // Disposing the lock here would race that caller's cleanup path.
     }
 
     private SegmentCache OpenSegment(SegmentId segmentId)
