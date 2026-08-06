@@ -5,41 +5,21 @@ namespace Lokad.Sift.Search;
 
 internal static class SearchPlanner
 {
-    internal static SelectedNgram[] ToSelectedNgrams(ReadOnlySpan<SelectedGram> grams)
-    {
-        if (grams.Length == 0)
-        {
-            return [];
-        }
-
-        var selected = new SelectedNgram[grams.Length];
-        for (var i = 0; i < grams.Length; i++)
-        {
-            selected[i] = new SelectedNgram(
-                (uint)grams[i].Gram,
-                grams[i].GramLength,
-                grams[i].DocFreq);
-        }
-
-        return selected;
-    }
-
     internal static SearchCandidateKind GetCandidateKind(
-        ReadOnlySpan<SelectedNgram> selected,
+        int selectedByteLength,
         bool usesIndex)
     {
-        var selectedLength = selected.Length == 0 ? 0 : selected[0].ByteLength;
-        return SearchPlanKinds.GetCandidateKind(selectedLength, usesIndex);
+        return SearchPlanKinds.GetCandidateKind(selectedByteLength, usesIndex);
     }
 
     internal static SearchCandidateCombination GetCandidateCombination(
-        ReadOnlySpan<SelectedNgram> selected,
+        int selectedCount,
         bool usesIndex,
         bool unionCandidates,
         bool branchUnion)
     {
         return SearchPlanKinds.GetCandidateCombination(
-            selected.Length,
+            selectedCount,
             usesIndex,
             unionCandidates,
             branchUnion);
@@ -159,12 +139,49 @@ internal static class SearchPlanner
         return postingsBytes + verifierCost;
     }
 
-    public static SegmentSearchPlan CreateSegmentPlan(
+    public static SegmentSearchPlan CreateExecutionPlan(
         SegmentCache cache,
         PathFilterMatcher matcher,
         SearchQuery query,
         PreparedSearchQuery preparedQuery,
         SiftOptions options,
+        CancellationToken cancellationToken)
+    {
+        return CreateSegmentPlan(
+            cache,
+            matcher,
+            query,
+            preparedQuery,
+            options,
+            retainAlternatives: false,
+            cancellationToken);
+    }
+
+    public static SegmentSearchPlan CreateDiagnosticPlan(
+        SegmentCache cache,
+        PathFilterMatcher matcher,
+        SearchQuery query,
+        PreparedSearchQuery preparedQuery,
+        SiftOptions options,
+        CancellationToken cancellationToken)
+    {
+        return CreateSegmentPlan(
+            cache,
+            matcher,
+            query,
+            preparedQuery,
+            options,
+            retainAlternatives: true,
+            cancellationToken);
+    }
+
+    private static SegmentSearchPlan CreateSegmentPlan(
+        SegmentCache cache,
+        PathFilterMatcher matcher,
+        SearchQuery query,
+        PreparedSearchQuery preparedQuery,
+        SiftOptions options,
+        bool retainAlternatives,
         CancellationToken cancellationToken)
     {
         var pathScope = new SegmentScopeBuilder(
@@ -173,15 +190,14 @@ internal static class SearchPlanner
             options.MaxSelectedNgrams,
             cancellationToken).Build();
         var features = new SearchQueryFeatures(query, preparedQuery);
-        var candidates = SearchPlanCandidateBuilder.Enumerate(
+        var candidates = SearchPlanCandidateBuilder.BuildCandidates(
             cache.Segment,
             pathScope.Scope,
             in features,
             options);
-        var scored = SearchPlanScorer.Score(candidates);
         var contentPlan = new SearchPlannerDecision(
-            SearchPlanScorer.ChooseBest(scored),
-            [.. candidates]);
+            SearchPlanSelector.ChooseBest(candidates),
+            retainAlternatives ? [.. candidates] : []);
         return new SegmentSearchPlan(
             pathScope.Scope,
             contentPlan,
@@ -216,7 +232,6 @@ internal readonly record struct SearchPlanCandidate(
     double EstimatedDirectScanCost,
     double? EstimatedIndexedCost,
     double EstimatedCandidateDocuments,
-    SelectedNgram[] SelectedNgrams,
     double EstimatedCost);
 
 internal readonly record struct SearchPlannerDecision(

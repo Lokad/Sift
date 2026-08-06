@@ -31,6 +31,15 @@ internal static class SelectedNgramMerger
         target[key] = checked(documentFrequency + gram.DocumentFrequency);
     }
 
+    public static void Add(
+        Dictionary<(uint PackedValue, int ByteLength), int> target,
+        SelectedGram gram)
+    {
+        var key = ((uint)gram.Gram, gram.GramLength);
+        target.TryGetValue(key, out var documentFrequency);
+        target[key] = checked(documentFrequency + gram.DocFreq);
+    }
+
     public static SelectedNgram[] Materialize(
         Dictionary<(uint PackedValue, int ByteLength), int> source)
     {

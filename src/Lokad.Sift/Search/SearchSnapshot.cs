@@ -900,7 +900,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken searchCancellationToken,
         CancellationToken callerCancellationToken)
     {
-        var segmentPlan = SearchPlanner.CreateSegmentPlan(
+        var segmentPlan = SearchPlanner.CreateExecutionPlan(
             cache,
             matcher,
             query,

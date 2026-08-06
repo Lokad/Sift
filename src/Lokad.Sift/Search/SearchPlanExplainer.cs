@@ -38,7 +38,7 @@ internal sealed class SearchPlanExplainer(
         foreach (var entry in segments)
         {
             var cache = openSegment(entry);
-            var segmentPlan = SearchPlanner.CreateSegmentPlan(
+            var segmentPlan = SearchPlanner.CreateDiagnosticPlan(
                 cache,
                 matcher,
                 query,
@@ -68,7 +68,7 @@ internal sealed class SearchPlanExplainer(
 
             estimatedCandidateDocuments += chosenPlan.EstimatedCandidateDocuments;
             estimatedCost += chosenPlan.EstimatedCost;
-            foreach (var gram in chosenPlan.SelectedNgrams)
+            foreach (var gram in chosenPlan.CandidatePlan.SelectedGrams)
             {
                 SelectedNgramMerger.Add(selected, gram);
             }
@@ -105,10 +105,12 @@ internal sealed class SearchPlanExplainer(
             query.Multiline;
         var selectedNgrams = SelectedNgramMerger.Materialize(selected);
         var resolvedCandidateKind = candidateKind ??
-            SearchPlanner.GetCandidateKind(selectedNgrams, usesIndex);
+            SearchPlanner.GetCandidateKind(
+                selectedNgrams.Length == 0 ? 0 : selectedNgrams[0].ByteLength,
+                usesIndex);
         var resolvedCandidateCombination = candidateCombination ??
             SearchPlanner.GetCandidateCombination(
-                selectedNgrams,
+                selectedNgrams.Length,
                 usesIndex,
                 unionCandidates: false,
                 branchUnion: false);

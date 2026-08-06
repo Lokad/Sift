@@ -4,7 +4,7 @@ using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Search;
 
-internal sealed class SearchPlanCandidateBuilder
+internal ref struct SearchPlanCandidateBuilder
 {
     private readonly MappedSegment _segment;
     private readonly SegmentScope _scope;
@@ -23,7 +23,7 @@ internal sealed class SearchPlanCandidateBuilder
         _options = options;
     }
 
-    public static List<SearchPlanCandidate> Enumerate(
+    public static List<SearchPlanCandidate> BuildCandidates(
         MappedSegment segment,
         SegmentScope scope,
         in SearchQueryFeatures features,
@@ -174,7 +174,7 @@ internal sealed class SearchPlanCandidateBuilder
 
     private SearchPlanCandidate CreateLiteralContentPlan(in LiteralPlan literalPlan)
     {
-        var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
+        var selected = literalPlan.SelectedGrams;
         var directScanCost = Math.Max(literalPlan.ScopeBytes, literalPlan.ScopeDocuments) *
             _features.RegexPlan.DirectScanCostMultiplier;
         var seedByteLength = literalPlan.SeedByteLength;
@@ -205,9 +205,11 @@ internal sealed class SearchPlanCandidateBuilder
             : directScanCost;
         return new SearchPlanCandidate(
             literalPlan,
-            SearchPlanner.GetCandidateKind(selected, literalPlan.UsesIndex),
+            SearchPlanner.GetCandidateKind(
+                selected.Length == 0 ? 0 : selected[0].GramLength,
+                literalPlan.UsesIndex),
             SearchPlanner.GetCandidateCombination(
-                selected,
+                selected.Length,
                 literalPlan.UsesIndex,
                 literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
                 literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
@@ -215,7 +217,6 @@ internal sealed class SearchPlanCandidateBuilder
             directScanCost,
             estimatedIndexedCost,
             estimatedCandidates,
-            selected,
             estimatedCost);
     }
 
@@ -230,7 +231,6 @@ internal sealed class SearchPlanCandidateBuilder
             directScanCost,
             null,
             _scope.Count,
-            [],
             directScanCost);
     }
 
@@ -238,7 +238,7 @@ internal sealed class SearchPlanCandidateBuilder
         in LiteralPlan literalPlan,
         double estimatedCandidates)
     {
-        var selected = SearchPlanner.ToSelectedNgrams(literalPlan.SelectedGrams);
+        var selected = literalPlan.SelectedGrams;
         var includesUnicodeFallback =
             _features.Query.PatternMode == PatternMode.Regex &&
             _features.ResolvedCaseMode == CaseMode.Insensitive &&
@@ -278,9 +278,11 @@ internal sealed class SearchPlanCandidateBuilder
                 : estimatedIndexedCost ?? 0d;
         return new SearchPlanCandidate(
             literalPlan,
-            SearchPlanner.GetCandidateKind(selected, usesIndex: true),
+            SearchPlanner.GetCandidateKind(
+                selected.Length == 0 ? 0 : selected[0].GramLength,
+                usesIndex: true),
             SearchPlanner.GetCandidateCombination(
-                selected,
+                selected.Length,
                 usesIndex: true,
                 literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
                 literalPlan.CandidateMode == LiteralCandidateMode.UnionOfIntersections),
@@ -288,7 +290,6 @@ internal sealed class SearchPlanCandidateBuilder
             directScanCost,
             estimatedIndexedCost,
             estimatedCandidates,
-            selected,
             estimatedCost);
     }
 
