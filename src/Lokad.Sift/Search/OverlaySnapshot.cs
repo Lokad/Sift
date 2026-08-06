@@ -722,73 +722,60 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
             additions.Sort(Utf8PathOrder);
             removals.Sort(Utf8PathOrder);
-            var retained = _hiddenPaths;
-            if (removals.Count > 0)
+            var merged = GC.AllocateUninitializedArray<byte[]>(
+                _hiddenPaths.Length - removals.Count + additions.Count);
+            var sourceIndex = 0;
+            var removalIndex = 0;
+            var additionIndex = 0;
+            var writeIndex = 0;
+            while (sourceIndex < _hiddenPaths.Length || additionIndex < additions.Count)
             {
-                retained = GC.AllocateUninitializedArray<byte[]>(
-                    _hiddenPaths.Length - removals.Count);
-                var sourceIndex = 0;
-                var removalIndex = 0;
-                var writeIndex = 0;
-                while (sourceIndex < _hiddenPaths.Length)
+                while (sourceIndex < _hiddenPaths.Length && removalIndex < removals.Count)
                 {
-                    if (removalIndex >= removals.Count)
-                    {
-                        Array.Copy(
-                            _hiddenPaths,
-                            sourceIndex,
-                            retained,
-                            writeIndex,
-                            _hiddenPaths.Length - sourceIndex);
-                        writeIndex += _hiddenPaths.Length - sourceIndex;
-                        break;
-                    }
-
                     var comparison = Utf8PathOrder.Compare(
                         _hiddenPaths[sourceIndex],
                         removals[removalIndex]);
                     if (comparison < 0)
                     {
-                        retained[writeIndex++] = _hiddenPaths[sourceIndex++];
+                        break;
                     }
-                    else if (comparison == 0)
+
+                    if (comparison == 0)
                     {
                         sourceIndex++;
                         removalIndex++;
+                        continue;
                     }
-                    else
-                    {
-                        throw new InvalidOperationException("The overlay visibility index is inconsistent.");
-                    }
-                }
 
-                if (removalIndex != removals.Count || writeIndex != retained.Length)
-                {
                     throw new InvalidOperationException("The overlay visibility index is inconsistent.");
                 }
-            }
 
-            if (additions.Count == 0)
-            {
-                return new HiddenPathVisibility(retained);
-            }
-
-            var merged = GC.AllocateUninitializedArray<byte[]>(retained.Length + additions.Count);
-            var additionIndex = 0;
-            var mergedIndex = 0;
-            var retainedIndex = 0;
-            while (retainedIndex < retained.Length && additionIndex < additions.Count)
-            {
-                var comparison = Utf8PathOrder.Compare(
-                    retained[retainedIndex],
-                    additions[additionIndex]);
-                if (comparison < 0)
+                if (sourceIndex >= _hiddenPaths.Length)
                 {
-                    merged[mergedIndex++] = retained[retainedIndex++];
+                    while (additionIndex < additions.Count)
+                    {
+                        merged[writeIndex++] = additions[additionIndex++];
+                    }
+
+                    break;
                 }
-                else if (comparison > 0)
+
+                if (additionIndex >= additions.Count)
                 {
-                    merged[mergedIndex++] = additions[additionIndex++];
+                    merged[writeIndex++] = _hiddenPaths[sourceIndex++];
+                    continue;
+                }
+
+                var additionComparison = Utf8PathOrder.Compare(
+                    _hiddenPaths[sourceIndex],
+                    additions[additionIndex]);
+                if (additionComparison < 0)
+                {
+                    merged[writeIndex++] = _hiddenPaths[sourceIndex++];
+                }
+                else if (additionComparison > 0)
+                {
+                    merged[writeIndex++] = additions[additionIndex++];
                 }
                 else
                 {
@@ -796,11 +783,15 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 }
             }
 
-            Array.Copy(retained, retainedIndex, merged, mergedIndex, retained.Length - retainedIndex);
-            mergedIndex += retained.Length - retainedIndex;
-            additions.CopyTo(additionIndex, merged, mergedIndex, additions.Count - additionIndex);
+            if (removalIndex != removals.Count ||
+                additionIndex != additions.Count ||
+                writeIndex != merged.Length)
+            {
+                throw new InvalidOperationException("The overlay visibility index is inconsistent.");
+            }
 
-            // The immutable sorted array can be shared by every search holding this state generation.
+            // Apply both deltas directly into the immutable next generation; an intermediate
+            // retained array would double peak reference storage for mixed batches.
             return new HiddenPathVisibility(merged);
         }
 

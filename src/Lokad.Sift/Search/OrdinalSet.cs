@@ -15,11 +15,11 @@ internal sealed class OrdinalSet
     private readonly uint _endExclusive;
     private readonly bool _isRange;
 
-    private OrdinalSet(uint[] ordinals)
+    private OrdinalSet(uint[] ordinals, int count)
     {
         _ordinals = ordinals;
         _excludedOrdinals = DeadOrdinalSet.Empty;
-        Count = ordinals.Length;
+        Count = count;
     }
 
     private OrdinalSet(uint startInclusive, uint endExclusive, DeadOrdinalSet excludedOrdinals)
@@ -54,7 +54,7 @@ internal sealed class OrdinalSet
         }
     }
 
-    public static OrdinalSet Empty { get; } = new([]);
+    public static OrdinalSet Empty { get; } = new([], 0);
 
     public int Count { get; }
 
@@ -65,7 +65,18 @@ internal sealed class OrdinalSet
         _excludedStart == _excludedEnd;
 
     public static OrdinalSet FromSorted(uint[] ordinals) =>
-        ordinals.Length == 0 ? Empty : new OrdinalSet(ordinals);
+        FromSorted(ordinals, ordinals.Length);
+
+    public static OrdinalSet FromSorted(uint[] ordinals, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (count > ordinals.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        return count == 0 ? Empty : new OrdinalSet(ordinals, count);
+    }
 
     public static OrdinalSet FromRange(uint startInclusive, uint endExclusive, DeadOrdinalSet excludedOrdinals)
     {
@@ -89,7 +100,7 @@ internal sealed class OrdinalSet
             return false;
         }
 
-        ordinals = _ordinals;
+        ordinals = _ordinals.AsSpan(0, Count);
         return true;
     }
 
@@ -138,7 +149,7 @@ internal sealed class OrdinalSet
             if (!_set._isRange)
             {
                 _ordinalIndex++;
-                if (_ordinalIndex >= _set._ordinals.Length)
+                if (_ordinalIndex >= _set.Count)
                 {
                     return false;
                 }

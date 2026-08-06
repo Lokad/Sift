@@ -80,7 +80,8 @@ internal ref struct SegmentScopeBuilder(
                 pathVerificationKind);
         }
 
-        var acceptedOrdinals = new List<uint>(scopedOrdinals.Count);
+        var acceptedOrdinals = GC.AllocateUninitializedArray<uint>(scopedOrdinals.Count);
+        var acceptedCount = 0;
         long bytes = 0;
         var nonAsciiDocuments = 0;
         long nonAsciiBytes = 0;
@@ -117,7 +118,7 @@ internal ref struct SegmentScopeBuilder(
                 }
             }
 
-            acceptedOrdinals.Add(ordinal);
+            acceptedOrdinals[acceptedCount++] = ordinal;
             bytes += document.ContentLength;
             if ((document.Flags & SegmentDocumentFlags.Ascii) == 0)
             {
@@ -128,7 +129,8 @@ internal ref struct SegmentScopeBuilder(
 
         return CreateResult(
             new SegmentScope(
-                OrdinalSet.FromSorted([.. acceptedOrdinals]),
+                // OrdinalSet owns the populated prefix, avoiding a second scope-sized array.
+                OrdinalSet.FromSorted(acceptedOrdinals, acceptedCount),
                 bytes,
                 nonAsciiDocuments,
                 nonAsciiBytes),
