@@ -267,7 +267,7 @@ internal sealed class IndexCompactor
                 }
 
                 var cursor = new CompactionCursor(
-                    _storage.OpenSegment(entry.SegmentId, cancellationToken),
+                    _storage.OpenSegment(entry, cancellationToken),
                     entry.DeadOrdinals);
                 if (cursor.MoveNext())
                 {
@@ -503,7 +503,7 @@ internal sealed class IndexCompactor
 
         long deadContentBytes = 0;
         using var mappedSegment = _storage.OpenSegment(
-            segment.SegmentId,
+            segment,
             cancellationToken);
         foreach (var deadOrdinal in segment.DeadOrdinals)
         {

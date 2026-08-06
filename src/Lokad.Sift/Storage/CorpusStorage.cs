@@ -240,11 +240,12 @@ internal sealed partial class CorpusStorage : ISiftStorage
             cancellationToken);
     }
 
-    public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
+    public void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken)
     {
 #if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _segmentOpenCount);
 #endif
+        var segmentId = entry.SegmentId;
         var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
         var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
         while (!Monitor.TryEnter(validationGate, millisecondsTimeout: 50))
@@ -259,6 +260,8 @@ internal sealed partial class CorpusStorage : ISiftStorage
                 segmentId,
                 validateChecksums: true,
                 cancellationToken);
+            segment.ValidateManifestEntry(entry);
+            segment.ValidateDeadContentBytes(entry, cancellationToken);
 #if SIFT_INTERNAL_VERIFICATION
             Interlocked.Increment(ref _checksumValidationCount);
 #endif
@@ -896,7 +899,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
 
             resolvedSegments ??= manifest.Segments.ToArray();
             long deadContentBytes = 0;
-            using var segment = OpenSegment(entry.SegmentId);
+            using var segment = ((ISiftStorage)this).OpenSegment(entry, CancellationToken.None);
             foreach (var ordinal in entry.DeadOrdinals)
             {
                 deadContentBytes = checked(

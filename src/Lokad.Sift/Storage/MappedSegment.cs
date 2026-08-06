@@ -129,6 +129,40 @@ internal sealed unsafe class MappedSegment : IDisposable
             Read<ulong>(offset + 50));
     }
 
+    public void ValidateManifestEntry(SegmentManifestEntry entry)
+    {
+        if (SegmentId != entry.SegmentId ||
+            DocumentCount != entry.DocumentCount ||
+            ContentBytes != entry.ContentBytes)
+        {
+            throw new InvalidDataException(
+                $"Sift segment '{SegmentId.Value:X16}' does not match its manifest metadata.");
+        }
+    }
+
+    public void ValidateDeadContentBytes(
+        SegmentManifestEntry entry,
+        CancellationToken cancellationToken)
+    {
+        if (entry.DeadContentBytes < 0)
+        {
+            return;
+        }
+
+        long deadContentBytes = 0;
+        foreach (var ordinal in entry.DeadOrdinals)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            deadContentBytes = checked(deadContentBytes + GetDocument(ordinal).ContentLength);
+        }
+
+        if (deadContentBytes != entry.DeadContentBytes)
+        {
+            throw new InvalidDataException(
+                $"Sift segment '{SegmentId.Value:X16}' does not match its manifest dead-content metadata.");
+        }
+    }
+
     public string GetPath(SegmentDocument document)
     {
         return Encoding.UTF8.GetString(GetPathBytes(document));

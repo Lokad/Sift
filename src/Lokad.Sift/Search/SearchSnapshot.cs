@@ -660,7 +660,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 }
             }
 
-            openedSegment = _storage.OpenSegment(entry.SegmentId, cancellationToken);
+            openedSegment = _storage.OpenSegment(entry, cancellationToken);
             lock (_segmentCachesSync)
             {
                 if (_segmentCaches.TryGetValue(entry.SegmentId, out var cache))
@@ -685,9 +685,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var nonAscii = segment.GetNonAsciiDocumentStats();
             var liveNonAsciiDocuments = nonAscii.DocumentCount;
             var liveNonAsciiBytes = nonAscii.ContentBytes;
+            long deadContentBytes = 0;
             foreach (var deadOrdinal in manifestEntry.DeadOrdinals)
             {
                 var deadDocument = segment.GetDocument(deadOrdinal);
+                deadContentBytes = checked(deadContentBytes + deadDocument.ContentLength);
                 if ((deadDocument.Flags & SegmentDocumentFlags.Ascii) == 0)
                 {
                     liveNonAsciiDocuments--;
@@ -695,10 +697,17 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 }
             }
 
+            if (manifestEntry.DeadContentBytes >= 0 &&
+                deadContentBytes != manifestEntry.DeadContentBytes)
+            {
+                throw new InvalidDataException(
+                    $"Sift segment '{segment.SegmentId.Value:X16}' does not match its manifest dead-content metadata.");
+            }
+
             var cache = new SegmentCache(
                 segment,
                 manifestEntry.DeadOrdinals,
-                manifestEntry.ContentBytes - manifestEntry.DeadContentBytes,
+                manifestEntry.ContentBytes - deadContentBytes,
                 liveNonAsciiDocuments,
                 liveNonAsciiBytes);
 #if SIFT_INTERNAL_VERIFICATION

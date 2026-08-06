@@ -117,8 +117,9 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             $"Sift segment '{segmentId.Value:X16}' contains id '{actualSegmentId.Value:X16}'.");
     }
 
-    public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
+    public void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken)
     {
+        var segmentId = entry.SegmentId;
         byte[] bytes;
         lock (_stateLock)
         {
@@ -139,6 +140,9 @@ internal sealed class InMemorySiftStorage : ISiftStorage
             throw new InvalidDataException(
                 $"Sift segment '{segmentId.Value:X16}' contains id '{segment.SegmentId.Value:X16}'.");
         }
+
+        segment.ValidateManifestEntry(entry);
+        segment.ValidateDeadContentBytes(entry, cancellationToken);
     }
 
     public long GetSegmentBytes(SegmentId segmentId)

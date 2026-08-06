@@ -245,7 +245,7 @@ public sealed class StorageIntegrityTests
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = storage.ReadManifest();
         Assert.Throws<InvalidDataException>(() =>
-            storage.ValidateSegment(manifest.Segments[0].SegmentId, CancellationToken.None));
+            storage.ValidateSegment(manifest.Segments[0], CancellationToken.None));
     }
 
     [Fact]
@@ -952,6 +952,48 @@ public sealed class StorageIntegrityTests
     }
 
     [Fact]
+    public void ManifestRejectsDuplicateSegmentIds()
+    {
+        using var fixture = new CorpusFixture();
+        var entry = new SegmentManifestEntry(
+            new SegmentId(1),
+            DocumentCount: 0,
+            ContentBytes: 0,
+            DeadOrdinalSet.Empty,
+            DeadContentBytes: 0);
+        var manifest = new CorpusManifest(
+            CorpusId.New(),
+            new StorageGeneration(1),
+            [entry, entry]);
+        var path = Path.Combine(fixture.CorpusPath, "duplicate-manifest.bin");
+        Directory.CreateDirectory(fixture.CorpusPath);
+        File.WriteAllBytes(path, CorpusManifestCodec.Encode(manifest));
+
+        Assert.Throws<InvalidDataException>(() => CorpusManifestCodec.Read(path));
+    }
+
+    [Fact]
+    public async Task ValidationRejectsManifestMetadataThatDoesNotMatchItsPack()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        RewriteChecksummedManifest(
+            Path.Combine(fixture.CorpusPath, "manifest.bin"),
+            bytes => BinaryPrimitives.WriteInt32LittleEndian(
+                bytes.AsSpan(SegmentFormat.ManifestHeaderSize + sizeof(ulong)),
+                2));
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+
+        Assert.True(reopened.RequiresRebuild);
+    }
+
+    [Fact]
     public async Task ExplicitValidationRechecksACachedManifestWithAnUnchangedStamp()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
@@ -1486,7 +1528,7 @@ public sealed class StorageIntegrityTests
         public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
             inner.OpenSegment(segmentId, cancellationToken);
 
-        public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken)
+        public void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken)
         {
             ValidationStarted.Set();
             ReleaseValidation.Wait(cancellationToken);
@@ -1526,7 +1568,7 @@ public sealed class StorageIntegrityTests
         public MappedSegment OpenSegment(SegmentId segmentId) => throw new NotSupportedException();
         public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
-        public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
+        public void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
         public long GetSegmentBytes(SegmentId segmentId) => throw new NotSupportedException();
         public long? GetAvailableBytes() => throw new NotSupportedException();
@@ -1568,8 +1610,8 @@ public sealed class StorageIntegrityTests
         public MappedSegment OpenSegment(SegmentId segmentId) => inner.OpenSegment(segmentId);
         public MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
             inner.OpenSegment(segmentId, cancellationToken);
-        public void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken) =>
-            inner.ValidateSegment(segmentId, cancellationToken);
+        public void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken) =>
+            inner.ValidateSegment(entry, cancellationToken);
         public long GetSegmentBytes(SegmentId segmentId) => inner.GetSegmentBytes(segmentId);
         public long? GetAvailableBytes() => inner.GetAvailableBytes();
         public void EnsureSnapshotMetadata() => inner.EnsureSnapshotMetadata();

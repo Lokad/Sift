@@ -9,7 +9,7 @@ internal interface ISiftStorage
     CorpusManifest RefreshManifest();
     MappedSegment OpenSegment(SegmentId segmentId);
     MappedSegment OpenSegment(SegmentId segmentId, CancellationToken cancellationToken);
-    void ValidateSegment(SegmentId segmentId, CancellationToken cancellationToken);
+    void ValidateSegment(SegmentManifestEntry entry, CancellationToken cancellationToken);
     long GetSegmentBytes(SegmentId segmentId);
     long? GetAvailableBytes();
     void EnsureSnapshotMetadata();
@@ -17,6 +17,27 @@ internal interface ISiftStorage
     StorageReadSnapshot OpenReadSnapshotForValidation();
     StorageStats GetStorageStats();
     void ReclaimUnreferencedSegments(CancellationToken cancellationToken);
+}
+
+internal static class SiftStorageExtensions
+{
+    public static MappedSegment OpenSegment(
+        this ISiftStorage storage,
+        SegmentManifestEntry entry,
+        CancellationToken cancellationToken)
+    {
+        var segment = storage.OpenSegment(entry.SegmentId, cancellationToken);
+        try
+        {
+            segment.ValidateManifestEntry(entry);
+            return segment;
+        }
+        catch
+        {
+            segment.Dispose();
+            throw;
+        }
+    }
 }
 
 internal interface IStorageWriteSession : IDisposable

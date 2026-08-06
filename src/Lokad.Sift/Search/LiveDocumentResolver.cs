@@ -29,7 +29,7 @@ internal sealed class LiveDocumentResolver(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var entry = manifest.Segments[entryIndex];
-            var segment = OpenSegment(entry.SegmentId, cancellationToken);
+            var segment = OpenSegment(entry, cancellationToken);
             var binarySearchComparisons = (long)unresolvedPaths.Count *
                 (BitOperations.Log2((uint)Math.Max(segment.DocumentCount, 1)) + 1);
             if (binarySearchComparisons <= segment.DocumentCount)
@@ -142,7 +142,7 @@ internal sealed class LiveDocumentResolver(
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var entry = manifest.Segments[entryIndex];
-                var segment = OpenSegment(entry.SegmentId, cancellationToken);
+                var segment = OpenSegment(entry, cancellationToken);
                 var binarySearchComparisons = (long)unresolvedCount *
                     (BitOperations.Log2((uint)Math.Max(segment.DocumentCount, 1)) + 1);
                 if (binarySearchComparisons <= segment.DocumentCount)
@@ -268,15 +268,16 @@ internal sealed class LiveDocumentResolver(
     }
 
     private MappedSegment OpenSegment(
-        SegmentId segmentId,
+        SegmentManifestEntry entry,
         CancellationToken cancellationToken)
     {
+        var segmentId = entry.SegmentId;
         if (_openedSegments.TryGetValue(segmentId, out var segment))
         {
             return segment;
         }
 
-        segment = storage.OpenSegment(segmentId, cancellationToken);
+        segment = storage.OpenSegment(entry, cancellationToken);
         _openedSegments.Add(segmentId, segment);
         return segment;
     }

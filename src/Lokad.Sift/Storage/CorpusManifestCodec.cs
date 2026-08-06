@@ -99,6 +99,7 @@ internal static class CorpusManifestCodec
         }
 
         var segments = new SegmentManifestEntry[count];
+        var segmentIds = new HashSet<SegmentId>();
         var offset = segmentTableOffset;
         var limit = segmentTableOffset + segmentTableLength;
         for (var i = 0; i < count; i++)
@@ -109,6 +110,11 @@ internal static class CorpusManifestCodec
             }
 
             var segmentId = new SegmentId(LittleEndianCodec.ReadUInt64(span[offset..]));
+            if (!segmentIds.Add(segmentId))
+            {
+                throw new InvalidDataException($"Duplicate Sift manifest segment id '{segmentId.Value:X16}'.");
+            }
+
             var documentCount = LittleEndianCodec.ReadInt32(span[(offset + 8)..]);
             var contentBytes = LittleEndianCodec.ReadInt64(span[(offset + 12)..]);
             var deadCount = LittleEndianCodec.ReadInt32(span[(offset + 20)..]);

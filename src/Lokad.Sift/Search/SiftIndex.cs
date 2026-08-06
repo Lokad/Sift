@@ -340,17 +340,17 @@ public sealed class SiftIndex : ISiftIndex
                 }
             }
 
-            void ValidateSegment(SegmentId segmentId)
+            void ValidateSegment(SegmentManifestEntry entry)
             {
                 try
                 {
-                    _storage.ValidateSegment(segmentId, cancellationToken);
+                    _storage.ValidateSegment(entry, cancellationToken);
                 }
                 catch (Exception exception) when (IsIndexCorruption(exception))
                 {
                     PreserveRetainedSegmentFailure(
                         validationRevision,
-                        segmentId,
+                        entry.SegmentId,
                         exception,
                         cancellationToken);
                     throw;
@@ -386,7 +386,7 @@ public sealed class SiftIndex : ISiftIndex
             for (var i = 0; i < manifest.Segments.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ValidateSegment(manifest.Segments[i].SegmentId);
+                ValidateSegment(manifest.Segments[i]);
                 validatedBytes += segmentBytes[i];
                 if (!TrySetValidationStats(validationRevision, new IndexValidationStats(
                     IndexValidationState.Running,
