@@ -547,13 +547,14 @@ internal sealed class IndexBuilder
         }
 
         var span = content.Span;
-        if (LooksBinary(span))
+        var hasBom = span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
+        var analysis = AnalyzeDocument(span, hasBom ? 3 : 0);
+        if (analysis.LooksBinary)
         {
             rejectionReason = DocumentRejectionReason.BinaryContent;
             return null;
         }
 
-        var hasBom = span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
         if (hasBom)
         {
             content = content[3..];
@@ -571,7 +572,7 @@ internal sealed class IndexBuilder
         }
 
         var flags = SegmentDocumentFlags.Utf8Text;
-        if (span.IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0)
+        if (analysis.IsAscii)
         {
             flags |= SegmentDocumentFlags.Ascii;
         }
@@ -593,48 +594,67 @@ internal sealed class IndexBuilder
             Path = normalizedPath,
             PathUtf8 = [],
             Content = ownedContent,
-            LineCount = 0,
+            LineCount = analysis.LineCount,
             EncodedLineIndex = [],
             Flags = flags,
             MTimeUtcTicks = document.LastModifiedUtc?.UtcTicks ?? 0,
             ContentHash64 = Hashing.Fnv1A64(span)
         };
+    }
 
-        static bool LooksBinary(ReadOnlySpan<byte> content)
+    private static DocumentAnalysis AnalyzeDocument(
+        ReadOnlySpan<byte> submittedContent,
+        int contentOffset)
+    {
+        // Binary detection, ASCII classification, and line counting share one byte pass.
+        var sampleLength = Math.Min(submittedContent.Length, 4096);
+        var hasNull = false;
+        var isAscii = true;
+        var suspicious = 0;
+        var lineCount = 1;
+        for (var i = 0; i < submittedContent.Length; i++)
         {
-            if (content.IndexOf((byte)0) >= 0)
+            var current = submittedContent[i];
+            hasNull |= current == 0;
+            if (i < sampleLength &&
+                current < 0x20 &&
+                current is not (byte)'\r' and not (byte)'\n' and not (byte)'\t' and not (byte)'\f')
             {
-                return true;
+                suspicious++;
             }
 
-            var sampleLength = Math.Min(content.Length, 4096);
-            if (sampleLength == 0)
+            if (i < contentOffset)
             {
-                return false;
+                continue;
             }
 
-            var suspicious = 0;
-            for (var i = 0; i < sampleLength; i++)
+            isAscii &= current <= 0x7F;
+            if (current == (byte)'\n')
             {
-                var current = content[i];
-                if (current < 0x20 && current is not (byte)'\r' and not (byte)'\n' and not (byte)'\t' and not (byte)'\f')
-                {
-                    suspicious++;
-                }
+                lineCount++;
             }
-
-            return suspicious >= 16 && suspicious * 5 >= sampleLength;
         }
+
+        var looksBinary = hasNull ||
+            suspicious >= 16 && suspicious * 5 >= sampleLength;
+        return new DocumentAnalysis(looksBinary, isAscii, lineCount);
     }
 
     private static void Materialize(StoredDocument document)
     {
-        var encodedLineIndex = LineMap.EncodeLineIndex(document.Content.Span, out var lineCount);
+        var encodedLineIndex = LineMap.EncodeLineIndex(
+            document.Content.Span,
+            document.LineCount);
         document.SetIndexMetadata(
             StrictUtf8.GetBytes(document.Path),
-            lineCount,
+            document.LineCount,
             encodedLineIndex);
     }
+
+    private readonly record struct DocumentAnalysis(
+        bool LooksBinary,
+        bool IsAscii,
+        int LineCount);
 
     private readonly record struct PartitioningStats(
         int Accepted,

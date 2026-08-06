@@ -1419,14 +1419,14 @@ public sealed class StorageIntegrityTests
     private static StoredDocument CreateStoredDocument(string path, string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
-        var lineStarts = LineMap.BuildLineStarts(bytes);
+        var lineCount = bytes.Count(static value => value == (byte)'\n') + 1;
         return new StoredDocument
         {
             Path = path,
             PathUtf8 = Encoding.UTF8.GetBytes(path),
             Content = bytes,
-            LineCount = lineStarts.Length,
-            EncodedLineIndex = LineMap.EncodeLineIndex(lineStarts),
+            LineCount = lineCount,
+            EncodedLineIndex = LineMap.EncodeLineIndex(bytes, lineCount),
             Flags = 0,
             MTimeUtcTicks = 0,
             ContentHash64 = Hashing.Fnv1A64(bytes)

@@ -301,11 +301,6 @@ internal sealed unsafe class MappedSegment : IDisposable
         }
     }
 
-    public int[] GetLineStarts(SegmentDocument document)
-    {
-        return LineMap.DecodeLineIndex(GetEncodedLineIndexBytes(document));
-    }
-
     public ReadOnlySpan<byte> GetEncodedLineIndexBytes(SegmentDocument document)
     {
         var region = GetRegion(SegmentRegionId.LineIndexBlob);
@@ -370,41 +365,6 @@ internal sealed unsafe class MappedSegment : IDisposable
         postings = default;
         docFreq = 0;
         return false;
-    }
-
-    public PostingsMetadata[] GetPostingsMetadata(IndexRegionPair pair)
-    {
-        var lexiconRegion = GetRegion(pair.Lexicon);
-        var lexicon = new ReadOnlySpan<byte>(BasePointer + lexiconRegion.Offset, (int)lexiconRegion.Length);
-        if (lexicon.Length < SegmentFormat.LexiconHeaderSize)
-        {
-            return [];
-        }
-
-        var entryCount = LittleEndianCodec.ReadInt32(lexicon);
-        if (entryCount == 0)
-        {
-            return [];
-        }
-
-        var suffixSize = SegmentFormat.GetLexiconSuffixSize(pair.Lexicon);
-        var entrySize = SegmentFormat.GetLexiconEntrySize(pair.Lexicon);
-        var results = GC.AllocateUninitializedArray<PostingsMetadata>(entryCount);
-        for (var i = 0; i < entryCount; i++)
-        {
-            var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
-            var postingsBytes = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4));
-            var docFreq = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4));
-            if (postingsBytes < 0)
-            {
-                throw new InvalidDataException("Invalid Sift postings length.");
-            }
-
-            ValidateDocumentFrequency(docFreq);
-            results[i] = new PostingsMetadata(docFreq, postingsBytes);
-        }
-
-        return results;
     }
 
     public void VisitPostings(IndexRegionPair pair, PostingsVisitor visitor)
@@ -821,10 +781,6 @@ internal sealed unsafe class MappedSegment : IDisposable
 }
 
 internal delegate void PostingsVisitor(ReadOnlySpan<byte> payload, int docFreq);
-
-internal readonly record struct PostingsMetadata(
-    int DocumentFrequency,
-    int EncodedBytes);
 
 internal readonly record struct NonAsciiDocumentStats(
     int DocumentCount,
