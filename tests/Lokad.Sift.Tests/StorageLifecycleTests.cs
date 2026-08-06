@@ -173,6 +173,34 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public async Task SnapshotMetadataRetriesWhenPublicationRetiresObservedLease()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var probingStorage = new CorpusStorage(fixture.CorpusPath);
+        var published = false;
+        probingStorage.SnapshotMetadataLeaseOpening = () =>
+        {
+            if (published)
+            {
+                return;
+            }
+
+            published = true;
+            index.Update(
+                new InMemoryDocumentSource([("src/b.txt", "beta\n")]),
+                []).GetAwaiter().GetResult();
+        };
+
+        ((ISiftStorage)probingStorage).EnsureSnapshotMetadata();
+
+        Assert.True(published);
+        using var snapshot = index.OpenSnapshot();
+        Assert.True(snapshot.TryGetDocumentBytes(new DocumentKey("src/b.txt"), out _));
+    }
+
+    [Fact]
     public async Task FullBuildRetiresOldPacksUntilSnapshotIsReleased()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));

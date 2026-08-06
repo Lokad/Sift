@@ -61,6 +61,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
     private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
 #if SIFT_INTERNAL_VERIFICATION
     internal PublicationFaultInjector? FaultInjector { get; set; }
+    internal Action? SnapshotMetadataLeaseOpening { get; set; }
 #endif
     public bool HasManifest => File.Exists(ManifestPath);
 
@@ -455,19 +456,44 @@ internal sealed partial class CorpusStorage : ISiftStorage
         }
 
         var manifest = ReadManifest();
-        var leasePath = GetGenerationLeasePath(manifest.Generation);
-        if (File.Exists(leasePath))
+        while (true)
         {
-            // Normal startup stays read-only and does not contend with writers.
-            using var stream = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            ValidateGenerationLease(stream, manifest);
+            var leasePath = GetGenerationLeasePath(manifest.Generation);
+#if SIFT_INTERNAL_VERIFICATION
+            SnapshotMetadataLeaseOpening?.Invoke();
+#endif
+            try
+            {
+                // Normal startup stays read-only and does not contend with writers.
+                using var stream = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                ValidateGenerationLease(stream, manifest);
+                return;
+            }
+            catch (IOException exception)
+            {
+                // Publication may retire the observed generation before its lease is opened.
+                if (HasManifest)
+                {
+                    var current = RefreshManifest();
+                    if (current.Generation != manifest.Generation)
+                    {
+                        manifest = current;
+                        continue;
+                    }
+                }
+
+                if (exception is not FileNotFoundException and not DirectoryNotFoundException)
+                {
+                    throw;
+                }
+            }
+
+            // Pre-lease corpora need a one-time writer-serialized migration and orphan sweep.
+            using var migrationLock = AcquireWriterLock();
+            EnsureCurrentGenerationLeaseUnderWriterLock();
+            SetReclamationPending(isPending: true);
             return;
         }
-
-        // Pre-lease corpora need a one-time writer-serialized migration and orphan sweep.
-        using var migrationLock = AcquireWriterLock();
-        EnsureCurrentGenerationLeaseUnderWriterLock();
-        SetReclamationPending(isPending: true);
     }
 
     StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
