@@ -43,7 +43,7 @@ public sealed class SearchIntegrationTests
         Assert.Throws<ArgumentOutOfRangeException>(() => snapshot.Explain(
             new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive)
             {
-                TimeoutPolicy = (TimeoutPolicy)int.MaxValue
+                RegexTimeoutPolicy = (RegexTimeoutPolicy)int.MaxValue
             },
             new PathFilter()));
     }
@@ -2849,7 +2849,7 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
         Assert.Throws<RegexMatchTimeoutException>(() => snapshot.Search(
-            new SearchQuery("^(a+)+\\1$", PatternMode.Regex, CaseMode.Sensitive) { TimeoutPolicy = TimeoutPolicy.Throw },
+            new SearchQuery("^(a+)+\\1$", PatternMode.Regex, CaseMode.Sensitive) { RegexTimeoutPolicy = RegexTimeoutPolicy.Throw },
             new PathFilter(),
             collector));
     }

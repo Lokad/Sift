@@ -10,7 +10,7 @@ internal readonly record struct PreparedQueryKey(
     bool WholeLine,
     bool Multiline,
     bool DotAll,
-    TimeoutPolicy TimeoutPolicy)
+    RegexTimeoutPolicy RegexTimeoutPolicy)
 {
     public SearchQuery ToSearchQuery()
     {
@@ -20,7 +20,7 @@ internal readonly record struct PreparedQueryKey(
             WholeLine = WholeLine,
             Multiline = Multiline,
             DotAll = DotAll,
-            TimeoutPolicy = TimeoutPolicy
+            RegexTimeoutPolicy = RegexTimeoutPolicy
         };
     }
 }
@@ -216,7 +216,7 @@ internal sealed class PreparedRegexExecution
         if (regexPlan.Utf8RegexProgram is { } utf8RegexProgram)
         {
             return new PreparedRegexExecution(
-                Utf8RegexEngine.Prepare(utf8RegexProgram, query.TimeoutPolicy),
+                Utf8RegexEngine.Prepare(utf8RegexProgram, query.RegexTimeoutPolicy),
                 () => RegexVerifier.Prepare(query, resolvedCaseMode));
         }
 

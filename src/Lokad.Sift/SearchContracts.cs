@@ -26,7 +26,7 @@ public enum SearchStopReason
     CollectorStopped
 }
 
-public enum TimeoutPolicy
+public enum RegexTimeoutPolicy
 {
     StopSearch,
     Throw
@@ -54,7 +54,7 @@ public sealed record SearchQuery
             maxHits: 10_000,
             maxMatchedDocuments: int.MaxValue,
             maxBytesScanned: long.MaxValue,
-            timeoutPolicy: TimeoutPolicy.StopSearch,
+            regexTimeoutPolicy: RegexTimeoutPolicy.StopSearch,
             maxHitsPerDocument: int.MaxValue,
             maxElapsedMilliseconds: 30_000)
     {
@@ -71,7 +71,7 @@ public sealed record SearchQuery
         int maxHits,
         int maxMatchedDocuments,
         long maxBytesScanned,
-        TimeoutPolicy timeoutPolicy,
+        RegexTimeoutPolicy regexTimeoutPolicy,
         int maxHitsPerDocument,
         long maxElapsedMilliseconds)
     {
@@ -86,7 +86,7 @@ public sealed record SearchQuery
         MaxHits = maxHits;
         MaxMatchedDocuments = maxMatchedDocuments;
         MaxBytesScanned = maxBytesScanned;
-        TimeoutPolicy = timeoutPolicy;
+        RegexTimeoutPolicy = regexTimeoutPolicy;
         MaxHitsPerDocument = maxHitsPerDocument;
         MaxElapsedMilliseconds = maxElapsedMilliseconds;
     }
@@ -101,7 +101,8 @@ public sealed record SearchQuery
     public int MaxHits { get; init; }
     public int MaxMatchedDocuments { get; init; }
     public long MaxBytesScanned { get; init; }
-    public TimeoutPolicy TimeoutPolicy { get; init; }
+    /// <summary>Gets the response to Sift's one-second safety timeout for each regex match operation.</summary>
+    public RegexTimeoutPolicy RegexTimeoutPolicy { get; init; }
     public int MaxHitsPerDocument { get; init; }
     public long MaxElapsedMilliseconds { get; init; }
 }
@@ -446,7 +447,7 @@ public sealed class SearchPlan
         SearchVerifierKind verifierKind,
         PlannerAlternative? runnerUp,
         double? runnerUpEstimatedCostDelta,
-        TimeoutPolicy timeoutPolicy,
+        RegexTimeoutPolicy regexTimeoutPolicy,
         PlannerAlternative[] plannerAlternatives)
     {
         PatternKind = patternKind;
@@ -477,7 +478,7 @@ public sealed class SearchPlan
         VerifierKind = verifierKind;
         RunnerUp = runnerUp;
         RunnerUpEstimatedCostDelta = runnerUpEstimatedCostDelta;
-        TimeoutPolicy = timeoutPolicy;
+        RegexTimeoutPolicy = regexTimeoutPolicy;
         PlannerAlternatives = PublicResultCollection.Own(plannerAlternatives);
     }
 
@@ -522,7 +523,8 @@ public sealed class SearchPlan
     public PlannerAlternative? RunnerUp { get; }
     /// <summary>Gets the runner-up's unitless estimated-cost excess over the selected strategy.</summary>
     public double? RunnerUpEstimatedCostDelta { get; }
-    public TimeoutPolicy TimeoutPolicy { get; }
+    /// <summary>Gets the response to the per-match regex safety timeout.</summary>
+    public RegexTimeoutPolicy RegexTimeoutPolicy { get; }
     /// <summary>Gets strategies observed during per-segment planning.</summary>
     /// <remarks>Use each entry's segment and scope counts to determine its coverage.</remarks>
     public IReadOnlyList<PlannerAlternative> PlannerAlternatives { get; }

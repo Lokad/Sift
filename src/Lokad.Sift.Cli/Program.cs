@@ -76,7 +76,7 @@ switch (command)
             var options = ParseSearchOptions(args.AsSpan(2));
             using var snapshot = index.OpenSnapshot();
             var plan = snapshot.Explain(options.Query, options.Filter);
-            Console.WriteLine($"pattern={plan.PatternKind} case={plan.ResolvedCaseMode} scopeDocs={plan.ScopeDocumentCount} scopeBytes={plan.ScopeByteCount} usesIndex={plan.UsesIndex} candidate={plan.CandidateKind} combination={plan.CandidateCombination} verifier={plan.VerifierKind} timeout={plan.TimeoutPolicy} pathPrefix={plan.UsesPathPrefixFilter} pathRegex={plan.UsesPathRegexFilter} includeGlobs={plan.UsesIncludeGlobs} excludeGlobs={plan.UsesExcludeGlobs} literalVerifier={plan.CanUseLiteralVerifier} nonBacktracking={plan.CanUseNonBacktracking} decode={plan.NeedsUnicodeDecode} wholeDocument={plan.MayRequireWholeDocumentVerification}");
+            Console.WriteLine($"pattern={plan.PatternKind} case={plan.ResolvedCaseMode} scopeDocs={plan.ScopeDocumentCount} scopeBytes={plan.ScopeByteCount} usesIndex={plan.UsesIndex} candidate={plan.CandidateKind} combination={plan.CandidateCombination} verifier={plan.VerifierKind} regexTimeout={plan.RegexTimeoutPolicy} pathPrefix={plan.UsesPathPrefixFilter} pathRegex={plan.UsesPathRegexFilter} includeGlobs={plan.UsesIncludeGlobs} excludeGlobs={plan.UsesExcludeGlobs} literalVerifier={plan.CanUseLiteralVerifier} nonBacktracking={plan.CanUseNonBacktracking} decode={plan.NeedsUnicodeDecode} wholeDocument={plan.MayRequireWholeDocumentVerification}");
             Console.WriteLine($"fragments={string.Join(", ", plan.MandatoryFragments)}");
             Console.WriteLine($"ngrams={string.Join(", ", plan.SelectedNgrams.Select(static gram => $"{gram.Text}[{gram.Hex}]/{gram.DocumentFrequency}"))}");
             return 0;
@@ -100,7 +100,7 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
     var maxHits = 10_000;
     var maxDocuments = int.MaxValue;
     long maxBytesScanned = long.MaxValue;
-    var timeoutPolicy = TimeoutPolicy.StopSearch;
+    var regexTimeoutPolicy = RegexTimeoutPolicy.StopSearch;
     var includeGlobs = new List<string>();
     var excludeGlobs = new List<string>();
     string? pathPrefix = null;
@@ -165,13 +165,13 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
 
         if (arg.Equals("--timeout-throw", StringComparison.OrdinalIgnoreCase))
         {
-            timeoutPolicy = TimeoutPolicy.Throw;
+            regexTimeoutPolicy = RegexTimeoutPolicy.Throw;
             continue;
         }
 
         if (arg.Equals("--timeout-stop", StringComparison.OrdinalIgnoreCase))
         {
-            timeoutPolicy = TimeoutPolicy.StopSearch;
+            regexTimeoutPolicy = RegexTimeoutPolicy.StopSearch;
             continue;
         }
 
@@ -240,7 +240,7 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
             MaxHits = maxHits,
             MaxMatchedDocuments = maxDocuments,
             MaxBytesScanned = maxBytesScanned,
-            TimeoutPolicy = timeoutPolicy
+            RegexTimeoutPolicy = regexTimeoutPolicy
         },
         new PathFilter
         {

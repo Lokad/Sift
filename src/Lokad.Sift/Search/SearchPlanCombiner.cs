@@ -76,7 +76,7 @@ internal static class SearchPlanCombiner
             runnerUpEstimatedCostDelta: runnerUp is null
                 ? null
                 : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
-            timeoutPolicy: basePlan.TimeoutPolicy,
+            regexTimeoutPolicy: basePlan.RegexTimeoutPolicy,
             plannerAlternatives: plannerAlternatives);
         static T MergeStrategy<T>(
         T left,

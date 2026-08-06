@@ -127,7 +127,7 @@ internal static class Utf8RegexEngine
         }
         catch (RegexMatchTimeoutException)
         {
-            if (prepared.TimeoutPolicy == TimeoutPolicy.Throw)
+            if (prepared.RegexTimeoutPolicy == RegexTimeoutPolicy.Throw)
             {
                 throw;
             }
@@ -144,7 +144,9 @@ internal static class Utf8RegexEngine
         return matched;
     }
 
-    public static PreparedUtf8Regex Prepare(Utf8RegexProgram program, TimeoutPolicy timeoutPolicy)
+    public static PreparedUtf8Regex Prepare(
+        Utf8RegexProgram program,
+        RegexTimeoutPolicy regexTimeoutPolicy)
     {
         var options = RegexOptions.CultureInvariant;
         if (program.Multiline)
@@ -167,7 +169,7 @@ internal static class Utf8RegexEngine
             key,
             static cacheKey => new CompiledUtf8Regex(cacheKey.Pattern, cacheKey.Options, DefaultTimeout),
             out var cacheHit);
-        return new PreparedUtf8Regex(regex, cacheHit, timeoutPolicy);
+        return new PreparedUtf8Regex(regex, cacheHit, regexTimeoutPolicy);
     }
 
     private static bool IsAscii(string text) => Encoding.UTF8.GetByteCount(text) == text.Length;
@@ -1400,4 +1402,4 @@ internal enum Utf8RegexAtomKind
 internal sealed record PreparedUtf8Regex(
     CompiledUtf8Regex Regex,
     bool CacheHit,
-    TimeoutPolicy TimeoutPolicy);
+    RegexTimeoutPolicy RegexTimeoutPolicy);

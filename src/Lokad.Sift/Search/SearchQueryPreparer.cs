@@ -58,7 +58,7 @@ internal static class SearchQueryPreparer
             query.WholeLine,
             query.Multiline,
             query.DotAll,
-            query.TimeoutPolicy);
+            query.RegexTimeoutPolicy);
         return PreparedQueryCache.GetOrAdd(
             key,
             CreatePreparedSearchQuery,

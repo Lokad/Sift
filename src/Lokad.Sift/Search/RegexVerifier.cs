@@ -110,7 +110,7 @@ internal static class RegexVerifier
         }
         catch (RegexMatchTimeoutException)
         {
-            if (prepared.TimeoutPolicy == TimeoutPolicy.Throw)
+            if (prepared.RegexTimeoutPolicy == RegexTimeoutPolicy.Throw)
             {
                 throw;
             }
@@ -155,7 +155,7 @@ internal static class RegexVerifier
             entry.Regex,
             entry.UsesNonBacktracking,
             query.WholeWord,
-            query.TimeoutPolicy);
+            query.RegexTimeoutPolicy);
     }
 
     public static Regex GetRegex(SearchQuery query, CaseMode resolvedCaseMode)
@@ -255,4 +255,4 @@ internal sealed record PreparedRegexVerifier(
     Regex Regex,
     bool UsesNonBacktracking,
     bool WholeWord,
-    TimeoutPolicy TimeoutPolicy);
+    RegexTimeoutPolicy RegexTimeoutPolicy);

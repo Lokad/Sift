@@ -163,9 +163,9 @@ internal sealed class SearchPlanExplainer(
             runnerUpEstimatedCostDelta: runnerUp is null
                 ? null
                 : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
-            timeoutPolicy: query.PatternMode == PatternMode.Regex
-                ? query.TimeoutPolicy
-                : TimeoutPolicy.StopSearch,
+            regexTimeoutPolicy: query.PatternMode == PatternMode.Regex
+                ? query.RegexTimeoutPolicy
+                : RegexTimeoutPolicy.StopSearch,
             plannerAlternatives: plannerAlternatives);
 
         static T Merge<T>(T? aggregate, T value, T mixed)

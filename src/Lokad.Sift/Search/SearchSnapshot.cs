@@ -287,7 +287,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             stopReason = SearchStopReason.MaxElapsedTime;
         }
-        catch (RegexMatchTimeoutException) when (query.TimeoutPolicy != TimeoutPolicy.Throw)
+        catch (RegexMatchTimeoutException) when (query.RegexTimeoutPolicy != RegexTimeoutPolicy.Throw)
         {
             stopReason = SearchStopReason.RegexTimeout;
         }
@@ -481,7 +481,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             stopReason = SearchStopReason.MaxElapsedTime;
         }
-        catch (RegexMatchTimeoutException) when (query.TimeoutPolicy != TimeoutPolicy.Throw)
+        catch (RegexMatchTimeoutException) when (query.RegexTimeoutPolicy != RegexTimeoutPolicy.Throw)
         {
             stopReason = SearchStopReason.RegexTimeout;
         }
@@ -757,9 +757,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             throw new ArgumentOutOfRangeException(nameof(query), "CaseMode is invalid.");
         }
 
-        if (!Enum.IsDefined(query.TimeoutPolicy))
+        if (!Enum.IsDefined(query.RegexTimeoutPolicy))
         {
-            throw new ArgumentOutOfRangeException(nameof(query), "TimeoutPolicy is invalid.");
+            throw new ArgumentOutOfRangeException(nameof(query), "RegexTimeoutPolicy is invalid.");
         }
 
         if (query.Pattern.Length > _options.MaxPatternCharacters)
