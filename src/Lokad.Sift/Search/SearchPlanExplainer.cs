@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Search;
@@ -33,7 +32,7 @@ internal sealed class SearchPlanExplainer(
         var estimatedCandidateDocuments = 0d;
         var estimatedCost = 0d;
         var segmentCount = 0;
-        var alternativeSums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
+        var alternativeSums = new Dictionary<PlannerAlternativeKey, PlannerAlternativeAccumulator>();
 
         foreach (var entry in segments)
         {
@@ -75,16 +74,10 @@ internal sealed class SearchPlanExplainer(
 
             foreach (var alternative in segmentPlan.ContentPlan.Alternatives)
             {
-                var key = (
-                    alternative.CandidateKind,
-                    alternative.CandidateCombination,
-                    alternative.VerifierKind,
-                    alternative.CandidatePlan.UsesIndex);
-                ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                PlannerAlternativeAggregation.Add(
                     alternativeSums,
-                    key,
-                    out _);
-                accumulator.Add(alternative, segmentPlan.Scope);
+                    alternative,
+                    segmentPlan.Scope);
             }
         }
 
@@ -116,15 +109,7 @@ internal sealed class SearchPlanExplainer(
                 branchUnion: false);
         var resolvedVerifierKind = verifierKind ??
             SearchPlanKinds.GetVerifierKind(query, regexPlan);
-        var plannerAlternatives = alternativeSums
-            .Select(static pair => pair.Value.ToPlannerAlternative(
-                pair.Key.CandidateKind,
-                pair.Key.CandidateCombination,
-                pair.Key.VerifierKind,
-                pair.Key.UsesIndex))
-            .OrderBy(static alternative => alternative.EstimatedCost)
-            .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
-            .ToArray();
+        var plannerAlternatives = PlannerAlternativeAggregation.Materialize(alternativeSums);
         var runnerUp = plannerAlternatives
             .FirstOrDefault(alternative =>
                 alternative.SegmentCount == segmentCount &&
@@ -261,17 +246,13 @@ internal struct PlannerAlternativeAccumulator
         ScopeByteCount += alternative.ScopeByteCount;
     }
 
-    public PlannerAlternative ToPlannerAlternative(
-        SearchCandidateKind candidateKind,
-        SearchCandidateCombination candidateCombination,
-        SearchVerifierKind verifierKind,
-        bool usesIndex)
+    public PlannerAlternative ToPlannerAlternative(in PlannerAlternativeKey key)
     {
         return new PlannerAlternative(
-            candidateKind: candidateKind,
-            candidateCombination: candidateCombination,
-            verifierKind: verifierKind,
-            usesIndex: usesIndex,
+            candidateKind: key.CandidateKind,
+            candidateCombination: key.CandidateCombination,
+            verifierKind: key.VerifierKind,
+            usesIndex: key.UsesIndex,
             estimatedDirectScanCost: EstimatedDirectScanCost,
             estimatedIndexedCost: EstimatedIndexedCost,
             estimatedCandidateDocuments: EstimatedCandidateDocuments,
@@ -279,5 +260,53 @@ internal struct PlannerAlternativeAccumulator
             segmentCount: SegmentCount,
             scopeDocumentCount: ScopeDocumentCount,
             scopeByteCount: ScopeByteCount);
+    }
+}
+
+internal readonly record struct PlannerAlternativeKey(
+    SearchCandidateKind CandidateKind,
+    SearchCandidateCombination CandidateCombination,
+    SearchVerifierKind VerifierKind,
+    bool UsesIndex);
+
+internal static class PlannerAlternativeAggregation
+{
+    public static void Add(
+        Dictionary<PlannerAlternativeKey, PlannerAlternativeAccumulator> sums,
+        in SearchPlanCandidate alternative,
+        in SegmentScope scope)
+    {
+        var key = new PlannerAlternativeKey(
+            alternative.CandidateKind,
+            alternative.CandidateCombination,
+            alternative.VerifierKind,
+            alternative.CandidatePlan.UsesIndex);
+        ref var accumulator = ref System.Runtime.InteropServices.CollectionsMarshal
+            .GetValueRefOrAddDefault(sums, key, out _);
+        accumulator.Add(alternative, scope);
+    }
+
+    public static void Add(
+        Dictionary<PlannerAlternativeKey, PlannerAlternativeAccumulator> sums,
+        PlannerAlternative alternative)
+    {
+        var key = new PlannerAlternativeKey(
+            alternative.CandidateKind,
+            alternative.CandidateCombination,
+            alternative.VerifierKind,
+            alternative.UsesIndex);
+        ref var accumulator = ref System.Runtime.InteropServices.CollectionsMarshal
+            .GetValueRefOrAddDefault(sums, key, out _);
+        accumulator.Add(alternative);
+    }
+
+    public static PlannerAlternative[] Materialize(
+        Dictionary<PlannerAlternativeKey, PlannerAlternativeAccumulator> sums)
+    {
+        return sums
+            .Select(static pair => pair.Value.ToPlannerAlternative(pair.Key))
+            .OrderBy(static alternative => alternative.EstimatedCost)
+            .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
+            .ToArray();
     }
 }

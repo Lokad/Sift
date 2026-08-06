@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Lokad.Sift.Search;
 
 internal static class SearchPlanCombiner
@@ -41,8 +39,9 @@ internal static class SearchPlanCombiner
             scopeDocumentCount: basePlan.ScopeDocumentCount + overlayPlan.ScopeDocumentCount,
             scopeByteCount: basePlan.ScopeByteCount + overlayPlan.ScopeByteCount,
             segmentCount: segmentCount,
-            mandatoryFragments: MergeStrings(basePlan.MandatoryFragments, overlayPlan.MandatoryFragments),
-            advisorySeeds: MergeStrings(basePlan.AdvisorySeeds, overlayPlan.AdvisorySeeds),
+            // These arrays describe the query, not a corpus generation.
+            mandatoryFragments: [.. basePlan.MandatoryFragments],
+            advisorySeeds: [.. basePlan.AdvisorySeeds],
             selectedNgrams: MergeSelectedNgrams(basePlan.SelectedNgrams, overlayPlan.SelectedNgrams),
             usesPathPrefixFilter: basePlan.UsesPathPrefixFilter,
             usesPathRegexFilter: basePlan.UsesPathRegexFilter,
@@ -103,68 +102,19 @@ internal static class SearchPlanCombiner
         IReadOnlyList<PlannerAlternative> left,
         IReadOnlyList<PlannerAlternative> right)
         {
-            var sums = new Dictionary<(SearchCandidateKind CandidateKind, SearchCandidateCombination CandidateCombination, SearchVerifierKind VerifierKind, bool UsesIndex), PlannerAlternativeAccumulator>();
+            var sums = new Dictionary<PlannerAlternativeKey, PlannerAlternativeAccumulator>();
             Add(left);
             Add(right);
-            return sums
-                .Select(static pair => pair.Value.ToPlannerAlternative(
-                    pair.Key.CandidateKind,
-                    pair.Key.CandidateCombination,
-                    pair.Key.VerifierKind,
-                    pair.Key.UsesIndex))
-                .OrderBy(static alternative => alternative.EstimatedCost)
-                .ThenBy(static alternative => alternative.EstimatedCandidateDocuments)
-                .ToArray();
+            return PlannerAlternativeAggregation.Materialize(sums);
 
             void Add(IReadOnlyList<PlannerAlternative> alternatives)
             {
                 for (var i = 0; i < alternatives.Count; i++)
                 {
                     var alternative = alternatives[i];
-                    var key = (
-                        alternative.CandidateKind,
-                        alternative.CandidateCombination,
-                        alternative.VerifierKind,
-                        alternative.UsesIndex);
-                    ref var accumulator = ref CollectionsMarshal.GetValueRefOrAddDefault(sums, key, out _);
-                    accumulator.Add(alternative);
+                    PlannerAlternativeAggregation.Add(sums, alternative);
                 }
             }
-        }
-
-        static string[] MergeStrings(
-        IReadOnlyList<string> left,
-        IReadOnlyList<string> right)
-        {
-            if (left.Count == 0)
-            {
-                return [.. right];
-            }
-
-            if (right.Count == 0)
-            {
-                return [.. left];
-            }
-
-            var merged = new List<string>(left.Count + right.Count);
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            for (var i = 0; i < left.Count; i++)
-            {
-                if (seen.Add(left[i]))
-                {
-                    merged.Add(left[i]);
-                }
-            }
-
-            for (var i = 0; i < right.Count; i++)
-            {
-                if (seen.Add(right[i]))
-                {
-                    merged.Add(right[i]);
-                }
-            }
-
-            return [.. merged];
         }
 
         static SelectedNgram[] MergeSelectedNgrams(
