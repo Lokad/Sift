@@ -181,7 +181,7 @@ public sealed class PathFilter
     public string? PathRegex { get; init; }
 }
 
-public readonly record struct RawHit
+public readonly struct RawHit : IEquatable<RawHit>
 {
     private readonly object? _owner;
 
@@ -227,6 +227,27 @@ public readonly record struct RawHit
     public int EndByte { get; }
     public int StartLine { get; }
     public int EndLine { get; }
+
+    public bool Equals(RawHit other) =>
+        SegmentId == other.SegmentId &&
+        DocumentOrdinal == other.DocumentOrdinal &&
+        StartByte == other.StartByte &&
+        EndByte == other.EndByte &&
+        StartLine == other.StartLine &&
+        EndLine == other.EndLine;
+
+    public override bool Equals(object? obj) => obj is RawHit other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(
+        SegmentId,
+        DocumentOrdinal,
+        StartByte,
+        EndByte,
+        StartLine,
+        EndLine);
+
+    public static bool operator ==(RawHit left, RawHit right) => left.Equals(right);
+    public static bool operator !=(RawHit left, RawHit right) => !left.Equals(right);
 
     internal bool IsOwnedBy(object owner) => ReferenceEquals(_owner, owner);
 

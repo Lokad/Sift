@@ -374,8 +374,17 @@ public sealed class MutationIntegrationTests
             new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter(),
             hits);
+        var secondHits = new HitBuffer();
+        second.Search(
+            new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(),
+            secondHits);
 
-        Assert.Throws<ArgumentException>(() => second.Materialize(hits.Hits.Single(), 0, 0));
+        var firstHit = hits.Hits.Single();
+        var secondHit = secondHits.Hits.Single();
+        Assert.Equal(firstHit, secondHit);
+        Assert.True(firstHit == secondHit);
+        Assert.Throws<ArgumentException>(() => second.Materialize(firstHit, 0, 0));
     }
 
     [Fact]
