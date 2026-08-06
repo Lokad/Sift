@@ -1204,23 +1204,22 @@ public sealed class SiftIndex : ISiftIndex
         private readonly CancellationTokenSource _cancellation = new();
         private readonly Task _sampler;
         private long _peakManagedBytes;
+        private int _stopped;
+        private int _disposed;
 
         private ManagedMemoryPeakMeasurement()
         {
             _peakManagedBytes = GC.GetTotalMemory(forceFullCollection: false);
+            var cancellationToken = _cancellation.Token;
             _sampler = Task.Run(async () =>
             {
-                while (!_cancellation.IsCancellationRequested)
+                while (!cancellationToken.IsCancellationRequested)
                 {
-                    var managedBytes = GC.GetTotalMemory(forceFullCollection: false);
-                    if (managedBytes > Volatile.Read(ref _peakManagedBytes))
-                    {
-                        Interlocked.Exchange(ref _peakManagedBytes, managedBytes);
-                    }
+                    ObserveManagedBytes();
 
                     try
                     {
-                        await Task.Delay(5, _cancellation.Token).ConfigureAwait(false);
+                        await Task.Delay(5, cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -1237,33 +1236,49 @@ public sealed class SiftIndex : ISiftIndex
 
         public async Task<long> CompleteAsync()
         {
-            var managedBytes = GC.GetTotalMemory(forceFullCollection: false);
-            if (managedBytes > Volatile.Read(ref _peakManagedBytes))
-            {
-                Interlocked.Exchange(ref _peakManagedBytes, managedBytes);
-            }
-
-            _cancellation.Cancel();
-            try
-            {
-                await _sampler.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
-            managedBytes = GC.GetTotalMemory(forceFullCollection: false);
-            if (managedBytes > Volatile.Read(ref _peakManagedBytes))
-            {
-                Interlocked.Exchange(ref _peakManagedBytes, managedBytes);
-            }
+            ObserveManagedBytes();
+            Stop();
+            await _sampler.ConfigureAwait(false);
+            ObserveManagedBytes();
 
             return Volatile.Read(ref _peakManagedBytes);
         }
 
         public void Dispose()
         {
-            _cancellation.Dispose();
+            Stop();
+            _sampler.GetAwaiter().GetResult();
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _cancellation.Dispose();
+            }
+        }
+
+        private void Stop()
+        {
+            if (Interlocked.Exchange(ref _stopped, 1) == 0)
+            {
+                _cancellation.Cancel();
+            }
+        }
+
+        private void ObserveManagedBytes()
+        {
+            var observed = GC.GetTotalMemory(forceFullCollection: false);
+            var peak = Volatile.Read(ref _peakManagedBytes);
+            while (observed > peak)
+            {
+                var previous = Interlocked.CompareExchange(
+                    ref _peakManagedBytes,
+                    observed,
+                    peak);
+                if (previous == peak)
+                {
+                    return;
+                }
+
+                peak = previous;
+            }
         }
     }
 
