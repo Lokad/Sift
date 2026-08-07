@@ -158,6 +158,33 @@ public sealed class MutationIntegrationTests
     }
 
     [Fact]
+    public async Task ExpectedIdentityRejectsCompactionBeforeConsumingItsSource()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+        var expectedIdentity = index.GetIndexIdentity();
+
+        var compaction = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
+        var compactedIdentity = index.GetIndexIdentity();
+        Assert.True(compaction.InputSegments > 0);
+        Assert.Equal(expectedIdentity.Revision, compactedIdentity.Revision);
+        Assert.NotEqual(expectedIdentity, compactedIdentity);
+        var source = new SubmittedDocumentSource([
+            new SubmittedDocument("src/c.txt", "gamma"u8.ToArray())
+        ]);
+
+        var exception = await Assert.ThrowsAsync<StaleIndexIdentityException>(() => index.Update(
+            source,
+            [],
+            new UpdateOptions { ExpectedIdentity = expectedIdentity }));
+
+        Assert.Equal(expectedIdentity, exception.ExpectedIdentity);
+        Assert.Equal(compactedIdentity, exception.ActualIdentity);
+        Assert.Equal(0, source.ConsumedDocuments);
+    }
+
+    [Fact]
     public async Task UpdateAppliesUpsertsAndDeletions()
     {
         using var fixture = new CorpusFixture(

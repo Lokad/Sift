@@ -635,6 +635,11 @@ public sealed class SiftIndex : ISiftIndex
             var actualIdentity = currentManifest is null ? default : CreateIndexIdentity(currentManifest);
             var committedIdentity = actualIdentity;
             var actualRevision = actualIdentity.Revision;
+            if (options.ExpectedIdentity is { } expectedIdentity &&
+                expectedIdentity != actualIdentity)
+            {
+                throw new StaleIndexIdentityException(expectedIdentity, actualIdentity);
+            }
             if (options.ExpectedRevision is { } expectedRevision &&
                 expectedRevision != actualRevision)
             {

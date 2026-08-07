@@ -62,6 +62,9 @@ public sealed record UpdateOptions
     }
 
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
+    // When present, the update is rejected unless this exact manifest identity is still current.
+    // Unlike ExpectedRevision, compaction and metadata-only commits invalidate the expectation.
+    public IndexIdentity? ExpectedIdentity { get; init; }
     // When present, the update is rejected unless this logical corpus revision is still current.
     // Physical generation changes caused by compaction do not invalidate the expectation.
     public IndexRevision? ExpectedRevision { get; init; }
@@ -84,6 +87,19 @@ public sealed record OverlayUpdateOptions
     }
 
     public RejectedUpsertPolicy RejectedUpsertPolicy { get; init; }
+}
+
+public sealed class StaleIndexIdentityException : Exception
+{
+    public StaleIndexIdentityException(IndexIdentity expectedIdentity, IndexIdentity actualIdentity)
+        : base("The Sift index changed after the caller read its identity.")
+    {
+        ExpectedIdentity = expectedIdentity;
+        ActualIdentity = actualIdentity;
+    }
+
+    public IndexIdentity ExpectedIdentity { get; }
+    public IndexIdentity ActualIdentity { get; }
 }
 
 public sealed class StaleIndexRevisionException : Exception

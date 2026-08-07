@@ -355,6 +355,13 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         ArgumentNullException.ThrowIfNull(baseIndex);
         ArgumentNullException.ThrowIfNull(options);
         var baseRevision = _baseIdentity.Revision;
+        if (options.ExpectedIdentity is { } expectedIdentity &&
+            expectedIdentity != _baseIdentity)
+        {
+            throw new ArgumentException(
+                "ExpectedIdentity must identify the overlay's base manifest.",
+                nameof(options));
+        }
         if (options.ExpectedRevision is { } expectedRevision &&
             expectedRevision != baseRevision)
         {
