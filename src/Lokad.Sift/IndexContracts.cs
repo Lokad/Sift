@@ -625,6 +625,10 @@ public sealed class StorageStats
 
 public interface IIndexSnapshot : IDisposable
 {
+    /// <summary>Gets the persisted index identity captured when this snapshot was opened.</summary>
+    /// <remarks>For an overlay, this identifies its immutable base; overlay updates do not change it.</remarks>
+    IndexIdentity Identity { get; }
+
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
     SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
     SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);

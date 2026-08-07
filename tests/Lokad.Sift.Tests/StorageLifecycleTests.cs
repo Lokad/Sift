@@ -57,6 +57,20 @@ public sealed class StorageLifecycleTests
     }
 
     [Fact]
+    public async Task SnapshotRetainsItsCapturedIdentityAcrossPublication()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var snapshot = index.OpenSnapshot();
+        var capturedIdentity = snapshot.Identity;
+
+        await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
+
+        Assert.Equal(capturedIdentity, snapshot.Identity);
+        Assert.NotEqual(index.GetIndexIdentity(), snapshot.Identity);
+    }
+
+    [Fact]
     public async Task CommitMetadataIsAtomicAndSurvivesCompactionAndReopen()
     {
         using var fixture = new CorpusFixture();

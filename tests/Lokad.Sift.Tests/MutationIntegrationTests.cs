@@ -601,9 +601,12 @@ public sealed class MutationIntegrationTests
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
         using var overlay = index.OpenOverlaySnapshot();
+        var capturedIdentity = overlay.Identity;
         await overlay.Update(new InMemoryDocumentSource([("src/a.txt", "omega")]), []);
         await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
 
+        Assert.Equal(capturedIdentity, overlay.Identity);
+        Assert.NotEqual(index.GetIndexIdentity(), overlay.Identity);
         await Assert.ThrowsAsync<StaleIndexRevisionException>(() => overlay.CommitToBase(index));
 
         using var snapshot = index.OpenSnapshot();

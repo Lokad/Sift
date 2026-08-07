@@ -63,6 +63,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
     }
 
+    public IndexIdentity Identity => _baseIdentity;
+
     public Task<OverlayUpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
     {
         return Update(

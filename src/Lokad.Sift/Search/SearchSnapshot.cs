@@ -44,7 +44,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     internal int ParallelSearchCount => Volatile.Read(ref _parallelSearchCount);
     internal Action<int>? BeforeParallelWorkerStart { get; set; }
 #endif
-    internal IndexIdentity Identity => new(
+    public IndexIdentity Identity => new(
         _storageSnapshot.Manifest.CorpusId,
         _storageSnapshot.Manifest.ContentRevision,
         _storageSnapshot.Manifest.Generation);
