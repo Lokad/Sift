@@ -26,6 +26,11 @@ Important benchmark rule:
 - Prefer `.\bench.ps1` over ad hoc `dotnet run` so stale benchmark hosts and output paths are handled consistently.
 - Benchmark commands should be run sequentially, not in parallel.
 
+## Packaging
+
+Treat NuGet artifacts as release outputs only when produced by an explicit
+Release pack. Debug build/test outputs are not release artifacts.
+
 ## Conditional compilation
 
 `SIFT_INTERNAL_VERIFICATION` is the repository's only conditional-compilation

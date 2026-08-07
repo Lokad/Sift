@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.0 - 2026-08-07
 
 ### Added
 
@@ -17,12 +17,15 @@
   buffers can avoid an intermediate body copy during build and update.
 - Added pull-based `IAsyncEnumerable<SubmittedDocument>` build and update APIs
   for naturally backpressured asynchronous ingestion.
-- Added bounded opaque commit metadata, stable corpus/content identity, and
-  optimistic update preconditions for consumer checkpoints committed with index
-  mutations.
-- Added snapshot live-document enumeration without body materialization.
+- Added bounded opaque commit metadata, stable corpus/content/storage identity,
+  and both logical-revision and exact-manifest update preconditions for consumer
+  checkpoints committed with index mutations.
+- Added snapshot-captured identity and commit metadata plus live-document
+  enumeration without body materialization.
 - Added complete rejected-document details and committed identities to build and
   non-failing update results.
+- Added matching-line materialization so callers can build excerpts without a
+  second document lookup or duplicate line scan.
 
 ### Changed
 
@@ -59,6 +62,8 @@
   default compaction pass.
 - Made compaction preserve logical content revisions and commit metadata while
   advancing only the physical storage generation.
+- Reclaimed retired on-disk generations automatically while preserving files
+  pinned by active snapshots and durable recovery intent after failed deletion.
 - Bounded overlay segments, tombstones, query preparation caches, path-filter
   caches, segment parallelism, and retained diagnostic state.
 - Serialized all asynchronous mutation kinds through one coordinator while
@@ -69,6 +74,8 @@
   explicit opt-ins instead of permanent process overhead.
 - Added end-to-end snapshot lifecycle and sustained overlay-churn benchmark
   scenarios alongside steady-state search measurements.
+- Routed explicit Release packages to `artifacts/nuget` and rejected non-Release
+  packaging unless deliberately overridden for troubleshooting.
 
 ### Fixed
 
@@ -91,6 +98,12 @@
   reported skipped documents and bytes in `UpdateStats`.
 - Made regex planning account for Unicode fallback document and byte density,
   and report mixed UTF-8/.NET verification accurately through `Explain`.
+- Prevented stale manifest and in-flight cache entries from regressing published
+  state or duplicating concurrent value construction.
+- Rejected reentrant mutation callbacks and incomplete overlay publication, and
+  preserved snapshot-backed hit and content lifetimes across concurrent updates.
+- Validated persisted manifest, segment, and postings structures before first use
+  and recovered safely when older generations were retired concurrently.
 
 ### Breaking changes
 
@@ -106,8 +119,8 @@
 - Changed `CompactOptions` from a value type to a reference type and moved
   partial configuration to object initializers.
 - Renamed `CompactOptions.SegmentCountTrigger` to
-  `SmallSegmentMergeThreshold` to clarify that it only gates clean small-segment
-  merging.
+  `MinimumSegmentCountForSmallMerge` to clarify that it only gates clean
+  small-segment merging.
 - Replaced generation-only index identity with corpus id, logical content
   revision, and physical storage generation.
 - Replaced raw index and hit identity primitives with `CorpusId`,

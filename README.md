@@ -8,6 +8,8 @@ It stores immutable index segments on disk or in memory, serves snapshot-based s
 dotnet add package Lokad.Sift
 ```
 
+The package targets .NET 10 (`net10.0`).
+
 ## C# example
 
 ```csharp
@@ -194,7 +196,7 @@ Use the same policy for the recommendation and the maintenance operation:
 ```csharp
 var options = new CompactOptions
 {
-    SmallSegmentMergeThreshold = 16,
+    MinimumSegmentCountForSmallMerge = 16,
     DeadFractionThreshold = 0.20
 };
 
@@ -212,9 +214,9 @@ if (index.ShouldCompact(options))
 `ShouldCompact(...)` uses the same replacement eligibility, capacity check, and
 per-segment selection as `Compact(...)`; it
 does not recommend work merely because a healthy corpus exceeds
-`SmallSegmentMergeThreshold` with target-sized segments, or when current quota
-and filesystem headroom cannot hold the estimated replacements. The result is a
-snapshot-based hint: a concurrent mutation may change the answer before
+`MinimumSegmentCountForSmallMerge` with target-sized segments, or when current
+quota and filesystem headroom cannot hold the estimated replacements. The result
+is a snapshot-based hint: a concurrent mutation may change the answer before
 `Compact(...)` starts, and a resulting no-op is harmless.
 `GetMaintenanceStats()` remains available for telemetry and diagnostics, but
 aggregate segment count is not itself a reliable compaction predicate.
@@ -298,8 +300,13 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   `UpdateOptions.CommitMetadataProvider` copy bounded opaque consumer metadata
   into the same manifest commit as the indexed documents. `GetIndexState()`
   returns that metadata with a corpus id, logical content revision, and physical
-  storage generation. `ExpectedIdentity` rejects an update based on stale logical
-  content while allowing content-preserving compaction.
+  storage generation. `ExpectedRevision` rejects an update based on stale logical
+  content while allowing content-preserving compaction; `ExpectedIdentity` also
+  rejects physical-generation and metadata-only changes.
+- `IIndexSnapshot.Identity` and `IIndexSnapshot.CommitMetadata` expose the state
+  captured with the snapshot. For an overlay, they identify its immutable base.
+- Use `MaterializeWithMatchingLine(...)` when the complete matching line is
+  required; ordinary `Materialize(...)` avoids that additional allocation.
 - `VisitDocuments(...)` streams the live document keys in a snapshot without
   requiring a search query or materializing document bodies.
 - Use `ShouldCompact(...)` with the same options passed to `Compact(...)`; do not trigger on aggregate segment count alone.
