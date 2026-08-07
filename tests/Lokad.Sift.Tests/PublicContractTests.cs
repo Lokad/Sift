@@ -45,6 +45,9 @@ public sealed class PublicContractTests
         Assert.Equal(
             typeof(IndexIdentity),
             GetPropertyType<IIndexSnapshot>(nameof(IIndexSnapshot.Identity)));
+        Assert.Equal(
+            typeof(ReadOnlyMemory<byte>),
+            GetPropertyType<IIndexSnapshot>(nameof(IIndexSnapshot.CommitMetadata)));
         Assert.Equal(typeof(CorpusId), GetPropertyType<IndexRevision>(nameof(IndexRevision.CorpusId)));
         Assert.Equal(
             typeof(ContentRevision),

@@ -26,6 +26,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly SearchOptions _searchOptions;
     private readonly StorageReadSnapshot _storageSnapshot;
     private readonly SearchPlanExplainer _planExplainer;
+    private byte[]? _commitMetadata;
     private readonly object _hitOwner = new();
     private readonly object _segmentCachesSync = new();
     // Reuse mappings and derived live-row metadata while the generation is pinned.
@@ -48,6 +49,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         _storageSnapshot.Manifest.CorpusId,
         _storageSnapshot.Manifest.ContentRevision,
         _storageSnapshot.Manifest.Generation);
+    public ReadOnlyMemory<byte> CommitMetadata
+    {
+        get
+        {
+            var metadata = Volatile.Read(ref _commitMetadata);
+            if (metadata is not null)
+                return metadata;
+
+            var copy = _storageSnapshot.Manifest.CommitMetadata.ToArray();
+            return Interlocked.CompareExchange(ref _commitMetadata, copy, null) ?? copy;
+        }
+    }
 
     public SearchSnapshot(
         ISiftStorage storage,

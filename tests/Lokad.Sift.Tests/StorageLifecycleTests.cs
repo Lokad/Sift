@@ -89,6 +89,11 @@ public sealed class StorageLifecycleTests
                 });
             var builtState = index.GetIndexState();
             Assert.Equal("initial"u8.ToArray(), builtState.CommitMetadata.ToArray());
+            using (var snapshot = index.OpenSnapshot())
+            {
+                Assert.Equal(builtState.Identity, snapshot.Identity);
+                Assert.Equal(builtState.CommitMetadata.ToArray(), snapshot.CommitMetadata.ToArray());
+            }
 
             await index.Update(
                 new InMemoryDocumentSource([]),
@@ -107,6 +112,11 @@ public sealed class StorageLifecycleTests
                 metadataOnlyState.Identity.StorageGeneration.Value >
                 builtState.Identity.StorageGeneration.Value);
             Assert.Equal("advanced"u8.ToArray(), metadataOnlyState.CommitMetadata.ToArray());
+            using (var snapshot = index.OpenSnapshot())
+            {
+                Assert.Equal(metadataOnlyState.Identity, snapshot.Identity);
+                Assert.Equal(metadataOnlyState.CommitMetadata.ToArray(), snapshot.CommitMetadata.ToArray());
+            }
 
             await index.Update(new InMemoryDocumentSource([("src/b.txt", "beta")]), []);
             var updatedState = index.GetIndexState();

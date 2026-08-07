@@ -644,6 +644,8 @@ public interface IIndexSnapshot : IDisposable
     /// <summary>Gets the persisted index identity captured when this snapshot was opened.</summary>
     /// <remarks>For an overlay, this identifies its immutable base; overlay updates do not change it.</remarks>
     IndexIdentity Identity { get; }
+    /// <summary>Gets the opaque commit metadata captured with this snapshot's manifest.</summary>
+    ReadOnlyMemory<byte> CommitMetadata { get; }
 
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
     SearchPlan Explain(SearchQuery query, PathFilter pathFilter);

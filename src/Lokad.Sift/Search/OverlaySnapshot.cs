@@ -64,6 +64,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     }
 
     public IndexIdentity Identity => _baseIdentity;
+    public ReadOnlyMemory<byte> CommitMetadata => _baseSnapshot.CommitMetadata;
 
     public Task<OverlayUpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions)
     {
