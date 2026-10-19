@@ -41,7 +41,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         _baseIdentity = baseSnapshot.Identity;
         _options = options;
         _searchOptions = searchOptions;
-        var overlayIndex = SiftIndex.CreateInMemory(options);
+        var overlayIndex = new SiftIndex(new InMemorySiftStorage(), options, baseSnapshot.RegexContext);
         SearchSnapshot? overlaySnapshot = null;
         try
         {
@@ -417,6 +417,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     public SearchPlan Explain(SearchQuery query, PathFilter pathFilter)
     {
+        using var callbackScope = ReentrancyGuard.Enter(this);
         using var state = BeginRead();
         var basePlan = _baseSnapshot.Explain(query, pathFilter);
         if (_overlayDocuments.Count == 0 && _baseTombstones.Count == 0)
@@ -445,11 +446,33 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         var watch = ValueStopwatch.StartNew();
         // Overlay and base are two generations of one logical search: prepare once and
         // enforce one absolute deadline while carrying the remaining result budgets.
-        var prepared = _baseSnapshot.PrepareSearch(query, pathFilter);
+        // Validate before constructing the deadline, including null/invalid queries.
+        _baseSnapshot.ValidateSearchArguments(query, pathFilter);
         using var deadlineCancellation = SearchSnapshot.CreateDeadlineCancellation(
             query.MaxElapsedMilliseconds,
             cancellationToken);
         var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
+        PreparedSearch prepared;
+        try { prepared = _baseSnapshot.PrepareSearch(query, pathFilter, effectiveCancellationToken); }
+        catch (RegexEngineFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch (OperationCanceledException) when (effectiveCancellationToken.IsCancellationRequested)
+        {
+            return SearchSnapshot.PreparationStopped(watch, SearchStopReason.MaxElapsedTime);
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException) when (query.RegexTimeoutPolicy == RegexTimeoutPolicy.StopSearch)
+        {
+            return SearchSnapshot.PreparationStopped(watch, SearchStopReason.RegexTimeout);
+        }
+        using var preparedLease = prepared;
 
         var generation = _overlayGeneration;
         var overlayCollector = new OverlayHitCollector(this, generation, collector);

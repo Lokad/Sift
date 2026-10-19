@@ -10,6 +10,41 @@ dotnet add package Lokad.Sift
 
 The package targets .NET 10 (`net10.0`).
 
+## Regex engines
+
+The core package has no runtime NuGet dependencies. Regex search uses invariant
+.NET semantics and defaults to .NET Regex, preferring `NonBacktracking` when the
+pattern supports it. Classic backtracking has a one-second match timeout;
+`RegexTimeoutPolicy` controls whether a timeout stops the search or throws.
+
+Applications can supply byte-oriented verification through
+`SiftOptions.RegexEngine`, an implementation of Sift's own `ISiftRegexEngine`
+contract. The application references its chosen producer directly; no adapter
+library is required. See [application-side adapter source](examples/Utf8RegexAdapter.cs).
+Successful compilation must guarantee byte-oriented execution on the declared
+input domain. Unsupported or unqualified capabilities use Sift's managed fallback.
+The current native route is qualified for ASCII documents; Unicode documents
+continue through the managed verifier, preserving case folding and byte offsets.
+
+The application owns the engine and keeps its configuration stable while its
+indexes/snapshots use it. Sift owns compiled handles and keeps bounded caches
+shared across snapshots and index generations. It releases handles after cache
+eviction or final context disposal once active users finish. The engine itself
+is borrowed and is never disposed by Sift. Inputs, match sinks, and checkpoints
+are synchronous borrowed values and must not be retained by the engine.
+
+The pinned `Lokad.Utf8Regex 0.1.0` API does not expose a public compile-time native
+capability query. The example therefore declines matching unless the application
+supplies a supported capability guarantee. A successful producer constructor
+alone does not establish native execution. Tests still reference and exercise
+the real producer directly alongside controlled contract providers.
+
+`SearchPlan.RegexRouteReason`, verifier labels, and invocation counters describe
+the selected route. Byte-native verification is counted only when an explicitly
+accepted engine runs; managed fallback reports its actual non-backtracking usage.
+Use [the package check](tools/verify-regex-package.ps1) to qualify the exact Release
+package with isolated core-only and producer-backed consumers.
+
 ## C# example
 
 ```csharp

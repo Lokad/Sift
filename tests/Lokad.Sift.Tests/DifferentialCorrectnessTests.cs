@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Lokad.Sift;
+using Lokad.Sift.Examples;
 
 namespace Lokad.Sift.Tests;
 
@@ -18,9 +19,12 @@ public sealed class DifferentialCorrectnessTests
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter { IncludeGlobs = ["src/**/*.txt"], ExcludeGlobs = ["src/generated/**"] } }
     };
 
+    public static IEnumerable<object[]> EngineSearchCases => SearchCases.SelectMany(row =>
+        new[] { new object[] { row[0], row[1], false }, new object[] { row[0], row[1], true } });
+
     [Theory]
-    [MemberData(nameof(SearchCases))]
-    public async Task SearchMatchesBruteForceBaseline(SearchQuery query, PathFilter filter)
+    [MemberData(nameof(EngineSearchCases))]
+    public async Task SearchMatchesBruteForceBaseline(SearchQuery query, PathFilter filter, bool useProducerAdapter)
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha beta\nbeta alpha\n"),
@@ -30,7 +34,8 @@ public sealed class DifferentialCorrectnessTests
             ("docs/e.md", "beta\n"),
             ("src/whole.txt", "beta\nalphabetabeta\n"));
 
-        using var index = new SiftIndex(fixture.CorpusPath);
+        using var index = new SiftIndex(fixture.CorpusPath,
+            new SiftOptions { RegexEngine = useProducerAdapter ? new Utf8RegexAdapter() : null });
         await index.Build(fixture.CreateSource());
 
         using var snapshot = index.OpenSnapshot();

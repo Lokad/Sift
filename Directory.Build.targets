@@ -1,6 +1,7 @@
 <Project>
   <ItemGroup>
-    <AllowedPackageReference Include="Lokad.Utf8Regex" />
+    <AllowedPackageReference Include="Lokad.Utf8Regex"
+      Condition="'$(MSBuildProjectName)' == 'Lokad.Sift.Tests' or '$(MSBuildProjectName)' == 'Lokad.Sift.Benchmarks' or '$(MSBuildProjectName)' == 'Lokad.Sift.TestHost'" />
     <AllowedPackageReference Include="BenchmarkDotNet" />
     <AllowedPackageReference Include="Microsoft.SourceLink.GitHub" />
     <AllowedPackageReference Include="Microsoft.NET.Test.Sdk" />

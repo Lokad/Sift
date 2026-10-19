@@ -1,26 +1,14 @@
 using System.Text;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Text.RegularExpressions;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
-using Lokad.Sift.Storage;
-using CompiledUtf8Regex = Lokad.Utf8Regex.Utf8Regex;
 
 namespace Lokad.Sift.Search;
 
-internal static class Utf8RegexEngine
+internal static class Utf8RegexAnalysis
 {
-    internal const int CacheCapacity = 256;
-    internal const int CachePatternCharacterCapacity = 256 * 1024;
     internal const int MaximumOrderedAnchorsPerGroup = 4;
-    private static readonly BoundedLruCache<Utf8RegexCacheKey, CompiledUtf8Regex> Cache = new(
-        CacheCapacity,
-        CachePatternCharacterCapacity,
-        static key => key.Pattern.Length);
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
-    internal static int CacheCount => Cache.Count;
-    internal static int CachePatternCharacters => Cache.Weight;
 
     public static bool TryParseSyntax(
         SearchQuery query,
@@ -65,112 +53,6 @@ internal static class Utf8RegexEngine
             syntax.DotAll,
             syntax.IgnoreCase);
         return true;
-    }
-
-    public static bool TrySearchDocument(
-        MappedSegment segment,
-        SegmentDocument document,
-        PreparedUtf8Regex prepared,
-        int hitLimit,
-        IHitCollector collector,
-        ref int hitsReturned,
-        ref int utf8RegexInvocations,
-        ref int utf8RegexMatchedDocuments,
-        ref long utf8RegexMatchesEnumerated,
-        ref SearchStopReason stopReason)
-    {
-        var contentBytes = segment.GetContentBytes(document);
-        var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
-        utf8RegexInvocations++;
-
-        var matched = false;
-        try
-        {
-            // Stay on the byte-native API surface. If Sift ever needs to continue from a byte offset,
-            // it should slice contentBytes or use a future byte-offset Utf8Regex API rather than a UTF-16 startAt overload.
-            foreach (var match in prepared.Regex.EnumerateMatches(contentBytes))
-            {
-                if (hitsReturned >= hitLimit)
-                {
-                    break;
-                }
-
-                if (!match.TryGetByteRange(out var startByte, out var lengthInBytes))
-                {
-                    continue;
-                }
-
-                matched = true;
-                utf8RegexMatchesEnumerated++;
-                var endByte = startByte + lengthInBytes;
-                var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
-                var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
-                var shouldContinue = collector.OnHit(
-                    new RawHit(
-                        segment.SegmentId,
-                        new DocumentOrdinal(document.Ordinal),
-                        startByte,
-                        endByte,
-                        startLine,
-                        endLine));
-                hitsReturned++;
-                if (!shouldContinue)
-                {
-                    stopReason = SearchStopReason.CollectorStopped;
-                    return true;
-                }
-
-                if (hitsReturned >= hitLimit)
-                {
-                    break;
-                }
-            }
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            if (prepared.RegexTimeoutPolicy == RegexTimeoutPolicy.Throw)
-            {
-                throw;
-            }
-
-            stopReason = SearchStopReason.RegexTimeout;
-            return false;
-        }
-
-        if (matched)
-        {
-            utf8RegexMatchedDocuments++;
-        }
-
-        return matched;
-    }
-
-    public static PreparedUtf8Regex Prepare(
-        Utf8RegexProgram program,
-        RegexTimeoutPolicy regexTimeoutPolicy)
-    {
-        var options = RegexOptions.CultureInvariant;
-        if (program.Multiline)
-        {
-            options |= RegexOptions.Multiline;
-        }
-
-        if (program.DotAll)
-        {
-            options |= RegexOptions.Singleline;
-        }
-
-        if (program.IgnoreCase)
-        {
-            options |= RegexOptions.IgnoreCase;
-        }
-
-        var key = new Utf8RegexCacheKey(program.Pattern, options);
-        var regex = Cache.GetOrAdd(
-            key,
-            static cacheKey => new CompiledUtf8Regex(cacheKey.Pattern, cacheKey.Options, DefaultTimeout),
-            out var cacheHit);
-        return new PreparedUtf8Regex(regex, cacheHit, regexTimeoutPolicy);
     }
 
     private static bool IsAscii(string text) => Encoding.UTF8.GetByteCount(text) == text.Length;
@@ -1362,10 +1244,6 @@ internal sealed record Utf8RegexSyntax(
     bool DotAll,
     bool IgnoreCase);
 
-internal readonly record struct Utf8RegexCacheKey(
-    string Pattern,
-    RegexOptions Options);
-
 internal readonly record struct Utf8RegexOrderedAnchorGroup(
     Utf8RegexOrderedAnchor[] Anchors);
 
@@ -1400,6 +1278,6 @@ internal enum Utf8RegexAtomKind
 }
 
 internal sealed record PreparedUtf8Regex(
-    CompiledUtf8Regex Regex,
+    ISiftCompiledRegex Regex,
     bool CacheHit,
     RegexTimeoutPolicy RegexTimeoutPolicy);

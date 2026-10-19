@@ -15,6 +15,22 @@ The objective is to answer these questions with evidence:
 
 This benchmark track is intended to guide architecture and performance work, not just to produce a vanity number.
 
+Regex verification now defaults to .NET Regex. The benchmark host retains its
+direct `Lokad.Utf8Regex` reference and can compile the application-side adapter
+source, but native measurements require explicit engine injection and supported
+capability guarantees. The pinned `0.1.0` producer has no public capability query;
+construction alone must not qualify an execution as native. Report default
+fallback measurements separately from qualified native acceleration and keep the
+backend revision fixed when measuring adapter overhead.
+
+Measure cold preparation separately from warm matching, including allocations,
+UTF-16 decoding, route reasons/counters, and compilation reuse across snapshot
+turnover. Snapshot creation must not clear the index's warm compiled-pattern
+cache. Run benchmarks sequentially with `bench.ps1` in Release. Default-fallback
+and controlled-provider checks establish Sift behavior. Producer-internal engine
+selection and backend acceleration performance belong to the producer and are
+outside Sift's delivery scope.
+
 ## 2. Local corpus convention
 
 Real benchmark repositories are checked out locally under:

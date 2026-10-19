@@ -452,7 +452,8 @@ public sealed class SearchPlan
         PlannerAlternative? runnerUp,
         double? runnerUpEstimatedCostDelta,
         RegexTimeoutPolicy regexTimeoutPolicy,
-        PlannerAlternative[] plannerAlternatives)
+        PlannerAlternative[] plannerAlternatives,
+        SiftRegexRouteReason regexRouteReason = SiftRegexRouteReason.Literal)
     {
         PatternKind = patternKind;
         ResolvedCaseMode = resolvedCaseMode;
@@ -484,10 +485,12 @@ public sealed class SearchPlan
         RunnerUpEstimatedCostDelta = runnerUpEstimatedCostDelta;
         RegexTimeoutPolicy = regexTimeoutPolicy;
         PlannerAlternatives = PublicResultCollection.Own(plannerAlternatives);
+        RegexRouteReason = regexRouteReason;
     }
 
     public SearchPatternKind PatternKind { get; }
     public CaseMode ResolvedCaseMode { get; }
+    public SiftRegexRouteReason RegexRouteReason { get; }
 
     /// <summary>Gets the number of physical segment rows covered by the plan.</summary>
     /// <remarks>For overlays, this includes hidden base rows because visibility is applied after segment planning.</remarks>

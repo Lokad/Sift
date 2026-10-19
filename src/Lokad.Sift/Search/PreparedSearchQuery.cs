@@ -12,6 +12,10 @@ internal readonly record struct PreparedQueryKey(
     bool DotAll,
     RegexTimeoutPolicy RegexTimeoutPolicy)
 {
+    public static PreparedQueryKey FromQuery(SearchQuery query) => new(
+        query.Pattern, query.PatternMode, query.CaseMode, query.WholeWord, query.WholeLine,
+        query.Multiline, query.DotAll, query.RegexTimeoutPolicy);
+
     public SearchQuery ToSearchQuery()
     {
         return new SearchQuery(Pattern, PatternMode, CaseMode)
@@ -68,6 +72,10 @@ internal sealed class PreparedSearchQuery
     public PreparedSearchText[] LeadingLiterals { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
     public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
+
+    internal void DisposeCompiledRegex() => RegexPlan.PreparedUtf8Regex?.Regex.Dispose();
+
+    internal void RecordExplanationAccess() => Interlocked.Exchange(ref _utf8RegexReturned, 1);
 
     public PreparedRegexExecutionAccess GetRegexExecution()
     {
@@ -213,10 +221,10 @@ internal sealed class PreparedRegexExecution
             return None;
         }
 
-        if (regexPlan.Utf8RegexProgram is { } utf8RegexProgram)
+        if (regexPlan.PreparedUtf8Regex is { } preparedUtf8Regex)
         {
             return new PreparedRegexExecution(
-                Utf8RegexEngine.Prepare(utf8RegexProgram, query.RegexTimeoutPolicy),
+                preparedUtf8Regex,
                 () => RegexVerifier.Prepare(query, resolvedCaseMode));
         }
 

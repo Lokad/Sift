@@ -64,10 +64,10 @@ internal ref struct SearchPlanCandidateBuilder
         }
 
         candidates.Add(CreateDirectRegexCandidate());
-        if (features.ResolvedCaseMode == CaseMode.Insensitive && !features.RegexPlan.UsesUtf8Regex)
+        if (features.ResolvedCaseMode == CaseMode.Insensitive && !features.RegexPlan.HasByteAnalysis)
         {
             // RegexOptions.IgnoreCase has Unicode equivalences that the byte indexes
-            // do not encode. Only a byte-compiled pattern can safely prune ASCII
+            // do not encode. Only a byte-analyzed pattern can safely prune ASCII
             // documents while the search separately retains every non-ASCII document.
             return candidates;
         }
@@ -105,7 +105,10 @@ internal ref struct SearchPlanCandidateBuilder
 
         if (!features.HasMandatoryFragments)
         {
-            if (features.RegexPlan.Kind == RegexExecutionKind.Fallback && features.AdvisoryTexts.Length > 0)
+            // Supported byte analysis has an exhaustive leading-literal set.
+            // The fallback advisory selector can omit dense branches, so it
+            // must not replace that sound set when execution uses managed Regex.
+            if (!features.RegexPlan.HasByteAnalysis && features.AdvisoryTexts.Length > 0)
             {
                 var advisoryPlan = TryCreateLiteralSetPlan(
                     features.Anchors.AdvisoryCaseMode,
@@ -242,7 +245,7 @@ internal ref struct SearchPlanCandidateBuilder
         var includesUnicodeFallback =
             _features.Query.PatternMode == PatternMode.Regex &&
             _features.ResolvedCaseMode == CaseMode.Insensitive &&
-            _features.RegexPlan.UsesUtf8Regex &&
+            _features.RegexPlan.HasByteAnalysis &&
             _scope.NonAsciiDocuments > 0;
         if (includesUnicodeFallback)
         {
@@ -298,9 +301,10 @@ internal ref struct SearchPlanCandidateBuilder
         var verifier = SearchPlanKinds.GetVerifierKind(
             _features.Query,
             _features.RegexPlan);
-        return verifier == SearchVerifierKind.Utf8Regex && _scope.NonAsciiDocuments > 0
-            ? SearchVerifierKind.Utf8RegexWithUnicodeFallback
-            : verifier;
+        if (verifier != SearchVerifierKind.Utf8Regex || _scope.NonAsciiDocuments == 0) return verifier;
+        return _scope.NonAsciiDocuments == _scope.Count
+            ? SearchVerifierKind.RegexFallback
+            : SearchVerifierKind.Utf8RegexWithUnicodeFallback;
     }
 
     private LiteralPlan SelectAnchorPlan(List<LiteralPlan> fragmentPlans)

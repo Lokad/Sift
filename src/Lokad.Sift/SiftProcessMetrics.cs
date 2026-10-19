@@ -13,8 +13,8 @@ public static class SiftProcessMetrics
     public static long RegexCacheMisses => RegexVerifier.CacheMisses;
     public static int RegexCacheEntries => RegexVerifier.CacheCount;
     public static int RegexCachePatternCharacters => RegexVerifier.CachePatternCharacters;
-    public static int Utf8RegexCacheEntries => Utf8RegexEngine.CacheCount;
-    public static int Utf8RegexCachePatternCharacters => Utf8RegexEngine.CachePatternCharacters;
+    public static int Utf8RegexCacheEntries => RegexExecutionContext.NativeEntries;
+    public static int Utf8RegexCachePatternCharacters => RegexExecutionContext.NativePatternCharacters;
 
     public static double RegexCacheHitRate
     {

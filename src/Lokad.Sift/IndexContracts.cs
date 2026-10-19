@@ -2,6 +2,9 @@ namespace Lokad.Sift;
 
 public sealed class SiftOptions
 {
+    /// <summary>Gets the borrowed UTF-8 regex engine, or null for .NET verification.</summary>
+    public ISiftRegexEngine? RegexEngine { get; init; }
+
     public const int MaximumSelectedNgramCount = 256;
 
     public int MaxDocumentBytes { get; init; } = 32 * 1024 * 1024;

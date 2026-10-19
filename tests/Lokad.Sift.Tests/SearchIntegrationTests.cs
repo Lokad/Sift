@@ -656,12 +656,12 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(1, stats.RegexInvocations);
         Assert.Equal(0, stats.Utf8RegexInvocations);
-        Assert.Equal(1, stats.FallbackRegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
         Assert.Equal(1, stats.NonBacktrackingRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedAsciiRegexUsesUtf8RegexEngine()
+    public async Task SupportedAsciiRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha beta\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -672,22 +672,22 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("b[a-z]+a", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
-        Assert.False(plan.CanUseNonBacktracking);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
+        Assert.True(plan.CanUseNonBacktracking);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("b[a-z]+a", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Single(collector.Hits);
         Assert.Equal(1, stats.RegexInvocations);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
-        Assert.Equal(0, stats.NonBacktrackingRegexInvocations);
-        Assert.Equal(0, stats.DecodedChars);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
+        Assert.Equal(1, stats.NonBacktrackingRegexInvocations);
+        Assert.True(stats.DecodedChars > 0);
     }
 
     [Fact]
-    public async Task SupportedAlternationRegexUsesUtf8RegexEngine()
+    public async Task SupportedAlternationRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha beta\nalpha bingo\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -698,17 +698,17 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("b(?:eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("b(?:eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Equal(2, stats.HitsReturned);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedCapturingGroupRegexUsesUtf8RegexEngine()
+    public async Task SupportedCapturingGroupRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha beta\nalpha bingo\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -719,17 +719,17 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("b(eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("b(eta|ingo)", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Equal(2, stats.HitsReturned);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedAsciiInsensitiveRegexUsesUtf8RegexEngine()
+    public async Task SupportedAsciiInsensitiveRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha beta\n"),
@@ -742,18 +742,18 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("B(?:ETA|INGO)", PatternMode.Regex, CaseMode.Insensitive), new PathFilter());
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("B(?:ETA|INGO)", PatternMode.Regex, CaseMode.Insensitive), new PathFilter(), collector);
         Assert.Equal(2, stats.HitsReturned);
         Assert.Equal(2, stats.RegexInvocations);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedShorthandClassRegexUsesUtf8RegexEngine()
+    public async Task SupportedShorthandClassRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "item 123\n"),
@@ -766,17 +766,17 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("\\d+", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("\\d+", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Single(collector.Hits);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedNegatedClassRegexUsesUtf8RegexEngine()
+    public async Task SupportedNegatedClassRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha"),
@@ -792,12 +792,12 @@ public sealed class SearchIntegrationTests
         var stats = snapshot.Search(new SearchQuery("^a[^x]+a$", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Single(collector.Hits);
         Assert.Equal("src/a.txt", snapshot.Materialize(collector.Hits[0], 0, 0).Path);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task Utf8RegexEndAnchorMatchesBeforeTrailingNewline()
+    public async Task ManagedRegexEndAnchorMatchesBeforeTrailingNewline()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -810,12 +810,12 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("^alph.$", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Single(collector.Hits);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedWordBoundaryRegexUsesUtf8RegexEngine()
+    public async Task SupportedWordBoundaryRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha beta gamma"),
@@ -828,18 +828,18 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var plan = snapshot.Explain(new SearchQuery("\\bbeta\\b", PatternMode.Regex, CaseMode.Sensitive), new PathFilter());
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("\\bbeta\\b", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
         Assert.Single(collector.Hits);
         Assert.Equal("src/a.txt", snapshot.Materialize(collector.Hits[0], 0, 0).Path);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task DeclarationFamilyRegexUsesUtf8RegexEngine()
+    public async Task DeclarationFamilyRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.cs", "public class Customer {}\npublic record Order;\npublic struct Point {}\npublic enum NoMatch { A }\n"),
@@ -853,17 +853,17 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:record|struct|class)\\s+[A-Z][A-Za-z0-9_]+", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter { IncludeGlobs = ["**/*.cs"] });
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
         Assert.Equal(3, collector.Hits.Count);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task ExactLiteralSetWordBoundaryRegexUsesUtf8RegexEngine()
+    public async Task ExactLiteralSetWordBoundaryRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "Task ValueTask IAsyncEnumerable alphabetagamma"),
@@ -877,18 +877,18 @@ public sealed class SearchIntegrationTests
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\b(?:Task|ValueTask|IAsyncEnumerable)\\b", PatternMode.Regex, CaseMode.Sensitive);
         var plan = snapshot.Explain(query, new PathFilter());
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
         Assert.Equal(3, collector.Hits.Count);
         Assert.All(collector.Hits, hit => Assert.Equal("src/a.txt", snapshot.Materialize(hit, 0, 0).Path));
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedLazyQuantifierRegexUsesUtf8RegexEngine()
+    public async Task SupportedLazyQuantifierRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "axxxbxxb"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -903,8 +903,8 @@ public sealed class SearchIntegrationTests
         Assert.Single(collector.Hits);
         var hit = snapshot.Materialize(collector.Hits[0], 0, 0);
         Assert.Equal("axxxb", hit.MatchText);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
@@ -928,11 +928,11 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
 
-        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
         Assert.Equal(3, stats.HitsReturned);
         Assert.True(stats.Utf8RegexMatchesEnumerated < 100);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
@@ -1021,7 +1021,7 @@ public sealed class SearchIntegrationTests
         Assert.All(
             program.OrderedAnchorGroups,
             static group => Assert.True(
-                group.Anchors.Length <= Utf8RegexEngine.MaximumOrderedAnchorsPerGroup));
+                group.Anchors.Length <= Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup));
     }
 
     [Fact]
@@ -1314,7 +1314,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task SupportedWholeWordRegexUsesUtf8RegexEngine()
+    public async Task SupportedWholeWordRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha beta\n"),
@@ -1330,17 +1330,17 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive) { WholeWord = true }, new PathFilter(), collector);
 
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
-        Assert.False(plan.NeedsUnicodeDecode);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
+        Assert.True(plan.NeedsUnicodeDecode);
         Assert.Single(collector.Hits);
         Assert.Equal(1, stats.HitsReturned);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
-        Assert.Equal(1, stats.Utf8RegexCacheHits + stats.Utf8RegexCacheMisses);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexCacheHits + stats.Utf8RegexCacheMisses);
     }
 
     [Fact]
-    public async Task SupportedWholeLineRegexUsesUtf8RegexEngine()
+    public async Task SupportedWholeLineRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha beta\nalpha\ngamma\n"),
@@ -1356,16 +1356,16 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("alpha.*", PatternMode.Regex, CaseMode.Sensitive) { WholeLine = true }, new PathFilter(), collector);
 
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
-        Assert.False(plan.NeedsUnicodeDecode);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
+        Assert.True(plan.NeedsUnicodeDecode);
         Assert.Equal(3, collector.Hits.Count);
         Assert.Equal(3, stats.HitsReturned);
-        Assert.Equal(2, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedAsciiEscapeRegexUsesUtf8RegexEngine()
+    public async Task SupportedAsciiEscapeRegexUsesManagedVerifierByDefault()
     {
         using var fixture = new CorpusFixture(("src/a.txt", "A\u0001\u001B[\a\f\v\n"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -1379,16 +1379,16 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("\\x41[\\cA]\\e\\[\\a\\f\\v", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
 
-        Assert.Equal(SearchVerifierKind.Utf8Regex, plan.VerifierKind);
-        Assert.False(plan.NeedsUnicodeDecode);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
+        Assert.True(plan.NeedsUnicodeDecode);
         Assert.Single(collector.Hits);
         Assert.Equal(1, stats.HitsReturned);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
-    public async Task SupportedAsciiRegexFallsBackPerDocumentForNonAsciiContent()
+    public async Task DefaultRegexVerifiesAsciiAndUnicodeDocuments()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "cafe\n"),
@@ -1405,8 +1405,8 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(2, stats.HitsReturned);
         Assert.Equal(2, stats.RegexInvocations);
-        Assert.Equal(1, stats.Utf8RegexInvocations);
-        Assert.Equal(1, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
         Assert.Equal(
             ["src/a.txt", "src/b.txt"],
             collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray());
@@ -1541,7 +1541,7 @@ public sealed class SearchIntegrationTests
 
         Assert.False(plan.UsesIndex);
         Assert.Equal(SearchCandidateKind.DirectScan, plan.CandidateKind);
-        Assert.Equal(SearchVerifierKind.Utf8RegexWithUnicodeFallback, plan.VerifierKind);
+        Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
         Assert.True(plan.NeedsUnicodeDecode);
         Assert.Equal(900, stats.FallbackRegexInvocations);
         Assert.Equal(0, stats.Utf8RegexInvocations);
@@ -2531,8 +2531,8 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(3, stats.HitsReturned);
         Assert.True(stats.RegexInvocations > 0);
-        Assert.True(stats.Utf8RegexInvocations > 0);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
@@ -2556,7 +2556,7 @@ public sealed class SearchIntegrationTests
         Assert.True(plan.UsesIndex);
         Assert.Contains("async", plan.MandatoryFragments);
         Assert.Contains("Task<", plan.MandatoryFragments);
-        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
         Assert.NotEqual(SearchCandidateKind.DirectScan, plan.CandidateKind);
 
         var collector = new HitBuffer();
@@ -2564,8 +2564,8 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(8, stats.HitsReturned);
         Assert.True(stats.CandidateDocumentsAfterIndex < stats.ScopeDocuments);
-        Assert.True(stats.Utf8RegexInvocations > 0);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
@@ -2590,7 +2590,7 @@ public sealed class SearchIntegrationTests
         Assert.True(plan.UsesIndex);
         Assert.Contains("Get", plan.MandatoryFragments);
         Assert.Contains("Async", plan.MandatoryFragments);
-        Assert.Equal(SearchPatternKind.Utf8Regex, plan.PatternKind);
+        Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "Asy");
         Assert.Contains(plan.SelectedNgrams, static gram => gram.Text == "syn");
         Assert.DoesNotContain(plan.SelectedNgrams, static gram => gram.Text == "ync");
@@ -2600,8 +2600,8 @@ public sealed class SearchIntegrationTests
 
         Assert.Equal(16, stats.HitsReturned);
         Assert.True(stats.CandidateDocumentsAfterIndex < stats.ScopeDocuments);
-        Assert.True(stats.Utf8RegexInvocations > 0);
-        Assert.Equal(0, stats.FallbackRegexInvocations);
+        Assert.Equal(0, stats.Utf8RegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
@@ -2965,7 +2965,7 @@ public sealed class SearchIntegrationTests
             collector);
 
         Assert.Single(collector.Hits);
-        Assert.Equal(1, stats.FallbackRegexInvocations);
+        Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
     [Fact]
@@ -3072,10 +3072,10 @@ public sealed class SearchIntegrationTests
 
     private static Utf8RegexProgram CompileUtf8Regex(SearchQuery query, CaseMode resolvedCaseMode)
     {
-        Assert.True(Utf8RegexEngine.TryParseSyntax(query, resolvedCaseMode, out var syntax));
+        Assert.True(Utf8RegexAnalysis.TryParseSyntax(query, resolvedCaseMode, out var syntax));
         var parsedSyntax = Assert.IsType<Utf8RegexSyntax>(syntax);
         var analysis = RegexFragmentAnalyzer.AnalyzePattern(parsedSyntax);
-        Assert.True(Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, parsedSyntax, out var program));
+        Assert.True(Utf8RegexAnalysis.TryCompile(query, analysis.IsExactLiteral, parsedSyntax, out var program));
         return Assert.IsType<Utf8RegexProgram>(program);
     }
 

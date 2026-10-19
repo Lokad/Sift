@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\examples\Utf8RegexAdapter.cs" Link="Adapters\Utf8RegexAdapter.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Search;
@@ -7,13 +8,13 @@ internal static class SearchQueryPreparer
 {
     internal const int CacheCapacity = 256;
     internal const int CacheCharacterCapacity = 256 * 1024;
-    private static readonly BoundedLruCache<PreparedQueryKey, PreparedSearchQuery> PreparedQueryCache = new(
+    private static readonly BoundedLruCache<PreparedQueryKey, QueryAnalysis> AnalysisCache = new(
         CacheCapacity,
         CacheCharacterCapacity,
         static key => key.Pattern.Length);
 
-    internal static int CacheCount => PreparedQueryCache.Count;
-    internal static int CacheCharacters => PreparedQueryCache.Weight;
+    internal static int CacheCount => AnalysisCache.Count;
+    internal static int CacheCharacters => AnalysisCache.Weight;
 
     internal static int[] BuildPrefixTable(ReadOnlySpan<byte> needle)
     {
@@ -50,41 +51,18 @@ internal static class SearchQueryPreparer
 
     internal static PreparedSearchQuery Prepare(SearchQuery query)
     {
-        var key = new PreparedQueryKey(
-            query.Pattern,
-            query.PatternMode,
-            query.CaseMode,
-            query.WholeWord,
-            query.WholeLine,
-            query.Multiline,
-            query.DotAll,
-            query.RegexTimeoutPolicy);
-        return PreparedQueryCache.GetOrAdd(
-            key,
-            CreatePreparedSearchQuery,
-            out _);
+        return Create(PreparedQueryKey.FromQuery(query), null, static () => { });
+    }
 
-        static PreparedSearchQuery CreatePreparedSearchQuery(PreparedQueryKey key)
+    internal static PreparedSearchQuery Create(PreparedQueryKey key, ISiftRegexEngine? engine, Action checkpoint)
+    {
+        var query = key.ToSearchQuery();
+        var analyzed = AnalysisCache.GetOrAdd(key, Analyze, out _);
+        var resolvedCaseMode = analyzed.CaseMode;
+        var regexPlan = ResolveRegexExecution(query, analyzed, engine, checkpoint);
+        try
         {
-            var query = key.ToSearchQuery();
-            var resolvedCaseMode = ResolveCaseMode(query);
-            Utf8RegexSyntax? utf8Syntax = null;
-            RegexFragmentAnalyzer.PatternAnalysis analysis = default;
-            if (query.PatternMode == PatternMode.Regex)
-            {
-                if (Utf8RegexEngine.TryParseSyntax(query, resolvedCaseMode, out var parsedSyntax))
-                {
-                    utf8Syntax = parsedSyntax;
-                    analysis = RegexFragmentAnalyzer.AnalyzePattern(parsedSyntax);
-                }
-                else
-                {
-                    analysis = RegexFragmentAnalyzer.AnalyzeFallbackPattern(query.Pattern);
-                }
-            }
-
-            var regexPlan = ResolveRegexExecution(query, resolvedCaseMode, analysis, utf8Syntax);
-            var anchors = SearchQueryAnchors.Create(query, resolvedCaseMode, regexPlan, analysis);
+            var anchors = SearchQueryAnchors.Create(query, resolvedCaseMode, regexPlan, analyzed.Fragments);
             var mandatoryTexts = PreparedSearchText.CreateMany(anchors.MandatoryTexts);
             var advisoryTexts = PreparedSearchText.CreateMany(anchors.AdvisoryTexts);
             var usesLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
@@ -103,47 +81,76 @@ internal static class SearchQueryPreparer
                     : PreparedMandatoryFragment.CreateMany(mandatoryTexts, resolvedCaseMode),
                 PreparedOrderedAnchor.CreateGroups(anchors.OrderedAnchorGroups),
                 () => PreparedRegexExecution.Create(query, resolvedCaseMode, regexPlan));
+        }
+        catch
+        {
+            regexPlan.PreparedUtf8Regex?.Regex.Dispose();
+            throw;
+        }
+    }
 
-            static RegexExecutionPlan ResolveRegexExecution(
-                SearchQuery query,
-                CaseMode resolvedCaseMode,
-                in RegexFragmentAnalyzer.PatternAnalysis analysis,
-                Utf8RegexSyntax? utf8Syntax)
+    private static QueryAnalysis Analyze(PreparedQueryKey key)
+    {
+        var query = key.ToSearchQuery();
+        var resolved = query.CaseMode == CaseMode.Smart
+            ? (Hashing.ContainsUppercase(query.Pattern) ? CaseMode.Sensitive : CaseMode.Insensitive)
+            : query.CaseMode;
+        Utf8RegexProgram? program = null;
+        RegexFragmentAnalyzer.PatternAnalysis fragments = default;
+        if (query.PatternMode == PatternMode.Regex)
+        {
+            if (Utf8RegexAnalysis.TryParseSyntax(query, resolved, out var syntax))
             {
-                if (query.PatternMode != PatternMode.Regex)
-                {
-                    return RegexExecutionPlan.Literal;
-                }
+                fragments = RegexFragmentAnalyzer.AnalyzePattern(syntax);
+                Utf8RegexAnalysis.TryCompile(query, fragments.IsExactLiteral, syntax, out program);
+            }
+            else fragments = RegexFragmentAnalyzer.AnalyzeFallbackPattern(query.Pattern);
+        }
+        return new QueryAnalysis(resolved, program, fragments);
+    }
 
-                // Invariant regex case folding is not equivalent to ordinal or ASCII folding.
-                // Only sensitive regexes can therefore be replaced by the literal verifier.
-                if (resolvedCaseMode == CaseMode.Sensitive &&
-                    analysis.IsExactLiteral &&
-                    analysis.ExactLiteral is { } exactLiteral)
-                {
-                    return RegexExecutionPlan.ForExactLiteral(exactLiteral);
-                }
+    private static RegexExecutionPlan ResolveRegexExecution(SearchQuery query, QueryAnalysis analysis,
+        ISiftRegexEngine? engine, Action checkpoint)
+    {
+        if (query.PatternMode != PatternMode.Regex) return RegexExecutionPlan.Literal;
+        // Invariant regex folding differs from ordinal/ASCII literal folding.
+        if (analysis.CaseMode == CaseMode.Sensitive && analysis.Fragments.IsExactLiteral &&
+            analysis.Fragments.ExactLiteral is { } literal)
+            return RegexExecutionPlan.ForExactLiteral(literal);
 
-                if (utf8Syntax is not null &&
-                    Utf8RegexEngine.TryCompile(query, analysis.IsExactLiteral, utf8Syntax, out var utf8RegexProgram))
+        var reason = engine is null ? SiftRegexRouteReason.NoEngine : SiftRegexRouteReason.UnsupportedPattern;
+        if (engine is not null && analysis.Program is { } program)
+        {
+            var options = RegexOptions.CultureInvariant |
+                (program.Multiline ? RegexOptions.Multiline : RegexOptions.None) |
+                (program.DotAll ? RegexOptions.Singleline : RegexOptions.None) |
+                (program.IgnoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
+            ISiftCompiledRegex? compiled = null;
+            try
+            {
+                checkpoint();
+                var accepted = RegexEngineGuards.TryCompile(engine, program.Pattern, options, TimeSpan.FromSeconds(1), checkpoint, out compiled);
+                checkpoint();
+                if (accepted)
                 {
-                    return RegexExecutionPlan.ForUtf8Regex(utf8RegexProgram);
+                    if (compiled is null || !Enum.IsDefined(RegexEngineGuards.GetInputDomain(compiled)))
+                        throw new InvalidOperationException("The supplied regex engine returned an invalid compiled pattern.");
+                    return RegexExecutionPlan.ForUtf8Regex(program,
+                        new PreparedUtf8Regex(compiled, false, query.RegexTimeoutPolicy));
                 }
-
-                return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, resolvedCaseMode));
+                if (compiled is not null)
+                    throw new InvalidOperationException("A declining regex engine returned a compiled pattern.");
+                reason = SiftRegexRouteReason.EngineDeclined;
+            }
+            catch
+            {
+                compiled?.Dispose();
+                throw;
             }
         }
-
-        static CaseMode ResolveCaseMode(SearchQuery query)
-        {
-            return query.CaseMode switch
-            {
-                CaseMode.Sensitive => CaseMode.Sensitive,
-                CaseMode.Insensitive => CaseMode.Insensitive,
-                CaseMode.Smart => Hashing.ContainsUppercase(query.Pattern) ? CaseMode.Sensitive : CaseMode.Insensitive,
-                _ => CaseMode.Sensitive
-            };
-        }
-
+        return RegexExecutionPlan.ForFallback(RegexVerifier.Prepare(query, analysis.CaseMode), analysis.Program, reason);
     }
+
+    private sealed record QueryAnalysis(CaseMode CaseMode, Utf8RegexProgram? Program,
+        RegexFragmentAnalyzer.PatternAnalysis Fragments);
 }

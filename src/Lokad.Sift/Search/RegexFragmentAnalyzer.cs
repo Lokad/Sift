@@ -63,7 +63,7 @@ internal static class RegexFragmentAnalyzer
         out PatternAnalysis analysis)
     {
         var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
-        if (!Utf8RegexEngine.TryParseSyntax(query, CaseMode.Sensitive, out var syntax))
+        if (!Utf8RegexAnalysis.TryParseSyntax(query, CaseMode.Sensitive, out var syntax))
         {
             analysis = default;
             return false;
@@ -348,7 +348,7 @@ internal static class RegexFragmentAnalyzer
     }
 
     // This parser intentionally covers .NET constructs that the UTF-8 executor
-    // rejects. Supported UTF-8 syntax is parsed once by Utf8RegexEngine instead.
+    // rejects. Supported UTF-8 syntax is parsed once by Utf8RegexAnalysis instead.
     private sealed class FallbackParser
     {
         private readonly string _pattern;

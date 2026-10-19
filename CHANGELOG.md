@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Removed the core package's dependency on `Lokad.Utf8Regex`. Added a Sift-owned
+  host-supplied regex contract with default .NET verification and truthful route
+  diagnostics; test and benchmark projects retain the pinned producer directly.
+- Shared bound query/compiled-pattern caches across an index's snapshots and
+  overlay generations, isolating engines and releasing evicted handles once
+  their active queries finish.
+- Prevented hidden producer backtracking fallback from bypassing Sift's
+  non-backtracking verifier. Unqualified native capabilities select the managed
+  route; cancellation, timeout policy, and input-range failures remain explicit.
+- Preserved sound byte prechecks for managed verification and prevented advisory
+  branch selection from dropping dense alternatives when native analysis exists.
+- Added adapter ownership, cancellation/deadline, eviction, producer differential,
+  and synthetic timeout regressions plus isolated Release package consumers.
+- Preserved independent caller cancellation during coalesced compilation and
+  prevented provider failures from being reported as index corruption.
+- Extended snapshot operation leases and callback disposal guards to host regex
+  compilation during searches and explanations, including overlays.
+
 - Breaking index-format change: segment version 4 removes the unused byte-frequency
   histogram and its per-byte counting pass. Non-ASCII document/byte statistics
   remain. Older packs are rejected on first access or validation and require an

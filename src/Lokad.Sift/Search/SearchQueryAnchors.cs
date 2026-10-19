@@ -26,7 +26,7 @@ internal readonly record struct SearchQueryAnchors(
     {
         if (query.PatternMode == PatternMode.Regex &&
             resolvedCaseMode == CaseMode.Insensitive &&
-            !regexPlan.UsesUtf8Regex)
+            !regexPlan.HasByteAnalysis)
         {
             // A mandatory byte fragment is not mandatory under invariant Unicode
             // regex folding unless the pattern has byte-safe semantics for ASCII documents.

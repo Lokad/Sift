@@ -76,7 +76,11 @@ internal static class SearchPlanCombiner
                 ? null
                 : Math.Max(0d, runnerUp.EstimatedCost - estimatedCost),
             regexTimeoutPolicy: basePlan.RegexTimeoutPolicy,
-            plannerAlternatives: plannerAlternatives);
+            plannerAlternatives: plannerAlternatives,
+            regexRouteReason: overlayPlan.ScopeDocumentCount == 0 ? basePlan.RegexRouteReason :
+                basePlan.ScopeDocumentCount == 0 ? overlayPlan.RegexRouteReason :
+                basePlan.RegexRouteReason == overlayPlan.RegexRouteReason
+                    ? basePlan.RegexRouteReason : SiftRegexRouteReason.MixedInputDomains);
         static T MergeStrategy<T>(
         T left,
         int leftSegments,

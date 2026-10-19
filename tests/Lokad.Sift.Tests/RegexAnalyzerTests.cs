@@ -14,7 +14,7 @@ public sealed class RegexAnalyzerTests
     public void SupportedPatternsUseExecutionSyntaxAnalysis(string pattern)
     {
         var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
-        Assert.True(Utf8RegexEngine.TryParseSyntax(query, CaseMode.Sensitive, out var syntax));
+        Assert.True(Utf8RegexAnalysis.TryParseSyntax(query, CaseMode.Sensitive, out var syntax));
 
         var fromPattern = RegexFragmentAnalyzer.AnalyzePattern(pattern);
         var fromSyntax = RegexFragmentAnalyzer.AnalyzePattern(syntax);

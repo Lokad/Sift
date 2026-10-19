@@ -31,7 +31,6 @@
     <None Include="..\..\icon.png" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Lokad.Utf8Regex" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
   </ItemGroup>
   <Target Name="RejectInternalVerificationInProduct" BeforeTargets="CoreCompile;Pack">

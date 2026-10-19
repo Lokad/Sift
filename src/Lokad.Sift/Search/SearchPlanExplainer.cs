@@ -23,6 +23,7 @@ internal sealed class SearchPlanExplainer(
         var selected = new Dictionary<(uint PackedValue, int ByteLength), int>();
         var usesIndex = false;
         var usesUnicodeFallback = false;
+        var nativeScopeDocuments = 0;
         SearchCandidateKind? candidateKind = null;
         SearchCandidateCombination? candidateCombination = null;
         SearchVerifierKind? verifierKind = null;
@@ -48,9 +49,11 @@ internal sealed class SearchPlanExplainer(
             scopeBytes += segmentPlan.Scope.Bytes;
             segmentCount++;
             var chosenPlan = segmentPlan.ContentPlan.ChosenPlan;
-            usesUnicodeFallback |=
-                chosenPlan.VerifierKind ==
-                SearchVerifierKind.Utf8RegexWithUnicodeFallback;
+            if (regexPlan.UsesUtf8Regex)
+            {
+                usesUnicodeFallback |= segmentPlan.Scope.NonAsciiDocuments > 0;
+                nativeScopeDocuments += segmentPlan.Scope.Count - segmentPlan.Scope.NonAsciiDocuments;
+            }
             usesIndex |= chosenPlan.CandidatePlan.UsesIndex;
             candidateKind = Merge(candidateKind, chosenPlan.CandidateKind, SearchCandidateKind.Mixed);
             candidateCombination = Merge(
@@ -151,7 +154,10 @@ internal sealed class SearchPlanExplainer(
             regexTimeoutPolicy: query.PatternMode == PatternMode.Regex
                 ? query.RegexTimeoutPolicy
                 : RegexTimeoutPolicy.StopSearch,
-            plannerAlternatives: plannerAlternatives);
+            plannerAlternatives: plannerAlternatives,
+            regexRouteReason: regexPlan.UsesUtf8Regex && usesUnicodeFallback
+                ? nativeScopeDocuments == 0 ? SiftRegexRouteReason.InputOutsideDomain : SiftRegexRouteReason.MixedInputDomains
+                : regexPlan.RouteReason);
 
         static T Merge<T>(T? aggregate, T value, T mixed)
             where T : struct, Enum

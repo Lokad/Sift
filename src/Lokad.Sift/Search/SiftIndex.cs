@@ -20,6 +20,7 @@ public sealed class SiftIndex : ISiftIndex
     private readonly IndexBuilder _builder;
     private readonly IndexCompactor _compactor;
     private readonly SiftOptions _options;
+    private readonly RegexExecutionContext _regexContext;
     private readonly IDisposable? _retainedIndexingWorkspaceLease;
     private readonly MutationCoordinator _mutations = new();
     private readonly CancellationTokenSource _reclamationCancellation = new();
@@ -63,7 +64,7 @@ public sealed class SiftIndex : ISiftIndex
     {
     }
 
-    internal SiftIndex(ISiftStorage storage, SiftOptions options)
+    internal SiftIndex(ISiftStorage storage, SiftOptions options, RegexExecutionContext? regexContext = null)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(options);
@@ -75,6 +76,7 @@ public sealed class SiftIndex : ISiftIndex
         _storage = storage;
         _builder = new IndexBuilder(_storage, _options);
         _compactor = new IndexCompactor(_storage, _options);
+        _regexContext = regexContext?.AddOwner() ?? new RegexExecutionContext(options.RegexEngine);
         try
         {
             _storage.EnsureSnapshotMetadata();
@@ -86,6 +88,7 @@ public sealed class SiftIndex : ISiftIndex
         }
         catch
         {
+            _regexContext.ReleaseOwner();
             _retainedIndexingWorkspaceLease?.Dispose();
             throw;
         }
@@ -115,7 +118,8 @@ public sealed class SiftIndex : ISiftIndex
                 _options,
                 options,
                 ScheduleReclamationIfPending,
-                MarkRequiresRebuild);
+                MarkRequiresRebuild,
+                _regexContext);
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
@@ -136,7 +140,8 @@ public sealed class SiftIndex : ISiftIndex
                     _options,
                     options,
                     ScheduleReclamationIfPending,
-                    MarkRequiresRebuild),
+                    MarkRequiresRebuild,
+                    _regexContext),
                 _options,
                 options);
         }
@@ -888,6 +893,7 @@ public sealed class SiftIndex : ISiftIndex
         _reclamationCancellation.Cancel();
         _reclamationIdle.Wait();
         _retainedIndexingWorkspaceLease?.Dispose();
+        _regexContext.ReleaseOwner();
         _mutations.Dispose();
         _validationCancellation.Dispose();
         _validationsIdle.Dispose();

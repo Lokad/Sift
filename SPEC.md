@@ -37,9 +37,12 @@ Sift is intended to remain **language agnostic** with respect to the indexed cor
 2. **Dependency policy**
 
    * No native dependencies
-   * Production code relies on the .NET runtime, base class libraries, and the
-     allowlisted managed `Lokad.Utf8Regex` package
-   * No other third-party NuGet packages in production code
+   * Core production code relies on the .NET runtime and base class libraries;
+     the shipped package has no runtime NuGet dependencies
+   * Optional regex engines implement Sift-owned contracts and are supplied by
+     applications, which reference their chosen managed producer directly
+   * Tests retain a direct pinned `Lokad.Utf8Regex` dependency and real-producer
+     integration/differential coverage; it is not a core package dependency
    * Test and benchmark projects may use minimal purpose-specific dependencies such as `xUnit`
    * No SQLite/LMDB/Lucene
    * No external service
@@ -703,6 +706,32 @@ Whole-line literal mode:
 ### 9.2 Regex verifier
 
 The preferred exact verifier is a **custom byte-oriented UTF-8 regex engine** for the supported fast subset. `.NET Regex` remains the semantic oracle and fallback verifier for constructs outside the supported subset.
+
+The byte verifier is supplied through `SiftOptions.RegexEngine` and Sift's
+`ISiftRegexEngine`/`ISiftCompiledRegex` contract. Without an engine, .NET Regex
+implements regex search, including path filtering. A compiled handle declares its
+input domain and guarantees .NET semantics with byte-oriented execution; an
+internal producer fallback must not be reported as a native verifier. Initially
+native execution is restricted to ASCII documents and Sift's conservative syntax
+subset. The contract admits future qualified Unicode input domains. Pattern
+analysis and candidate soundness remain under Sift's control, including byte
+prechecks for managed verification where sound and Unicode supplementation.
+
+Bound plans and compiled handles use a bounded index-owned execution context
+shared by snapshots and generations, with fixed engine binding/configuration.
+Snapshot turnover preserves cached compilation. Active query leases protect
+their own handles from eviction/disposal; snapshots can outlive the originating
+index. The application owns the engine; Sift owns compiled handles and releases
+them after the last applicable lease. Only backend-independent analysis and
+fully keyed BCL regex state may be cached process-wide.
+
+Sift verifies its adapter boundary independently of producer internals. Native
+execution must meet the declared adapter contract; a producer that cannot give
+that guarantee declines matching and the managed fallback remains available.
+Producer-internal engine selection and backend acceleration qualification are
+outside Sift's delivery scope. Timeouts, cancellation,
+invalid provider ranges, and unexpected failures do not request fallback after
+partial hit publication. Preparation observes the query deadline and timeout policy.
 
 Rules:
 

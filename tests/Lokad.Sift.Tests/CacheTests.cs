@@ -23,7 +23,7 @@ public sealed class CacheTests
     public async Task Utf8RegexSearchDoesNotPrepareUnusedUnicodeFallback()
     {
         var suffix = Guid.NewGuid().ToString("N");
-        using var index = SiftIndex.CreateInMemory();
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = new RegexContractTestEngine() });
         await index.Build(new InMemoryDocumentSource([("src/a.txt", $"alpha123{suffix}")]));
         using var snapshot = index.OpenSnapshot();
         var baselineHits = RegexVerifier.CacheHits;
@@ -45,7 +45,7 @@ public sealed class CacheTests
     {
         const int concurrency = 8;
         var suffix = Guid.NewGuid().ToString("N");
-        using var index = SiftIndex.CreateInMemory();
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = new RegexContractTestEngine() });
         await index.Build(new InMemoryDocumentSource([("src/a.txt", $"alpha123{suffix}")]));
         using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery($"alpha[0-9]*{suffix}", PatternMode.Regex, CaseMode.Sensitive);

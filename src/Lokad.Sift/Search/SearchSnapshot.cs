@@ -23,6 +23,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     private readonly Dictionary<SegmentId, SegmentManifestEntry> _segmentsById;
     private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
+    private readonly RegexExecutionContext _regexContext;
+    internal RegexExecutionContext RegexContext => _regexContext;
     private readonly SearchOptions _searchOptions;
     private readonly StorageReadSnapshot _storageSnapshot;
     private readonly SearchPlanExplainer _planExplainer;
@@ -67,7 +69,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         SiftOptions options,
         SearchOptions searchOptions,
         Action? onDisposed,
-        Action<Exception>? onIndexFailure)
+        Action<Exception>? onIndexFailure,
+        RegexExecutionContext? regexContext = null)
     {
         if (searchOptions.SegmentParallelism < 0 ||
             searchOptions.SegmentParallelism > options.MaxSegmentParallelism)
@@ -92,6 +95,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             _segments = _storageSnapshot.Manifest.Segments;
             _segmentsById = _segments.ToDictionary(static entry => entry.SegmentId);
             _planExplainer = new SearchPlanExplainer(_segments, _options, OpenSegment);
+            _regexContext = regexContext?.AddOwner() ?? new RegexExecutionContext(options.RegexEngine);
         }
         catch
         {
@@ -157,8 +161,18 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ValidatePathFilter(pathFilter);
         try
         {
+            using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
-            return _planExplainer.Explain(query, pathFilter, SearchQueryPreparer.Prepare(query));
+            using var regexOperation = _regexContext.EnterOperation();
+            var prepared = _regexContext.Prepare(regexOperation, query, CancellationToken.None);
+            // Capability resolution during Explain has already warmed compilation.
+            prepared.RecordExplanationAccess();
+            return _planExplainer.Explain(query, pathFilter, prepared);
+        }
+        catch (RegexEngineFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {
@@ -179,32 +193,85 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(collector);
-        var prepared = PrepareSearch(query, pathFilter);
+        ValidateQuery(query);
+        ValidatePathFilter(pathFilter);
         var watch = ValueStopwatch.StartNew();
-        using var deadlineCancellation = CreateDeadlineCancellation(
-            query.MaxElapsedMilliseconds,
-            cancellationToken);
-        return SearchPrepared(
-            query,
-            prepared,
-            collector,
-            pathVisibility: null,
-            SearchLimits.FromQuery(query),
-            deadlineCancellation?.Token ?? cancellationToken,
-            cancellationToken,
-            watch);
+        using var deadlineCancellation = CreateDeadlineCancellation(query.MaxElapsedMilliseconds, cancellationToken);
+        var effectiveToken = deadlineCancellation?.Token ?? cancellationToken;
+        try
+        {
+            using var callbackScope = ReentrancyGuard.Enter(this);
+            using var operation = BeginOperation();
+            using var prepared = PrepareSearch(query, pathFilter, effectiveToken);
+            return SearchPreparedCore(query, prepared, collector, pathVisibility: null,
+                SearchLimits.FromQuery(query), effectiveToken, cancellationToken, watch);
+        }
+        catch (RegexEngineFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch (OperationCanceledException) when (effectiveToken.IsCancellationRequested)
+        {
+            return PreparationStopped(watch, SearchStopReason.MaxElapsedTime);
+        }
+        catch (RegexMatchTimeoutException) when (query.RegexTimeoutPolicy == RegexTimeoutPolicy.StopSearch)
+        {
+            return PreparationStopped(watch, SearchStopReason.RegexTimeout);
+        }
     }
 
-    internal PreparedSearch PrepareSearch(SearchQuery query, PathFilter pathFilter)
+    internal static SearchStats PreparationStopped(ValueStopwatch watch, SearchStopReason reason) =>
+        new SearchMetrics().ToSearchStats(watch.ElapsedMilliseconds, 0, reason);
+
+    internal PreparedSearch PrepareSearch(SearchQuery query, PathFilter pathFilter,
+        CancellationToken cancellationToken = default)
     {
         ValidateQuery(query);
         ValidatePathFilter(pathFilter);
-        return new PreparedSearch(
-            SearchQueryPreparer.Prepare(query),
-            PathFilterMatcher.Prepare(pathFilter));
+        var operation = _regexContext.EnterOperation();
+        try
+        {
+            return new PreparedSearch(
+                _regexContext.Prepare(operation, query, cancellationToken),
+                PathFilterMatcher.Prepare(pathFilter), operation);
+        }
+        catch
+        {
+            operation.Dispose();
+            throw;
+        }
+    }
+
+    internal void ValidateSearchArguments(SearchQuery query, PathFilter pathFilter)
+    {
+        ValidateQuery(query);
+        ValidatePathFilter(pathFilter);
     }
 
     internal SearchStats SearchPrepared(
+        SearchQuery query,
+        in PreparedSearch prepared,
+        IHitCollector collector,
+        IPathVisibility? pathVisibility,
+        SearchLimits limits,
+        CancellationToken cancellationToken,
+        CancellationToken callerCancellationToken,
+        ValueStopwatch watch)
+    {
+        using var callbackScope = ReentrancyGuard.Enter(this);
+        using var operation = BeginOperation();
+        return SearchPreparedCore(query, prepared, collector, pathVisibility, limits,
+            cancellationToken, callerCancellationToken, watch);
+    }
+
+    // The caller holds the snapshot's operation lease across preparation and execution.
+    private SearchStats SearchPreparedCore(
         SearchQuery query,
         in PreparedSearch prepared,
         IHitCollector collector,
@@ -218,8 +285,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var ownedCollector = new GuardedOwnedHitCollector(_hitOwner, collector);
         try
         {
-            using var callbackScope = ReentrancyGuard.Enter(this);
-            using var operation = BeginOperation();
             return CanUseSegmentParallelSearch(limits)
                 ? SearchParallel(
                     query,
@@ -241,6 +306,16 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     cancellationToken,
                     callerCancellationToken,
                     watch);
+        }
+        catch (RegexEngineFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
+        }
+        catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested)
+        {
+            callerCancellationToken.ThrowIfCancellationRequested();
+            throw;
         }
         catch (CollectorFailureException exception)
         {
@@ -724,6 +799,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             }
             _segmentCaches.Clear();
             _storageSnapshot.Dispose();
+            _regexContext.ReleaseOwner();
             Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
         }
         finally
@@ -1045,6 +1121,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         };
         var segmentStopReason = SearchStopReason.None;
         PreparedRegexVerifier? fallbackRegex = null;
+        Utf8RegexHitSink? nativeSink = null;
         var hitsReturned = 0;
         var matchedDocuments = 0;
 
@@ -1169,12 +1246,14 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 }
                 else if (preparedRegex.Utf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
                 {
-                    Utf8RegexEngine.TrySearchDocument(
+                    Utf8RegexVerifier.TrySearchDocument(
                         cache.Segment,
                         document,
                         utf8Regex,
                         documentHitLimit,
                         collector,
+                        searchCancellationToken,
+                        ref nativeSink,
                         ref hitsReturned,
                         ref metrics.Utf8RegexInvocations,
                         ref metrics.Utf8RegexMatchedDocuments,
@@ -1491,13 +1570,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         // The regex compiler enforces this shared bound independently of the public
         // pattern-length option, so prechecking always uses fixed-size stack storage.
-        Span<int> nextStartsBuffer = stackalloc int[Utf8RegexEngine.MaximumOrderedAnchorsPerGroup];
-        Span<int> latestReachableEndsBuffer = stackalloc int[Utf8RegexEngine.MaximumOrderedAnchorsPerGroup];
+        Span<int> nextStartsBuffer = stackalloc int[Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup];
+        Span<int> latestReachableEndsBuffer = stackalloc int[Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup];
         for (var groupIndex = 0; groupIndex < preparedOrderedAnchorGroups.Length; groupIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var group = preparedOrderedAnchorGroups[groupIndex];
-            Debug.Assert(group.Length <= Utf8RegexEngine.MaximumOrderedAnchorsPerGroup);
+            Debug.Assert(group.Length <= Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup);
             var nextStarts = nextStartsBuffer[..group.Length];
             var latestReachableEnds = latestReachableEndsBuffer[..group.Length];
             latestReachableEnds.Fill(-1);
@@ -1759,7 +1838,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     {
         return query.PatternMode == PatternMode.Regex &&
             resolvedCaseMode == CaseMode.Insensitive &&
-            regexPlan.UsesUtf8Regex &&
+            regexPlan.HasByteAnalysis &&
             plan.CandidatePlan.UsesIndex;
     }
 
@@ -1840,7 +1919,11 @@ internal readonly record struct SearchLimits(
 
 internal readonly record struct PreparedSearch(
     PreparedSearchQuery Query,
-    PathFilterMatcher Matcher);
+    PathFilterMatcher Matcher,
+    RegexExecutionContext.Operation ContextOperation) : IDisposable
+{
+    public void Dispose() => ContextOperation.Dispose();
+}
 
 internal struct SearchMetrics
 {
