@@ -5,6 +5,7 @@
 *.userosscache
 *.sln.docstates
 .env
+/PLAN.md
 
 [Bb]in/
 [Oo]bj/
