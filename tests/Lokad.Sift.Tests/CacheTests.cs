@@ -5,19 +5,22 @@ namespace Lokad.Sift.Tests;
 [Collection("ProcessMetrics")]
 public sealed class CacheTests
 {
-    [Fact]
-    public void LiteralVerifiersDoNotPrepareRedundantMandatoryPrechecks()
+    [Theory]
+    [InlineData(PatternMode.Literal)]
+    [InlineData(PatternMode.Regex)]
+    public async Task LiteralQueriesUseLiteralVerification(PatternMode mode)
     {
-        var suffix = Guid.NewGuid().ToString("N");
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery("alpha", mode, CaseMode.Sensitive);
 
-        var literal = SearchQueryPreparer.Prepare(
-            new SearchQuery($"literal-{suffix}", PatternMode.Literal, CaseMode.Sensitive));
-        var exactRegex = SearchQueryPreparer.Prepare(
-            new SearchQuery($"exact-{suffix}", PatternMode.Regex, CaseMode.Sensitive));
-
-        Assert.Empty(literal.MandatoryFragmentsForPrecheck);
-        Assert.Empty(exactRegex.MandatoryFragmentsForPrecheck);
+        Assert.True(snapshot.Explain(query, new PathFilter()).CanUseLiteralVerifier);
+        var stats = snapshot.Search(query, new PathFilter(), new HitBuffer());
+        Assert.Equal(1, stats.HitsReturned);
+        Assert.Equal(0, stats.RegexInvocations);
     }
+
 
     [Fact]
     public async Task Utf8RegexSearchDoesNotPrepareUnusedUnicodeFallback()
@@ -178,16 +181,21 @@ public sealed class CacheTests
     }
 
     [Fact]
-    public void UserRegexCacheIsBounded()
+    public async Task UserRegexCacheIsBounded()
     {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "needle")]));
+        using var snapshot = index.OpenSnapshot();
         for (var i = 0; i < RegexVerifier.CacheCapacity + 32; i++)
         {
             var query = new SearchQuery($"needle(?#bounded-cache-{i})", PatternMode.Regex, CaseMode.Sensitive);
-            _ = RegexVerifier.GetRegex(query, CaseMode.Sensitive);
+            var stats = snapshot.Search(query, new PathFilter(), new HitBuffer());
+            Assert.Equal(1, stats.HitsReturned);
+            Assert.Equal(1, stats.FallbackRegexInvocations);
         }
 
-        Assert.True(RegexVerifier.CacheCount <= RegexVerifier.CacheCapacity);
-        Assert.True(RegexVerifier.CachePatternCharacters <= RegexVerifier.CachePatternCharacterCapacity);
+        Assert.True(SiftProcessMetrics.RegexCacheEntries <= RegexVerifier.CacheCapacity);
+        Assert.True(SiftProcessMetrics.RegexCachePatternCharacters <= RegexVerifier.CachePatternCharacterCapacity);
     }
 
     [Fact]

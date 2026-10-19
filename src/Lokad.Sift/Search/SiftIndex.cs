@@ -48,8 +48,8 @@ public sealed class SiftIndex : ISiftIndex
     private int _disposed;
     private long _validationStatsRevision;
     private Exception? _rebuildCause;
-    internal ISiftStorage Storage => _storage;
 #if SIFT_INTERNAL_VERIFICATION
+    internal ISiftStorage Storage => _storage;
     internal Func<SiftIndex, bool>? ReclamationWorkItemScheduler { get; set; }
 #endif
     public bool RequiresRebuild => Volatile.Read(ref _rebuildCause) is not null;

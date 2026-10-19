@@ -6,27 +6,6 @@ namespace Lokad.Sift.Tests;
 public sealed class RegexAnalyzerTests
 {
     [Theory]
-    [InlineData("alpha")]
-    [InlineData("a(b|c)d")]
-    [InlineData("foo[0-9]+bar")]
-    [InlineData("^foo.*bar$")]
-    [InlineData("\\bword\\b")]
-    public void SupportedPatternsUseExecutionSyntaxAnalysis(string pattern)
-    {
-        var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
-        Assert.True(Utf8RegexAnalysis.TryParseSyntax(query, CaseMode.Sensitive, out var syntax));
-
-        var fromPattern = RegexFragmentAnalyzer.AnalyzePattern(pattern);
-        var fromSyntax = RegexFragmentAnalyzer.AnalyzePattern(syntax);
-
-        Assert.Equal(fromSyntax.IsExactLiteral, fromPattern.IsExactLiteral);
-        Assert.Equal(fromSyntax.ExactLiteral, fromPattern.ExactLiteral);
-        Assert.Equal(fromSyntax.MandatoryFragments, fromPattern.MandatoryFragments);
-        Assert.Equal(fromSyntax.AdvisorySeeds.Seeds, fromPattern.AdvisorySeeds.Seeds);
-        Assert.Equal(fromSyntax.AdvisorySeeds.RequiresIgnoreCase, fromPattern.AdvisorySeeds.RequiresIgnoreCase);
-    }
-
-    [Theory]
     [InlineData("(?(1)foo|bar)")]
     [InlineData("(?i:foo)bar")]
     [InlineData("(?-i:foo)bar")]
@@ -47,16 +26,16 @@ public sealed class RegexAnalyzerTests
     [Fact]
     public async Task AdvisorySeedsSurviveUnsupportedFallbackConstructs()
     {
-        Assert.Contains("foo", RegexFragmentAnalyzer.ExtractAdvisorySeeds("(foo|bar)\\1"));
-        Assert.Contains("bar", RegexFragmentAnalyzer.ExtractAdvisorySeeds("(foo|bar)\\1"));
-        Assert.Contains("public", RegexFragmentAnalyzer.ExtractAdvisorySeeds("public(?!\\s+static)"));
-        Assert.Contains("struct", RegexFragmentAnalyzer.ExtractAdvisorySeeds("(?<!readonly\\s)struct"));
+        Assert.Contains("foo", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(foo|bar)\\1").AdvisorySeeds.Seeds);
+        Assert.Contains("bar", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(foo|bar)\\1").AdvisorySeeds.Seeds);
+        Assert.Contains("public", RegexFragmentAnalyzer.AnalyzeFallbackPattern("public(?!\\s+static)").AdvisorySeeds.Seeds);
+        Assert.Contains("struct", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(?<!readonly\\s)struct").AdvisorySeeds.Seeds);
     }
 
     [Fact]
     public async Task AdvisorySeedAnalysisTracksScopedIgnoreCase()
     {
-        var advisory = RegexFragmentAnalyzer.AnalyzeAdvisorySeeds("(?i:debug)\\s*=\\s*true");
+        var advisory = RegexFragmentAnalyzer.AnalyzeFallbackPattern("(?i:debug)\\s*=\\s*true").AdvisorySeeds;
         Assert.True(advisory.RequiresIgnoreCase);
         Assert.Contains("debug", advisory.Seeds);
         Assert.Contains("true", advisory.Seeds);
@@ -99,26 +78,28 @@ public sealed class RegexAnalyzerTests
         Assert.Contains("Disposable", RegexFragmentAnalyzer.ExtractMandatoryFragments("(?:IDisposable|IAsyncDisposable)"));
     }
 
-    [Fact]
-    public async Task ExactLiteralExtractionDoesNotTreatNegatedCharClassAsLiteral()
+    [Theory]
+    [InlineData("^a[^x]+a$", "abca\naaa", false)]
+    [InlineData("\\bbeta\\b", "alphabetabeta beta", false)]
+    [InlineData("a+", "aaa a", false)]
+    [InlineData("a{2}", "aaa a", false)]
+    [InlineData("a{1,2}", "aaa a", false)]
+    [InlineData("a{1}", "aaa a", true)]
+    public async Task RegexLiteralClassificationPreservesBoundariesAndRepetition(
+        string pattern, string text, bool usesLiteralVerifier)
     {
-        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("^a[^x]+a$", out _));
-    }
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", text)]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
+        var plan = snapshot.Explain(query, new PathFilter());
+        var hits = new HitBuffer();
+        snapshot.Search(query, new PathFilter(), hits);
 
-    [Fact]
-    public async Task ExactLiteralExtractionDoesNotCollapseWordBoundaryRegex()
-    {
-        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("\\bbeta\\b", out _));
-    }
-
-    [Fact]
-    public async Task ExactLiteralExtractionDoesNotCollapseRepeatedRegex()
-    {
-        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("a+", out _));
-        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("a{2}", out _));
-        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral("a{1,2}", out _));
-        Assert.True(RegexFragmentAnalyzer.TryExtractExactLiteral("a{1}", out var literal));
-        Assert.Equal("a", literal);
+        Assert.Equal(usesLiteralVerifier, plan.CanUseLiteralVerifier);
+        var expected = System.Text.RegularExpressions.Regex.Matches(text, pattern)
+            .Select(static match => (match.Index, match.Index + match.Length));
+        Assert.Equal(expected, hits.Hits.Select(static hit => (hit.StartByte, hit.EndByte)));
     }
 
     [Fact]
@@ -126,7 +107,6 @@ public sealed class RegexAnalyzerTests
     {
         const string oversized = "a{999999999999999999999999999999}";
 
-        Assert.False(RegexFragmentAnalyzer.TryExtractExactLiteral(oversized, out _));
         Assert.Empty(RegexFragmentAnalyzer.ExtractMandatoryFragments(oversized));
         Assert.Empty(RegexFragmentAnalyzer.ExtractMandatoryFragments("\\uD800"));
     }

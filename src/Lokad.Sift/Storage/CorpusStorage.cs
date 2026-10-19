@@ -1574,25 +1574,6 @@ internal sealed partial class CorpusStorage : ISiftStorage
         return stream.ReadByte() != 0;
     }
 
-    private bool IsCurrentGenerationLeaseValid(CorpusManifest manifest)
-    {
-        try
-        {
-            using var stream = new FileStream(
-                GetGenerationLeasePath(manifest.Generation),
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite);
-            ValidateGenerationLease(stream, manifest);
-            return true;
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            return false;
-        }
-    }
-
     private void SetReclamationPending(bool isPending)
     {
         try

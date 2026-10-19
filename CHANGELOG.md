@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Breaking API change: removed `SiftOptions.MeasurePeakManagedMemory`,
+  `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
+  the library's background managed-heap sampler. Benchmark memory measurement
+  remains in the benchmark harness.
+- Breaking index-format change: segment version 4 removes the unused byte-frequency
+  histogram and its per-byte counting pass. Non-ASCII document/byte statistics
+  remain. Older packs are rejected on first access or validation and require an
+  explicit full `Build` from source documents via `RequiresRebuild`; no migration
+  is provided. Manifest version/compatibility are unchanged.
+- Removed unused generation-lease probing and redundant regex analysis/cache
+  entry points. Tests exercise production preparation/search paths; necessary
+  cache/storage inspection is confined to `SIFT_INTERNAL_VERIFICATION` builds.
+
 - Removed the core package's dependency on `Lokad.Utf8Regex`. Added a Sift-owned
   host-supplied regex contract with default .NET verification and truthful route
   diagnostics; test and benchmark projects retain the pinned producer directly.
@@ -20,15 +33,6 @@
 - Extended snapshot operation leases and callback disposal guards to host regex
   compilation during searches and explanations, including overlays.
 
-- Breaking index-format change: segment version 4 removes the unused byte-frequency
-  histogram and its per-byte counting pass. Non-ASCII document/byte statistics
-  remain. Older packs are rejected on first access or validation and require an
-  explicit full `Build` from source documents via `RequiresRebuild`; no migration
-  is provided. Manifest version/compatibility are unchanged.
-- Breaking API change: removed `SiftOptions.MeasurePeakManagedMemory`,
-  `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
-  the library's background managed-heap sampler. Benchmark memory measurement
-  remains in the benchmark harness.
 ## 0.2.0 - 2026-08-07
 
 ### Added

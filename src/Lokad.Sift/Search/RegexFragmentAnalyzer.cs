@@ -11,26 +11,6 @@ internal static class RegexFragmentAnalyzer
         string[] MandatoryFragments,
         AdvisorySeedPlan AdvisorySeeds);
 
-    public static PatternAnalysis AnalyzePattern(string pattern)
-    {
-        return AnalyzePattern(pattern, limit: 8);
-    }
-
-    private static PatternAnalysis AnalyzePattern(string pattern, int limit)
-    {
-        if (pattern.Length == 0)
-        {
-            return new PatternAnalysis(true, string.Empty, [], new AdvisorySeedPlan([], false));
-        }
-
-        if (TryAnalyzeSupportedPattern(pattern, limit, out var analysis))
-        {
-            return analysis;
-        }
-
-        return AnalyzeFallbackPattern(pattern, limit);
-    }
-
     public static PatternAnalysis AnalyzeFallbackPattern(string pattern)
     {
         return AnalyzeFallbackPattern(pattern, limit: 8);
@@ -164,36 +144,6 @@ internal static class RegexFragmentAnalyzer
         }
     }
 
-    public static bool TryExtractExactLiteral(string pattern, out string literal)
-    {
-        literal = string.Empty;
-        if (pattern.Length == 0)
-        {
-            return true;
-        }
-
-        if (TryAnalyzeSupportedPattern(pattern, limit: 1, out var analysis))
-        {
-            if (analysis.IsExactLiteral && analysis.ExactLiteral is { } exactLiteral)
-            {
-                literal = exactLiteral;
-                return true;
-            }
-
-            return false;
-        }
-
-        var parser = new FallbackParser(pattern, limit: 1);
-        var result = parser.ParseExpression();
-        if (!parser.IsComplete || result.ExactLiteral is null)
-        {
-            return false;
-        }
-
-        literal = result.ExactLiteral;
-        return true;
-    }
-
     public static string[] ExtractMandatoryFragments(string pattern)
     {
         return ExtractMandatoryFragments(pattern, limit: 8);
@@ -219,57 +169,6 @@ internal static class RegexFragmentAnalyzer
         }
 
         return SelectBestFragments(result.Fragments, limit);
-    }
-
-    public static string[] ExtractAdvisorySeeds(string pattern)
-    {
-        return ExtractAdvisorySeeds(pattern, limit: 8);
-    }
-
-    public static string[] ExtractAdvisorySeeds(string pattern, int limit)
-    {
-        return AnalyzeAdvisorySeeds(pattern, limit).Seeds;
-    }
-
-    public static AdvisorySeedPlan AnalyzeAdvisorySeeds(string pattern)
-    {
-        return AnalyzeAdvisorySeeds(pattern, limit: 8);
-    }
-
-    public static AdvisorySeedPlan AnalyzeAdvisorySeeds(string pattern, int limit)
-    {
-        if (pattern.Length == 0)
-        {
-            return new AdvisorySeedPlan([], false);
-        }
-
-        if (TryAnalyzeSupportedPattern(pattern, limit, out var analysis))
-        {
-            return analysis.AdvisorySeeds;
-        }
-
-        var parser = new FallbackParser(pattern, limit, advisoryMode: true);
-        var result = parser.ParseExpression();
-        if (!parser.IsComplete)
-        {
-            return new AdvisorySeedPlan([], parser.RequiresIgnoreCase);
-        }
-
-        var merged = new List<string>(result.AdvisorySeeds.Length + result.Fragments.Length);
-        for (var i = 0; i < result.AdvisorySeeds.Length; i++)
-        {
-            merged.Add(result.AdvisorySeeds[i]);
-        }
-
-        for (var i = 0; i < result.Fragments.Length; i++)
-        {
-            if (!ContainsOrdinal(merged, result.Fragments[i]))
-            {
-                merged.Add(result.Fragments[i]);
-            }
-        }
-
-        return new AdvisorySeedPlan(SelectBestFragments([.. merged], limit), parser.RequiresIgnoreCase);
     }
 
     private static string[] SelectBestFragments(string[] fragments, int limit)

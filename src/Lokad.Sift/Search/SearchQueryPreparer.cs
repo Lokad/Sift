@@ -13,8 +13,10 @@ internal static class SearchQueryPreparer
         CacheCharacterCapacity,
         static key => key.Pattern.Length);
 
+#if SIFT_INTERNAL_VERIFICATION
     internal static int CacheCount => AnalysisCache.Count;
     internal static int CacheCharacters => AnalysisCache.Weight;
+#endif
 
     internal static int[] BuildPrefixTable(ReadOnlySpan<byte> needle)
     {
@@ -47,11 +49,6 @@ internal static class SearchQueryPreparer
         }
 
         return loweredNeedle;
-    }
-
-    internal static PreparedSearchQuery Prepare(SearchQuery query)
-    {
-        return Create(PreparedQueryKey.FromQuery(query), null, static () => { });
     }
 
     internal static PreparedSearchQuery Create(PreparedQueryKey key, ISiftRegexEngine? engine, Action checkpoint)

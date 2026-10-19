@@ -20,8 +20,10 @@ internal sealed class PathFilterMatcher
     private readonly Regex? _pathRegex;
     private readonly string[] _accelerationFragments;
     private readonly int[] _pathTrigrams;
+#if SIFT_INTERNAL_VERIFICATION
     internal static int CacheCount => Cache.Count;
     internal static int CacheCharacters => Cache.Weight;
+#endif
 
     public static PathFilterMatcher Prepare(PathFilter filter)
     {

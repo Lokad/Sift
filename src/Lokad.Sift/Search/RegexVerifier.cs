@@ -158,11 +158,6 @@ internal static class RegexVerifier
             query.RegexTimeoutPolicy);
     }
 
-    public static Regex GetRegex(SearchQuery query, CaseMode resolvedCaseMode)
-    {
-        return Prepare(query, resolvedCaseMode).Regex;
-    }
-
     private static RegexEntry GetRegexEntry(SearchQuery query, CaseMode resolvedCaseMode)
     {
         var pattern = BuildPattern(query);
