@@ -344,3 +344,8 @@ This benchmark track is not intended to:
 - require the benchmark repositories to exist on every developer machine
 
 The purpose is local realism, repeatability, and architectural guidance.
+
+Managed-heap peaks for builds and compactions are sampled by this harness around
+those operations. The core library has no managed-memory profiling option or
+peak-memory statistics; benchmark report `PeakManagedBytes` fields remain harness
+measurements, with the limits of sampling and process-wide heap accounting.

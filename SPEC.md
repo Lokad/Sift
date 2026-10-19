@@ -1003,6 +1003,11 @@ Convenience overloads that supply default options or cancellation tokens are
 extension methods in `SiftIndexExtensions`; the interfaces keep their core
 contracts explicit.
 
+Build/compaction telemetry includes elapsed time and document/byte/segment
+counts. Managed-heap sampling is outside the library and belongs in the benchmark
+harness. The public `MeasurePeakManagedMemory` option and `PeakManagedBytes`
+properties on `BuildStats`/`CompactStats` have been removed.
+
 Memory ownership rule:
 
 * `SubmittedDocument.Content` is borrowed memory whose declared lifetime is set by `ContentLifetime`

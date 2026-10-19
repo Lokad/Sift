@@ -154,7 +154,8 @@ public sealed class SiftIndex : ISiftIndex
     {
         ArgumentNullException.ThrowIfNull(documents);
         ArgumentNullException.ThrowIfNull(options);
-        return RunBuild(
+        return RunMutation(
+            SiftWriteActivity.Build,
             operationCancellation => BuildCore(
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
                 operationCancellation),
@@ -168,31 +169,11 @@ public sealed class SiftIndex : ISiftIndex
     {
         ArgumentNullException.ThrowIfNull(documents);
         ArgumentNullException.ThrowIfNull(options);
-        return RunBuild(
+        return RunMutation(
+            SiftWriteActivity.Build,
             operationCancellation => BuildCore(
                 (isRecovery, token) => _builder.BuildAsync(documents, options, isRecovery, token),
                 operationCancellation),
-            cancellationToken);
-    }
-
-    private Task<BuildStats> RunBuild(
-        Func<CancellationToken, ValueTask<BuildStats>> build,
-        CancellationToken cancellationToken)
-    {
-        return RunMutation(
-            SiftWriteActivity.Build,
-            async operationCancellation =>
-            {
-                if (!_options.MeasurePeakManagedMemory)
-                {
-                    return await build(operationCancellation).ConfigureAwait(false);
-                }
-
-                using var measurement = ManagedMemoryPeakMeasurement.Start();
-                var stats = await build(operationCancellation).ConfigureAwait(false);
-                var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
-                return stats.WithPeakManagedBytes(peakManagedBytes);
-            },
             cancellationToken);
     }
 
@@ -868,27 +849,15 @@ public sealed class SiftIndex : ISiftIndex
         IndexCompactor.ValidateOptions(options);
         return RunMutation(
             SiftWriteActivity.Compact,
-            async operationCancellation =>
+            operationCancellation =>
             {
                 try
                 {
-                    if (!_options.MeasurePeakManagedMemory)
-                    {
-                        return _compactor.Compact(
-                            options,
-                            ThrowIfRebuildRequired,
-                            ResetValidationStats,
-                            operationCancellation);
-                    }
-
-                    using var measurement = ManagedMemoryPeakMeasurement.Start();
-                    var stats = _compactor.Compact(
+                    return ValueTask.FromResult(_compactor.Compact(
                         options,
                         ThrowIfRebuildRequired,
                         ResetValidationStats,
-                        operationCancellation);
-                    var peakManagedBytes = await measurement.CompleteAsync().ConfigureAwait(false);
-                    return stats.WithPeakManagedBytes(peakManagedBytes);
+                        operationCancellation));
                 }
                 catch (Exception exception) when (IsIndexCorruption(exception))
                 {
@@ -1216,89 +1185,6 @@ public sealed class SiftIndex : ISiftIndex
         if (IsIndexCorruption(exception))
         {
             Interlocked.CompareExchange(ref _rebuildCause, exception, null);
-        }
-    }
-
-    private sealed class ManagedMemoryPeakMeasurement : IDisposable
-    {
-        private readonly CancellationTokenSource _cancellation = new();
-        private readonly Task _sampler;
-        private long _peakManagedBytes;
-        private int _stopped;
-        private int _disposed;
-
-        private ManagedMemoryPeakMeasurement()
-        {
-            _peakManagedBytes = GC.GetTotalMemory(forceFullCollection: false);
-            var cancellationToken = _cancellation.Token;
-            _sampler = Task.Run(async () =>
-            {
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    ObserveManagedBytes();
-
-                    try
-                    {
-                        await Task.Delay(5, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                }
-            });
-        }
-
-        public static ManagedMemoryPeakMeasurement Start()
-        {
-            return new ManagedMemoryPeakMeasurement();
-        }
-
-        public async Task<long> CompleteAsync()
-        {
-            ObserveManagedBytes();
-            Stop();
-            await _sampler.ConfigureAwait(false);
-            ObserveManagedBytes();
-
-            return Volatile.Read(ref _peakManagedBytes);
-        }
-
-        public void Dispose()
-        {
-            Stop();
-            _sampler.GetAwaiter().GetResult();
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-            {
-                _cancellation.Dispose();
-            }
-        }
-
-        private void Stop()
-        {
-            if (Interlocked.Exchange(ref _stopped, 1) == 0)
-            {
-                _cancellation.Cancel();
-            }
-        }
-
-        private void ObserveManagedBytes()
-        {
-            var observed = GC.GetTotalMemory(forceFullCollection: false);
-            var peak = Volatile.Read(ref _peakManagedBytes);
-            while (observed > peak)
-            {
-                var previous = Interlocked.CompareExchange(
-                    ref _peakManagedBytes,
-                    observed,
-                    peak);
-                if (previous == peak)
-                {
-                    return;
-                }
-
-                peak = previous;
-            }
         }
     }
 

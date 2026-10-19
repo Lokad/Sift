@@ -141,7 +141,6 @@ internal sealed class IndexBuilder
         return new BuildStats(
             pendingStats,
             watch.ElapsedMilliseconds,
-            peakManagedBytes: 0,
             new IndexIdentity(
                 corpusId,
                 new ContentRevision(1),

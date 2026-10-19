@@ -11,9 +11,8 @@ public sealed class IndexingWorkspaceTests
         Assert.Equal(0, SiftProcessMetrics.NativeIndexWorkspaceBytes);
         using var index = SiftIndex.CreateInMemory();
 
-        var build = await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
 
-        Assert.Equal(0, build.PeakManagedBytes);
         Assert.Equal(0, SiftProcessMetrics.NativeIndexWorkspaceBytes);
     }
 
@@ -36,13 +35,5 @@ public sealed class IndexingWorkspaceTests
         }
     }
 
-    [Fact]
-    public async Task ManagedMemoryMeasurementIsOptIn()
-    {
-        using var index = SiftIndex.CreateInMemory(new SiftOptions { MeasurePeakManagedMemory = true });
 
-        var build = await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha beta gamma")]));
-
-        Assert.True(build.PeakManagedBytes > 0);
-    }
 }

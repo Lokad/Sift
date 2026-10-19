@@ -119,7 +119,6 @@ internal sealed class IndexCompactor
                 mergedDocuments: 0,
                 contentBytes: 0,
                 elapsedMilliseconds: watch.ElapsedMilliseconds,
-                peakManagedBytes: 0,
                 hasMoreWork: false);
         }
 
@@ -175,7 +174,6 @@ internal sealed class IndexCompactor
             mergedDocuments: publication.MergedDocuments,
             contentBytes: publication.ContentBytes,
             elapsedMilliseconds: watch.ElapsedMilliseconds,
-            peakManagedBytes: 0,
             hasMoreWork: writeSession.CanReplaceSegments() &&
                 HasActionableWork(
                     manifest,

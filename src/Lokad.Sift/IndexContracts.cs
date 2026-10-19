@@ -37,8 +37,6 @@ public sealed class SiftOptions
     public int MaxSegmentParallelism { get; init; } = 64;
     // Retains the native indexing workspace between mutations for latency-sensitive writers.
     public bool RetainIndexingWorkspace { get; init; }
-    // Enables process-wide managed-heap sampling during build and compaction.
-    public bool MeasurePeakManagedMemory { get; init; }
 }
 
 public sealed record BuildOptions
@@ -169,27 +167,17 @@ public sealed class BuildStats : BuildCommitStats
     internal BuildStats(
         BuildCommitStats pending,
         long elapsedMilliseconds,
-        long peakManagedBytes,
         IndexIdentity committedIdentity)
         : base(pending)
     {
         ElapsedMilliseconds = elapsedMilliseconds;
-        PeakManagedBytes = peakManagedBytes;
         CommittedIdentity = committedIdentity;
     }
 
     public long ElapsedMilliseconds { get; }
-    // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
-    public long PeakManagedBytes { get; }
 
     /// <summary>Identity of the index state committed by the completed build.</summary>
     public IndexIdentity CommittedIdentity { get; }
-
-    internal BuildStats WithPeakManagedBytes(long peakManagedBytes) => new(
-        this,
-        ElapsedMilliseconds,
-        peakManagedBytes,
-        CommittedIdentity);
 }
 
 public class UpdateCommitStats
@@ -345,7 +333,6 @@ public sealed class CompactStats
         int mergedDocuments,
         long contentBytes,
         long elapsedMilliseconds,
-        long peakManagedBytes,
         bool hasMoreWork)
     {
         InputSegments = inputSegments;
@@ -353,7 +340,6 @@ public sealed class CompactStats
         MergedDocuments = mergedDocuments;
         ContentBytes = contentBytes;
         ElapsedMilliseconds = elapsedMilliseconds;
-        PeakManagedBytes = peakManagedBytes;
         HasMoreWork = hasMoreWork;
     }
 
@@ -362,19 +348,8 @@ public sealed class CompactStats
     public int MergedDocuments { get; }
     public long ContentBytes { get; }
     public long ElapsedMilliseconds { get; }
-    // Zero when SiftOptions.MeasurePeakManagedMemory is disabled.
-    public long PeakManagedBytes { get; }
     // True when the same policy can make progress in another bounded pass.
     public bool HasMoreWork { get; }
-
-    internal CompactStats WithPeakManagedBytes(long peakManagedBytes) => new(
-        InputSegments,
-        OutputSegments,
-        MergedDocuments,
-        ContentBytes,
-        ElapsedMilliseconds,
-        peakManagedBytes,
-        HasMoreWork);
 }
 
 public enum SiftWriteActivity

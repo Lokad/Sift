@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Breaking API change: removed `SiftOptions.MeasurePeakManagedMemory`,
+  `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
+  the library's background managed-heap sampler. Benchmark memory measurement
+  remains in the benchmark harness.
 ## 0.2.0 - 2026-08-07
 
 ### Added

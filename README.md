@@ -230,6 +230,11 @@ publication and manifest publication. No separate cleanup call is required.
 Snapshots acquire an immutable generation lease read-only; opening or disposing a
 snapshot does not create files or take the writer lock.
 
+Build and compaction statistics report elapsed time and indexing results.
+Managed-memory profiling belongs in the benchmark harness: the library no longer
+exposes `SiftOptions.MeasurePeakManagedMemory`, `BuildStats.PeakManagedBytes`, or
+`CompactStats.PeakManagedBytes`.
+
 Corrupt manifest, lease, or segment metadata is fail-closed. The `SiftIndex` instance
 remains constructible and reports `RequiresRebuild`; searches, updates, and
 maintenance reject the unusable index. Calling `Build(...)` is the explicit
