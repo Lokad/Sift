@@ -1177,21 +1177,7 @@ public sealed class StorageIntegrityTests
         Assert.Equal(new uint[] { 0, 1 }, Decode(postings));
     }
 
-    [Fact]
-    public async Task StatsRegionStoresByteFrequencyHistogram()
-    {
-        using var fixture = new CorpusFixture(("src/a.txt", "aba\n"));
-        using var index = new SiftIndex(fixture.CorpusPath);
-        await index.Build(fixture.CreateSource());
 
-        var storage = new CorpusStorage(fixture.CorpusPath);
-        var manifest = storage.ReadManifest();
-        using var segment = storage.OpenSegment(manifest.Segments[0].SegmentId);
-
-        Assert.Equal(2, segment.GetByteFrequency((byte)'a'));
-        Assert.Equal(1, segment.GetByteFrequency((byte)'b'));
-        Assert.Equal(1, segment.GetByteFrequency((byte)'\n'));
-    }
 
     [Fact]
     public async Task StatsRegionStoresNonAsciiDocumentDensity()
@@ -1212,35 +1198,79 @@ public sealed class StorageIntegrityTests
         Assert.Equal("café"u8.Length, stats.ContentBytes);
     }
 
-    [Fact]
-    public async Task LegacyStatsUseConservativeNonAsciiDensityWithoutScanningDocuments()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    [InlineData(8)]
+    [InlineData(12)]
+    public async Task ValidationRejectsInvalidRetainedStatistics(int offset)
     {
-        var documents = new[]
+        using var fixture = new CorpusFixture(("src/a.txt", "café"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
         {
-            CreateStoredDocument("src/ascii.txt", "alpha"),
-            CreateStoredDocument("src/unicode.txt", "café")
-        };
-        using var workspaceLease = SegmentIndexBuilder.AcquireWorkspaceLease();
-        var (current, _) = SegmentWriter.WriteToBytes(new SegmentId(0x1234UL), documents, CancellationToken.None);
-        var currentChecksumOffset = BinaryPrimitives.ReadInt64LittleEndian(current.AsSpan(52));
-        var removedBytes = SegmentFormat.StatsLength - SegmentFormat.LegacyStatsLength;
-        var legacy = new byte[current.Length - removedBytes];
-        current.AsSpan(0, checked((int)currentChecksumOffset - removedBytes)).CopyTo(legacy);
-        current.AsSpan(checked((int)currentChecksumOffset)).CopyTo(legacy.AsSpan(checked((int)currentChecksumOffset - removedBytes)));
-        BinaryPrimitives.WriteInt64LittleEndian(legacy.AsSpan(52), currentChecksumOffset - removedBytes);
-        var statsDirectoryLengthOffset = SegmentFormat.HeaderSize +
-            ((int)SegmentRegionId.Stats - 1) * SegmentFormat.RegionDirectoryEntrySize + 12;
-        BinaryPrimitives.WriteInt64LittleEndian(legacy.AsSpan(statsDirectoryLengthOffset), SegmentFormat.LegacyStatsLength);
+            await index.Build(fixture.CreateSource());
+        }
 
-        using var segment = new MappedSegment(
-            legacy,
-            validateChecksums: false,
-            CancellationToken.None);
-        var stats = segment.GetNonAsciiDocumentStats();
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+        RewriteChecksummedRegion(segmentPath, SegmentRegionId.Stats, (region, _) =>
+        {
+            if (offset == 12)
+                BinaryPrimitives.WriteInt64LittleEndian(region[offset..], -1);
+            else
+                BinaryPrimitives.WriteInt32LittleEndian(region[offset..], -1);
+        });
 
-        Assert.Equal(segment.DocumentCount, stats.DocumentCount);
-        Assert.Equal(segment.ContentBytes, stats.ContentBytes);
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+        Assert.True(reopened.RequiresRebuild);
     }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(5)]
+    public async Task UnsupportedSegmentVersionRequiresExplicitRebuild(int version)
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha"));
+        using (var original = new SiftIndex(fixture.CorpusPath))
+        {
+            await original.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+        // Version is checked before region layout/checksums: old and future packs
+        // cannot accidentally be interpreted as the current format.
+        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.Write))
+        {
+            stream.Position = 8;
+            var bytes = new byte[4];
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
+            stream.Write(bytes);
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        using (var obsoleteSnapshot = reopened.OpenSnapshot())
+        {
+            Assert.Throws<InvalidDataException>(() => obsoleteSnapshot.Search(
+                new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), new HitBuffer()));
+        }
+        Assert.True(reopened.RequiresRebuild);
+        Assert.Throws<InvalidDataException>(() => reopened.OpenSnapshot());
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Update(
+            new InMemoryDocumentSource([("src/b.txt", "beta")]), []));
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Compact(new CompactOptions()));
+
+        await reopened.Build(fixture.CreateSource());
+        Assert.False(reopened.RequiresRebuild);
+        await reopened.Validate();
+        using var snapshot = reopened.OpenSnapshot();
+        var stats = snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter(), new HitBuffer());
+        Assert.Equal(1, stats.HitsReturned);
+    }
+
 
     [Fact]
     public async Task SegmentFormatReservesFutureSidecarRegionIds()

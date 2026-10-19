@@ -235,7 +235,6 @@ internal static unsafe class SegmentWriter
         var contentBlob = bytes.Slice(contentBlobOffset, prepared.ContentBlobLength);
         var lineIndexBlob = bytes.Slice(lineIndexBlobOffset, prepared.LineIndexBlobLength);
         var stats = bytes.Slice(statsOffset, SegmentFormat.StatsLength);
-        stats.Clear();
         LittleEndianCodec.WriteInt32(stats, rows.Length);
         LittleEndianCodec.WriteInt32(stats[4..], prepared.ContentBlobLength);
         var nonAsciiDocumentCount = 0;
@@ -266,18 +265,6 @@ internal static unsafe class SegmentWriter
             pathUtf8.CopyTo(pathBlob[pathOffsetCursor..]);
             pathOffsetCursor += pathUtf8.Length;
             content.CopyTo(contentBlob[contentOffsetCursor..]);
-            for (var i = 0; i < content.Length; i++)
-            {
-                if ((i & 0xFFFF) == 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-
-                var bucketOffset = 8 + content[i] * 4;
-                var current = LittleEndianCodec.ReadInt32(stats.Slice(bucketOffset, 4));
-                LittleEndianCodec.WriteInt32(stats.Slice(bucketOffset, 4), current + 1);
-            }
-
             contentOffsetCursor += content.Length;
             encodedLineIndex.CopyTo(lineIndexBlob[lineOffsetCursor..]);
             lineOffsetCursor += encodedLineIndex.Length;

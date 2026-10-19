@@ -43,7 +43,7 @@ internal static class SegmentFormat
 {
     public const ulong SegmentMagic = 0x3154474553464953UL;
     public const ulong ManifestMagic = 0x314E414D46544953UL;
-    public const int FormatVersion = 3;
+    public const int FormatVersion = 4;
     public const int ManifestFormatVersion = 4;
     public const int PreviousManifestFormatVersion = 3;
     public const int LegacyManifestFormatVersion = 2;
@@ -61,8 +61,7 @@ internal static class SegmentFormat
     public const int MaximumCommitMetadataBytes = 1024 * 1024;
     public const int LexiconBucketCount = 257;
     public const int LexiconHeaderSize = 4 + (LexiconBucketCount * 4);
-    public const int LegacyStatsLength = 8 + 256 * 4;
-    public const int NonAsciiDocumentCountOffset = LegacyStatsLength;
+    public const int NonAsciiDocumentCountOffset = 8;
     public const int NonAsciiContentBytesOffset = NonAsciiDocumentCountOffset + 4;
     public const int StatsLength = NonAsciiContentBytesOffset + 8;
     public const int FixedSegmentBytes =

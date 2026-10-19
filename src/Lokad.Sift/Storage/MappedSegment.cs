@@ -567,23 +567,10 @@ internal sealed unsafe class MappedSegment : IDisposable
             : System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(source);
     }
 
-    public int GetByteFrequency(byte value)
-    {
-        var region = GetRegion(SegmentRegionId.Stats);
-        var stats = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
-        var bucketOffset = 8 + (value * 4);
-        if (stats.Length < bucketOffset + 4)
-        {
-            throw new InvalidDataException("Invalid Sift stats region.");
-        }
-
-        return LittleEndianCodec.ReadInt32(stats.Slice(bucketOffset, 4));
-    }
-
     private void ValidateStatsRegion()
     {
         var region = GetRegion(SegmentRegionId.Stats);
-        if (region.Length is not SegmentFormat.LegacyStatsLength and not SegmentFormat.StatsLength)
+        if (region.Length != SegmentFormat.StatsLength)
         {
             throw new InvalidDataException("Invalid Sift stats region length.");
         }
@@ -595,46 +582,22 @@ internal sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException("Sift statistics do not match segment metadata.");
         }
 
-        long frequencyTotal = 0;
-        for (var value = 0; value < 256; value++)
-        {
-            var frequency = LittleEndianCodec.ReadInt32(stats.Slice(8 + value * 4, 4));
-            if (frequency < 0)
-            {
-                throw new InvalidDataException("Sift byte frequencies cannot be negative.");
-            }
-
-            frequencyTotal += frequency;
-        }
-
-        if (frequencyTotal != ContentBytes)
-        {
-            throw new InvalidDataException("Sift byte frequencies do not match segment content.");
-        }
-
         _ = GetNonAsciiDocumentStats();
     }
 
     internal NonAsciiDocumentStats GetNonAsciiDocumentStats()
     {
         var region = GetRegion(SegmentRegionId.Stats);
-        if (region.Length >= SegmentFormat.StatsLength)
+        var stats = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
+        var documentCount = LittleEndianCodec.ReadInt32(stats[SegmentFormat.NonAsciiDocumentCountOffset..]);
+        var contentBytes = LittleEndianCodec.ReadInt64(stats[SegmentFormat.NonAsciiContentBytesOffset..]);
+        if (documentCount < 0 || documentCount > DocumentCount ||
+            contentBytes < 0 || contentBytes > ContentBytes)
         {
-            var stats = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
-            var documentCount = LittleEndianCodec.ReadInt32(stats[SegmentFormat.NonAsciiDocumentCountOffset..]);
-            var contentBytes = LittleEndianCodec.ReadInt64(stats[SegmentFormat.NonAsciiContentBytesOffset..]);
-            if (documentCount < 0 || documentCount > DocumentCount ||
-                contentBytes < 0 || contentBytes > ContentBytes)
-            {
-                throw new InvalidDataException("Invalid non-ASCII Sift document statistics.");
-            }
-
-            return new NonAsciiDocumentStats(documentCount, contentBytes);
+            throw new InvalidDataException("Invalid non-ASCII Sift document statistics.");
         }
 
-        // Legacy packs lack these planner-only counters. Treating every document as
-        // Unicode is conservative and avoids rescanning the document table per query.
-        return new NonAsciiDocumentStats(DocumentCount, ContentBytes);
+        return new NonAsciiDocumentStats(documentCount, contentBytes);
     }
 
     public void Dispose()

@@ -235,6 +235,13 @@ Managed-memory profiling belongs in the benchmark harness: the library no longer
 exposes `SiftOptions.MeasurePeakManagedMemory`, `BuildStats.PeakManagedBytes`, or
 `CompactStats.PeakManagedBytes`.
 
+Segment packs now use format version 4, with document/content totals and non-ASCII
+statistics only. Existing version 3 (and earlier) packs require a full `Build(...)`
+from the submitted sources; there is no automatic migration. An unsupported pack
+is rejected when first opened by search, maintenance, or validation and sets
+`RequiresRebuild`. `Validate()` can detect this before serving queries. The
+manifest format is unchanged.
+
 Corrupt manifest, lease, or segment metadata is fail-closed. The `SiftIndex` instance
 remains constructible and reports `RequiresRebuild`; searches, updates, and
 maintenance reject the unusable index. Calling `Build(...)` is the explicit

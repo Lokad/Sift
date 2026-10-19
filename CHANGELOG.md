@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Breaking index-format change: segment version 4 removes the unused byte-frequency
+  histogram and its per-byte counting pass. Non-ASCII document/byte statistics
+  remain. Older packs are rejected on first access or validation and require an
+  explicit full `Build` from source documents via `RequiresRebuild`; no migration
+  is provided. Manifest version/compatibility are unchanged.
 - Breaking API change: removed `SiftOptions.MeasurePeakManagedMemory`,
   `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
   the library's background managed-heap sampler. Benchmark memory measurement

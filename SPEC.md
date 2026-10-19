@@ -220,6 +220,19 @@ Header fields:
 * region directory
 * checksum table
 
+The current segment format version is **4**. Its `Stats` region is exactly 20
+bytes: document count (`i32`), content byte count (`i32`), non-ASCII document count
+(`i32`), and non-ASCII content byte count (`i64`), all little-endian. Non-ASCII
+statistics count whole documents whose content has non-ASCII bytes. Search uses
+these counters for conservative Unicode planning. No byte-frequency histogram
+is stored or computed.
+
+Readers reject every other segment version before interpreting its regions.
+Existing packs require an explicit full `Build` from source documents through
+the existing `RequiresRebuild` recovery mechanism; there is no migration layer.
+Detection occurs when a pack is opened or explicitly validated. Manifest version
+4 and existing manifest compatibility are unchanged by this segment change.
+
 ### 6.2 Regions
 
 Required regions:
