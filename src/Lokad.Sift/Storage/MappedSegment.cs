@@ -567,10 +567,13 @@ internal sealed unsafe class MappedSegment : IDisposable
             : System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(source);
     }
 
-    private void ValidateStatsRegion()
+    private void ValidateStatsRegion(int version)
     {
         var region = GetRegion(SegmentRegionId.Stats);
-        if (region.Length != SegmentFormat.StatsLength)
+        var validLength = version == SegmentFormat.FormatVersion
+            ? region.Length == SegmentFormat.StatsLength
+            : region.Length is SegmentFormat.PreviousStatsPrefixLength or SegmentFormat.PreviousStatsLength;
+        if (!validLength)
         {
             throw new InvalidDataException("Invalid Sift stats region length.");
         }
@@ -589,8 +592,16 @@ internal sealed unsafe class MappedSegment : IDisposable
     {
         var region = GetRegion(SegmentRegionId.Stats);
         var stats = new ReadOnlySpan<byte>(BasePointer + region.Offset, (int)region.Length);
-        var documentCount = LittleEndianCodec.ReadInt32(stats[SegmentFormat.NonAsciiDocumentCountOffset..]);
-        var contentBytes = LittleEndianCodec.ReadInt64(stats[SegmentFormat.NonAsciiContentBytesOffset..]);
+        // The oldest version-3 layout has no Unicode counters. Preserve its
+        // conservative estimate without rescanning document rows.
+        if (stats.Length == SegmentFormat.PreviousStatsPrefixLength)
+            return new NonAsciiDocumentStats(DocumentCount, ContentBytes);
+
+        var nonAsciiOffset = stats.Length == SegmentFormat.StatsLength
+            ? SegmentFormat.NonAsciiDocumentCountOffset
+            : SegmentFormat.PreviousStatsPrefixLength;
+        var documentCount = LittleEndianCodec.ReadInt32(stats[nonAsciiOffset..]);
+        var contentBytes = LittleEndianCodec.ReadInt64(stats[(nonAsciiOffset + 4)..]);
         if (documentCount < 0 || documentCount > DocumentCount ||
             contentBytes < 0 || contentBytes > ContentBytes)
         {
@@ -719,7 +730,7 @@ internal sealed unsafe class MappedSegment : IDisposable
         }
 
         var version = Read<int>(8);
-        if (version != SegmentFormat.FormatVersion)
+        if (version is not SegmentFormat.FormatVersion and not SegmentFormat.PreviousFormatVersion)
         {
             throw new InvalidDataException($"Unsupported Sift segment version: {version}.");
         }
@@ -821,7 +832,7 @@ internal sealed unsafe class MappedSegment : IDisposable
             throw new InvalidDataException("Invalid Sift content length.");
         }
 
-        ValidateStatsRegion();
+        ValidateStatsRegion(version);
 
         ValidateLexiconRegion(SegmentRegionId.ContentTriCsLex, validateChecksums, cancellationToken);
         ValidateLexiconRegion(SegmentRegionId.ContentTriIcLex, validateChecksums, cancellationToken);

@@ -270,12 +270,14 @@ Managed-memory profiling belongs in the benchmark harness: the library no longer
 exposes `SiftOptions.MeasurePeakManagedMemory`, `BuildStats.PeakManagedBytes`, or
 `CompactStats.PeakManagedBytes`.
 
-Segment packs now use format version 4, with document/content totals and non-ASCII
-statistics only. Existing version 3 (and earlier) packs require a full `Build(...)`
-from the submitted sources; there is no automatic migration. An unsupported pack
-is rejected when first opened by search, maintenance, or validation and sets
-`RequiresRebuild`. `Validate()` can detect this before serving queries. The
-manifest format is unchanged.
+New segment packs use format version 4, with document/content totals and
+non-ASCII statistics only. Existing version 3 packs remain readable: their obsolete
+histogram bytes are ignored, with bounds and checksum validation preserved. The
+oldest version 3 stats layout lacks non-ASCII totals and retains its conservative
+Unicode estimate. Opening or validating an old pack does not rewrite it. Updates
+may mix versions 3 and 4; normal compaction writes version 4. No rebuild or migration
+is needed for the histogram removal. Other unsupported versions still set
+`RequiresRebuild` on access/validation. The manifest format is unchanged.
 
 Corrupt manifest, lease, or segment metadata is fail-closed. The `SiftIndex` instance
 remains constructible and reports `RequiresRebuild`; searches, updates, and

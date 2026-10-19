@@ -230,11 +230,20 @@ statistics count whole documents whose content has non-ASCII bytes. Search uses
 these counters for conservative Unicode planning. No byte-frequency histogram
 is stored or computed.
 
-Readers reject every other segment version before interpreting its regions.
-Existing packs require an explicit full `Build` from source documents through
-the existing `RequiresRebuild` recovery mechanism; there is no migration layer.
-Detection occurs when a pack is opened or explicitly validated. Manifest version
-4 and existing manifest compatibility are unchanged by this segment change.
+Readers also accept segment version **3**, whose stats region is either 1032 or
+1044 bytes. Both begin with the same document/content totals; bytes 8 through
+1031 are obsolete and ignored. The 1044-byte form stores non-ASCII totals at
+byte offsets 1032 (`i32`) and 1036 (`i64`). The 1032-byte form has no such totals
+and conservatively estimates all documents/content as non-ASCII, as the former
+reader did. Both retain region bounds, checksums, and applicable total validation;
+no histogram is reconstructed or semantically validated.
+
+Version/layout combinations must match exactly. Other segment versions are
+rejected through the existing `RequiresRebuild` mechanism. Reading or validating
+version 3 does not rewrite files. Updates may publish version-4 packs alongside
+version-3 packs; normal compaction writes version 4. No migration layer or rebuild
+is required for these supported older packs. Manifest version 4 and existing
+manifest compatibility are unchanged.
 
 ### 6.2 Regions
 

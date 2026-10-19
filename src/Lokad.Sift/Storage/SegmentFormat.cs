@@ -44,6 +44,7 @@ internal static class SegmentFormat
     public const ulong SegmentMagic = 0x3154474553464953UL;
     public const ulong ManifestMagic = 0x314E414D46544953UL;
     public const int FormatVersion = 4;
+    public const int PreviousFormatVersion = 3;
     public const int ManifestFormatVersion = 4;
     public const int PreviousManifestFormatVersion = 3;
     public const int LegacyManifestFormatVersion = 2;
@@ -64,6 +65,9 @@ internal static class SegmentFormat
     public const int NonAsciiDocumentCountOffset = 8;
     public const int NonAsciiContentBytesOffset = NonAsciiDocumentCountOffset + 4;
     public const int StatsLength = NonAsciiContentBytesOffset + 8;
+    // Version 3 has an obsolete 1024-byte area after the document/content totals.
+    public const int PreviousStatsPrefixLength = 8 + 1024;
+    public const int PreviousStatsLength = PreviousStatsPrefixLength + 12;
     public const int FixedSegmentBytes =
         HeaderSize +
         RegionCount * RegionDirectoryEntrySize +

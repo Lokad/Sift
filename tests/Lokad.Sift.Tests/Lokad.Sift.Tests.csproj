@@ -16,6 +16,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\examples\Utf8RegexAdapter.cs" Link="Adapters\Utf8RegexAdapter.cs" />
+    <EmbeddedResource Include="Fixtures\segment-v3.pack" />
   </ItemGroup>
 
   <ItemGroup>

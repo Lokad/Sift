@@ -6,11 +6,12 @@
   `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
   the library's background managed-heap sampler. Benchmark memory measurement
   remains in the benchmark harness.
-- Breaking index-format change: segment version 4 removes the unused byte-frequency
-  histogram and its per-byte counting pass. Non-ASCII document/byte statistics
-  remain. Older packs are rejected on first access or validation and require an
-  explicit full `Build` from source documents via `RequiresRebuild`; no migration
-  is provided. Manifest version/compatibility are unchanged.
+- New segment writes use version 4 without the unused byte-frequency histogram
+  or its per-byte counting pass. Version 3 packs remain readable, including the
+  older stats layout without non-ASCII totals. Obsolete histogram bytes are
+  ignored; retained statistics, region bounds, and checksums remain validated.
+  Updates can mix old/new packs; normal compaction writes version 4. No rebuild
+  or migration is required. Manifest version/compatibility are unchanged.
 - Removed unused generation-lease probing and redundant regex analysis/cache
   entry points. Tests exercise production preparation/search paths; necessary
   cache/storage inspection is confined to `SIFT_INTERNAL_VERIFICATION` builds.

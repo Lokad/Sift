@@ -1230,7 +1230,7 @@ public sealed class StorageIntegrityTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(5)]
-    public async Task UnsupportedSegmentVersionRequiresExplicitRebuild(int version)
+    public async Task UnsupportedSegmentFormatRequiresExplicitRebuild(int version)
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha"));
         using (var original = new SiftIndex(fixture.CorpusPath))
@@ -1240,8 +1240,8 @@ public sealed class StorageIntegrityTests
 
         var segmentPath = Directory.EnumerateFiles(
             Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
-        // Version is checked before region layout/checksums: old and future packs
-        // cannot accidentally be interpreted as the current format.
+        // Unknown versions and a version-3 header over version-4 stats must
+        // fail closed rather than guessing which format to interpret.
         using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.Write))
         {
             stream.Position = 8;
