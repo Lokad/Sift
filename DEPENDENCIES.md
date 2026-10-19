@@ -20,9 +20,11 @@ Any additional package must be introduced by updating this file and `Directory.P
 `Directory.Build.targets` enforces the allowlist during restore/build for Sift projects.
 
 The shipped `Lokad.Sift` assembly/package has no runtime package dependencies.
-`Microsoft.SourceLink.GitHub` is private build tooling. The core project and CLI
-may not reference `Lokad.Utf8Regex`; the allowlist scopes that package to the test,
-benchmark, and optional test-host projects. Tests keep their direct pinned
+`Microsoft.SourceLink.GitHub` 10.0.402 is private build tooling, pinned beyond the
+versions affected by [CVE-2026-62900](https://github.com/advisories/GHSA-23fw-v26w-5fgq).
+Its dependencies remain private and do not enter the shipped package. The core
+project and CLI may not reference `Lokad.Utf8Regex`; the allowlist scopes that
+package to the test, benchmark, and optional test-host projects. Tests keep their direct pinned
 reference and exercise the real producer through application-side adapter source
 and differential checks. Producer-free core verification uses isolated restores
 and package consumers rather than removing the test dependency.

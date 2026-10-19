@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Updated private SourceLink build tooling to 10.0.402 to remove the vulnerable
+  `Microsoft.Build.Tasks.Git` 8.0.0 dependency (CVE-2026-62900). The core package
+  continues to have no runtime NuGet dependencies.
 - Breaking API change: removed `SiftOptions.MeasurePeakManagedMemory`,
   `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
   the library's background managed-heap sampler. Benchmark memory measurement
