@@ -1,41 +1,60 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - Unreleased
 
-- Updated private SourceLink build tooling to 10.0.402 to remove the vulnerable
-  `Microsoft.Build.Tasks.Git` 8.0.0 dependency (CVE-2026-62900). The core package
-  continues to have no runtime NuGet dependencies.
-- Breaking API change: removed `SiftOptions.MeasurePeakManagedMemory`,
-  `BuildStats.PeakManagedBytes`, and `CompactStats.PeakManagedBytes`, including
-  the library's background managed-heap sampler. Benchmark memory measurement
-  remains in the benchmark harness.
+### Added
+
+- Added optional host-supplied UTF-8 regex engines through `SiftOptions.RegexEngine`
+  and Sift-owned `ISiftRegexEngine`, `ISiftCompiledRegex`, and match-sink contracts.
+  Application-side Utf8Regex adapter source needs no additional adapter library.
+- Added `SearchPlan.RegexRouteReason` and CLI/benchmark diagnostics that distinguish
+  managed fallback, unsupported capabilities, native verification, and input domains.
+- Added adapter ownership, coalesced compilation, cancellation/deadline, eviction,
+  timeout, byte-range, producer integration, and differential regression coverage.
+- Added Windows/Ubuntu CI with locked restore, Release tests, isolated Release
+  package consumers, and verification logs.
+
+### Changed
+
+- Removed the core package's `Lokad.Utf8Regex` dependency. The shipped core has no
+  runtime NuGet dependencies. Regex verification defaults to .NET Regex, preferring
+  `NonBacktracking` when supported; optional byte-native verification requires
+  explicit host configuration. Tests and benchmarks retain the real producer.
+- Shared bounded compiled-pattern caches across an index's snapshots and overlay
+  generations. Active query leases protect handles until their users finish.
 - New segment writes use version 4 without the unused byte-frequency histogram
-  or its per-byte counting pass. Version 3 packs remain readable, including the
-  older stats layout without non-ASCII totals. Obsolete histogram bytes are
-  ignored; retained statistics, region bounds, and checksums remain validated.
-  Updates can mix old/new packs; normal compaction writes version 4. No rebuild
-  or migration is required. Manifest version/compatibility are unchanged.
-- Removed unused generation-lease probing and redundant regex analysis/cache
-  entry points. Tests exercise production preparation/search paths; necessary
-  cache/storage inspection is confined to `SIFT_INTERNAL_VERIFICATION` builds.
+  or its counting pass. Version 3 packs remain readable, including the older stats
+  layout without non-ASCII totals. Obsolete bytes are ignored while retained
+  statistics, bounds, and checksums remain validated. Updates may mix versions;
+  normal compaction writes version 4. No index rebuild or migration is required.
+- Removed orphan generation-lease probing and redundant regex helper entry points.
+  Necessary cache/storage inspection is confined to `SIFT_INTERNAL_VERIFICATION`.
+  Managed-heap sampling remains in the benchmark harness.
 
-- Removed the core package's dependency on `Lokad.Utf8Regex`. Added a Sift-owned
-  host-supplied regex contract with default .NET verification and truthful route
-  diagnostics; test and benchmark projects retain the pinned producer directly.
-- Shared bound query/compiled-pattern caches across an index's snapshots and
-  overlay generations, isolating engines and releasing evicted handles once
-  their active queries finish.
-- Prevented hidden producer backtracking fallback from bypassing Sift's
-  non-backtracking verifier. Unqualified native capabilities select the managed
-  route; cancellation, timeout policy, and input-range failures remain explicit.
-- Preserved sound byte prechecks for managed verification and prevented advisory
-  branch selection from dropping dense alternatives when native analysis exists.
-- Added adapter ownership, cancellation/deadline, eviction, producer differential,
-  and synthetic timeout regressions plus isolated Release package consumers.
-- Preserved independent caller cancellation during coalesced compilation and
-  prevented provider failures from being reported as index corruption.
-- Extended snapshot operation leases and callback disposal guards to host regex
-  compilation during searches and explanations, including overlays.
+### Fixed
+
+- Preserved sound byte prechecks during managed verification and prevented advisory
+  branch selection from dropping dense alternatives when byte analysis exists.
+- Preserved independent caller cancellation and deadlines during coalesced regex
+  compilation, without cancelling or evicting a healthy caller's work.
+- Prevented regex-provider failures from being reported as index corruption and
+  preserved timeout policies, result limits, and byte-range validation.
+- Protected snapshot lifetimes during host compilation and rejected reentrant
+  disposal from search/explanation callbacks, including overlays.
+- Removed checkout-name and Windows-path assumptions from smoke/package checks.
+
+### Security
+
+- Updated private SourceLink build tooling to 10.0.402, replacing vulnerable
+  `Microsoft.Build.Tasks.Git` 8.0.0 (CVE-2026-62900). Its dependencies remain private.
+
+### Breaking changes
+
+- Removed `SiftOptions.MeasurePeakManagedMemory`, `BuildStats.PeakManagedBytes`,
+  and `CompactStats.PeakManagedBytes`, including the library's background sampler.
+  Consumers should measure memory outside the library.
+- Applications requiring byte-native regex verification must now configure an
+  engine explicitly and reference their chosen regex producer directly.
 
 ## 0.2.0 - 2026-08-07
 
