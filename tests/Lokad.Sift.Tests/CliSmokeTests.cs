@@ -87,7 +87,7 @@ public sealed class CliSmokeTests
 
     private static string GetRepositoryRoot()
     {
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
     }
 
     private static string GetCliAssemblyPath(string repoRoot)
@@ -95,7 +95,6 @@ public sealed class CliSmokeTests
         var configuration = GetBuildConfiguration();
         var cliAssembly = Path.Combine(
             repoRoot,
-            "sift",
             "src",
             "Lokad.Sift.Cli",
             "bin",

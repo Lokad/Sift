@@ -43,3 +43,13 @@ package build. The library project rejects the symbol before compilation and
 packing so the verification hooks cannot enter the shipped assembly. Document
 any future conditional-compilation symbol here and give it an explicit package
 policy before introducing its first `#if`.
+
+## CI
+
+`.github/workflows/ci.yml` runs locked restore, Release build/tests, and isolated
+Release package consumers on Windows and Ubuntu. It uploads verification logs
+and captures crash dumps on failures. `global.json` selects stable .NET 10 SDKs
+so a newer preinstalled major version cannot change the build implicitly.
+
+Use authenticated GitHub CLI calls and space CI status checks minutes apart.
+Do not poll in a tight loop or rerun workflows without investigating failures.

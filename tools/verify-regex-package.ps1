@@ -25,6 +25,10 @@ $isolatedCore = Join-Path $sourceRoot 'src\Lokad.Sift'
 $buildFeed = Join-Path $checkRoot 'build-feed'
 $buildPackages = Join-Path $checkRoot 'build-packages'
 New-Item -ItemType Directory -Path $isolatedCore, $buildFeed -Force | Out-Null
+$sdkPolicy = Join-Path $repoRoot 'global.json'
+if (Test-Path -LiteralPath $sdkPolicy) {
+    Copy-Item -LiteralPath $sdkPolicy -Destination $checkRoot
+}
 foreach ($fileName in @('Directory.Build.props', 'Directory.Build.targets', 'Directory.Packages.props')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $fileName) -Destination $sourceRoot
 }
@@ -32,7 +36,7 @@ $originalCore = Join-Path $repoRoot 'src\Lokad.Sift'
 Copy-Item -LiteralPath (Join-Path $originalCore 'Lokad.Sift.csproj'), (Join-Path $originalCore 'packages.lock.json') -Destination $isolatedCore
 foreach ($sourceFile in Get-ChildItem -LiteralPath $originalCore -Filter '*.cs' -File -Recurse) {
     $relativePath = [System.IO.Path]::GetRelativePath($originalCore, $sourceFile.FullName)
-    if ($relativePath -match '(^|\\)(bin|obj)\\') { continue }
+    if ($relativePath -match '(^|[\\/])(bin|obj)[\\/]') { continue }
     $targetPath = Join-Path $isolatedCore $relativePath
     New-Item -ItemType Directory -Path (Split-Path -Parent $targetPath) -Force | Out-Null
     Copy-Item -LiteralPath $sourceFile.FullName -Destination $targetPath
