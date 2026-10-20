@@ -19,6 +19,9 @@
 - Reduced postings generation to one sizing pass followed by encoding, using the
   written byte count for lexicon entries. Index format versions and bytes remain
   unchanged, including version 3 read compatibility.
+- Removed unreachable postings intersection branches and redundant planner
+  forwarding methods. The existing SIMD hardware fallback, planner decisions,
+  public diagnostics and index compatibility are preserved.
 
 ## 0.3.0 - 2026-10-19
 

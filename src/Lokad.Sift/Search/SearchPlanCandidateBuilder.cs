@@ -208,10 +208,10 @@ internal ref struct SearchPlanCandidateBuilder
             : directScanCost;
         return new SearchPlanCandidate(
             literalPlan,
-            SearchPlanner.GetCandidateKind(
+            SearchPlanKinds.GetCandidateKind(
                 selected.Length == 0 ? 0 : selected[0].GramLength,
                 literalPlan.UsesIndex),
-            SearchPlanner.GetCandidateCombination(
+            SearchPlanKinds.GetCandidateCombination(
                 selected.Length,
                 literalPlan.UsesIndex,
                 literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,
@@ -281,10 +281,10 @@ internal ref struct SearchPlanCandidateBuilder
                 : estimatedIndexedCost ?? 0d;
         return new SearchPlanCandidate(
             literalPlan,
-            SearchPlanner.GetCandidateKind(
+            SearchPlanKinds.GetCandidateKind(
                 selected.Length == 0 ? 0 : selected[0].GramLength,
                 usesIndex: true),
-            SearchPlanner.GetCandidateCombination(
+            SearchPlanKinds.GetCandidateCombination(
                 selected.Length,
                 usesIndex: true,
                 literalPlan.CandidateMode is LiteralCandidateMode.Union or LiteralCandidateMode.UnionOfIntersections,

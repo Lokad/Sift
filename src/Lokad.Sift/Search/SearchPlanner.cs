@@ -5,26 +5,6 @@ namespace Lokad.Sift.Search;
 
 internal static class SearchPlanner
 {
-    internal static SearchCandidateKind GetCandidateKind(
-        int selectedByteLength,
-        bool usesIndex)
-    {
-        return SearchPlanKinds.GetCandidateKind(selectedByteLength, usesIndex);
-    }
-
-    internal static SearchCandidateCombination GetCandidateCombination(
-        int selectedCount,
-        bool usesIndex,
-        bool unionCandidates,
-        bool branchUnion)
-    {
-        return SearchPlanKinds.GetCandidateCombination(
-            selectedCount,
-            usesIndex,
-            unionCandidates,
-            branchUnion);
-    }
-
     internal static int GetTargetCandidateDocuments(int scopeDocuments, SiftOptions options)
     {
         var target = int.MaxValue;

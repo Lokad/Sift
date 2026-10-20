@@ -100,11 +100,11 @@ internal sealed class SearchPlanExplainer(
             query.Multiline;
         var selectedNgrams = SelectedNgramMerger.Materialize(selected);
         var resolvedCandidateKind = candidateKind ??
-            SearchPlanner.GetCandidateKind(
+            SearchPlanKinds.GetCandidateKind(
                 selectedNgrams.Length == 0 ? 0 : selectedNgrams[0].ByteLength,
                 usesIndex);
         var resolvedCandidateCombination = candidateCombination ??
-            SearchPlanner.GetCandidateCombination(
+            SearchPlanKinds.GetCandidateCombination(
                 selectedNgrams.Length,
                 usesIndex,
                 unionCandidates: false,
