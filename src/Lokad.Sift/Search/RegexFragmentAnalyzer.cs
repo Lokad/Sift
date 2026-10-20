@@ -4,12 +4,11 @@ namespace Lokad.Sift.Search;
 
 internal static class RegexFragmentAnalyzer
 {
-    internal readonly record struct AdvisorySeedPlan(string[] Seeds, bool RequiresIgnoreCase);
     internal readonly record struct PatternAnalysis(
         bool IsExactLiteral,
         string? ExactLiteral,
         string[] MandatoryFragments,
-        AdvisorySeedPlan AdvisorySeeds);
+        string[] AdvisorySeeds);
 
     public static PatternAnalysis AnalyzeFallbackPattern(string pattern)
     {
@@ -65,7 +64,7 @@ internal static class RegexFragmentAnalyzer
                 false,
                 null,
                 [],
-                new AdvisorySeedPlan([], requiresIgnoreCase));
+                []);
         }
 
         var merged = new List<string>(result.AdvisorySeeds.Length + result.Fragments.Length);
@@ -86,9 +85,7 @@ internal static class RegexFragmentAnalyzer
             result.ExactLiteral is not null && !requiresIgnoreCase,
             result.ExactLiteral,
             requiresIgnoreCase ? [] : SelectBestFragments(result.Fragments, limit),
-            new AdvisorySeedPlan(
-                SelectBestFragments([.. merged], limit),
-                requiresIgnoreCase));
+            SelectBestFragments([.. merged], limit));
     }
 
     private static NodeResult AnalyzeSyntaxNode(Utf8RegexNode node, int limit)
@@ -496,6 +493,14 @@ internal static class RegexFragmentAnalyzer
                 _index++;
             }
 
+            if (_index < _pattern.Length && _pattern[_index] == ']')
+            {
+                // A leading ']' is a class member in .NET, not the terminator.
+                // Leave this form to the verifier instead of inferring fragments.
+                _unsupported = true;
+                return NodeResult.None;
+            }
+
             var builder = new StringBuilder();
             var literalCount = 0;
             while (_index < _pattern.Length && _pattern[_index] != ']')
@@ -637,13 +642,15 @@ internal static class RegexFragmentAnalyzer
                     continue;
                 }
 
-                if (!char.IsLetter(current))
+                // Whitespace options change tokenization, which this parser does
+                // not model. Accept only options that preserve its literal tokens.
+                if (current is not ('i' or 'I' or 'm' or 'M' or 'n' or 'N' or 's' or 'S'))
                 {
                     return false;
                 }
 
                 hasOption = true;
-                if (current == 'i')
+                if (current is 'i' or 'I')
                 {
                     ignoreCase = !negate;
                 }

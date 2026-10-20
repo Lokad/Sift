@@ -90,8 +90,7 @@ internal readonly record struct SearchQueryAnchors(
                 return [];
             }
 
-            var advisoryPlan = analysis.AdvisorySeeds;
-            var seeds = advisoryPlan.Seeds;
+            var seeds = analysis.AdvisorySeeds;
             if (seeds.Length == 0)
             {
                 return [];

@@ -26,19 +26,10 @@ public sealed class RegexAnalyzerTests
     [Fact]
     public async Task AdvisorySeedsSurviveUnsupportedFallbackConstructs()
     {
-        Assert.Contains("foo", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(foo|bar)\\1").AdvisorySeeds.Seeds);
-        Assert.Contains("bar", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(foo|bar)\\1").AdvisorySeeds.Seeds);
-        Assert.Contains("public", RegexFragmentAnalyzer.AnalyzeFallbackPattern("public(?!\\s+static)").AdvisorySeeds.Seeds);
-        Assert.Contains("struct", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(?<!readonly\\s)struct").AdvisorySeeds.Seeds);
-    }
-
-    [Fact]
-    public async Task AdvisorySeedAnalysisTracksScopedIgnoreCase()
-    {
-        var advisory = RegexFragmentAnalyzer.AnalyzeFallbackPattern("(?i:debug)\\s*=\\s*true").AdvisorySeeds;
-        Assert.True(advisory.RequiresIgnoreCase);
-        Assert.Contains("debug", advisory.Seeds);
-        Assert.Contains("true", advisory.Seeds);
+        Assert.Contains("foo", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(foo|bar)\\1").AdvisorySeeds);
+        Assert.Contains("bar", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(foo|bar)\\1").AdvisorySeeds);
+        Assert.Contains("public", RegexFragmentAnalyzer.AnalyzeFallbackPattern("public(?!\\s+static)").AdvisorySeeds);
+        Assert.Contains("struct", RegexFragmentAnalyzer.AnalyzeFallbackPattern("(?<!readonly\\s)struct").AdvisorySeeds);
     }
 
     [Fact]
