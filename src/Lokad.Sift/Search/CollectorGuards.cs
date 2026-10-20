@@ -21,13 +21,20 @@ internal sealed class BoundedHitCollector(
     }
 }
 
-internal sealed class GuardedOwnedHitCollector(object owner, IHitCollector inner) : IHitCollector
+internal sealed class GuardedOwnedHitCollector(
+    object owner, IHitCollector inner, ValueStopwatch watch, long maxElapsedMilliseconds) : IHitCollector
 {
+    public bool DeadlineExceeded { get; private set; }
+
     public bool OnHit(in RawHit hit)
     {
         try
         {
-            return inner.OnHit(hit.WithOwner(owner));
+            if (!inner.OnHit(hit.WithOwner(owner))) return false;
+            // Cancellation timers can be delayed by thread-pool load. Enforce the
+            // same absolute deadline before accepting another hit in every route.
+            DeadlineExceeded = watch.ElapsedMilliseconds >= maxElapsedMilliseconds;
+            return !DeadlineExceeded;
         }
         catch (Exception exception)
         {

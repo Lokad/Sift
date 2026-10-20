@@ -40,19 +40,43 @@ public sealed class SearchControlRegressionTests
         Assert.Equal(1, collector.Count);
     }
 
-    [Theory]
-    [InlineData("alpha", PatternMode.Literal)]
-    [InlineData("alpha", PatternMode.Regex)]
-    [InlineData("alp.a", PatternMode.Regex)]
-    [InlineData("(?=alpha)alpha", PatternMode.Regex)]
-    public async Task DeadlineStopsBetweenHitsWithinOneDocument(string pattern, PatternMode mode)
+    public static IEnumerable<object[]> DeadlineCases()
     {
-        using var index = SiftIndex.CreateInMemory();
-        await index.Build(new InMemoryDocumentSource([
-            ("a.txt", string.Join(' ', Enumerable.Repeat("alpha", 50)))
-        ]));
-        using var snapshot = index.OpenSnapshot();
-        var query = new SearchQuery(pattern, mode, CaseMode.Sensitive);
+        foreach (var mode in new[] { "snapshot", "overlay", "parallel", "native" })
+        {
+            yield return [mode, "alpha", PatternMode.Literal, CaseMode.Sensitive];
+            yield return [mode, "alpha", PatternMode.Literal, CaseMode.Insensitive];
+            yield return [mode, "alpha", PatternMode.Regex, CaseMode.Sensitive];
+            yield return [mode, "alp.a", PatternMode.Regex, CaseMode.Sensitive];
+            yield return [mode, "(?=alpha)alpha", PatternMode.Regex, CaseMode.Sensitive];
+            if (mode != "native")
+                yield return [mode, "é", PatternMode.Literal, CaseMode.Sensitive];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(DeadlineCases))]
+    public async Task DeadlineStopsBetweenHitsWithinOneDocument(
+        string mode, string pattern, PatternMode patternMode, CaseMode caseMode)
+    {
+        var word = pattern == "é" ? "é" : "alpha";
+        var content = string.Join(' ', Enumerable.Repeat(word, 50));
+        var engine = mode == "native" ? new RegexContractTestEngine
+        {
+            Ranges = Enumerable.Range(0, 50).Select(i => (i * 6, 5)).ToArray()
+        } : null;
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            TargetSegmentDocumentCount = 1,
+            RegexEngine = engine
+        });
+        await index.Build(new InMemoryDocumentSource([("a.txt", content), ("b.txt", content)]));
+        using IIndexSnapshot snapshot = mode == "overlay"
+            ? index.OpenOverlaySnapshot()
+            : index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+        if (snapshot is IOverlaySnapshot overlay)
+            await overlay.Update(new InMemoryDocumentSource([("c.txt", content)]), []);
+        var query = new SearchQuery(pattern, patternMode, caseMode);
         snapshot.Search(query, new PathFilter(), new HitBuffer());
         var paused = false;
         var collector = new ContinuingCallbackCollector(() =>
@@ -67,6 +91,8 @@ public sealed class SearchControlRegressionTests
         Assert.Equal(1, collector.Count);
         Assert.Equal(1, stats.HitsReturned);
         Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
+        if (mode == "native" && pattern == "alp.a")
+            Assert.True(stats.Utf8RegexInvocations > 0);
     }
 
     [Theory]

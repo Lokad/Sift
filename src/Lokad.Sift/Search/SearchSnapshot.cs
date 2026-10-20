@@ -280,10 +280,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ValueStopwatch watch)
     {
         ArgumentNullException.ThrowIfNull(collector);
-        var ownedCollector = new GuardedOwnedHitCollector(_hitOwner, collector);
+        var ownedCollector = new GuardedOwnedHitCollector(
+            _hitOwner, collector, watch, query.MaxElapsedMilliseconds);
         try
         {
-            return CanUseSegmentParallelSearch(limits)
+            var result = CanUseSegmentParallelSearch(limits)
                 ? SearchParallel(
                     query,
                     prepared,
@@ -302,6 +303,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     cancellationToken,
                     callerCancellationToken,
                     watch);
+            if (ownedCollector.DeadlineExceeded && result.StopReason == SearchStopReason.CollectorStopped)
+            {
+                callerCancellationToken.ThrowIfCancellationRequested();
+                return result.WithStopReason(SearchStopReason.MaxElapsedTime);
+            }
+
+            return result;
         }
         catch (RegexEngineFailureException exception)
         {

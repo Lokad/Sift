@@ -36,6 +36,8 @@
   short, or dense.
 - Context materialization accepts large byte budgets, including `int.MaxValue`,
   without integer overflow. Shared context limits and UTF-8 boundaries are retained.
+- Hit delivery checks elapsed time synchronously after callbacks so delayed
+  cancellation timers cannot allow further hits past a search deadline.
 - Case-sensitive ASCII literal and managed regex scans now observe caller
   cancellation and search deadlines between matches within one document.
 - Regex nesting limits now respect comments, scoped whitespace options, control
