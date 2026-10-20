@@ -8,7 +8,7 @@ using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Storage;
 
-internal sealed unsafe class MappedSegment : IDisposable
+internal sealed unsafe partial class MappedSegment : IDisposable
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static long s_mappedBytes;
@@ -403,40 +403,6 @@ internal sealed unsafe class MappedSegment : IDisposable
         postings = default;
         docFreq = 0;
         return false;
-    }
-
-    public void VisitPostings(IndexRegionPair pair, PostingsVisitor visitor)
-    {
-        var lexiconRegion = GetRegion(pair.Lexicon);
-        var postingsRegion = GetRegion(pair.Postings);
-        var lexicon = new ReadOnlySpan<byte>(BasePointer + lexiconRegion.Offset, (int)lexiconRegion.Length);
-        if (lexicon.Length < SegmentFormat.LexiconHeaderSize)
-        {
-            return;
-        }
-
-        var entryCount = LittleEndianCodec.ReadInt32(lexicon);
-        if (entryCount == 0)
-        {
-            return;
-        }
-
-        var suffixSize = SegmentFormat.GetLexiconSuffixSize(pair.Lexicon);
-        var entrySize = SegmentFormat.GetLexiconEntrySize(pair.Lexicon);
-        for (var i = 0; i < entryCount; i++)
-        {
-            var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
-            var postingsOffset = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize, 4));
-            var postingsBytes = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4));
-            var docFreq = LittleEndianCodec.ReadInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4));
-            ValidateDocumentFrequency(docFreq);
-            if (postingsOffset < 0 || postingsBytes < 0 || postingsOffset > postingsRegion.Length || postingsBytes > postingsRegion.Length - postingsOffset)
-            {
-                throw new InvalidDataException($"Invalid postings bounds in region '{pair.Postings}'.");
-            }
-
-            visitor(new ReadOnlySpan<byte>(BasePointer + postingsRegion.Offset + postingsOffset, postingsBytes), docFreq);
-        }
     }
 
     private static int GetLexiconBucket(SegmentRegionId lexiconRegion, int gram)
@@ -972,7 +938,6 @@ internal sealed unsafe class MappedSegment : IDisposable
     }
 }
 
-internal delegate void PostingsVisitor(ReadOnlySpan<byte> payload, int docFreq);
 
 internal readonly record struct NonAsciiDocumentStats(
     int DocumentCount,

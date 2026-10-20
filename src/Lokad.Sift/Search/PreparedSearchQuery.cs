@@ -38,7 +38,6 @@ internal sealed class PreparedSearchQuery
         RegexExecutionPlan regexPlan,
         SearchQueryAnchors anchors,
         PreparedLiteralQuery? literal,
-        PreparedSearchText pattern,
         PreparedSearchText[] mandatoryTexts,
         PreparedSearchText[] leadingLiterals,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
@@ -49,7 +48,6 @@ internal sealed class PreparedSearchQuery
         RegexPlan = regexPlan;
         Anchors = anchors;
         Literal = literal;
-        Pattern = pattern;
         MandatoryTexts = mandatoryTexts;
         LeadingLiterals = leadingLiterals;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
@@ -63,7 +61,6 @@ internal sealed class PreparedSearchQuery
     public RegexExecutionPlan RegexPlan { get; }
     public SearchQueryAnchors Anchors { get; }
     public PreparedLiteralQuery? Literal { get; }
-    public PreparedSearchText Pattern { get; }
     public PreparedSearchText[] MandatoryTexts { get; }
     public PreparedSearchText[] LeadingLiterals { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }

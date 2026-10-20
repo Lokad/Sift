@@ -89,7 +89,6 @@ internal sealed class SearchPlanExplainer(
         var needsUnicodeDecode =
             NeedsUnicodeDecode(
                 query,
-                preparedQuery.Pattern,
                 preparedQuery.MandatoryTexts,
                 resolvedCaseMode,
                 regexPlan) ||
@@ -168,7 +167,6 @@ internal sealed class SearchPlanExplainer(
 
         static bool NeedsUnicodeDecode(
             SearchQuery query,
-            PreparedSearchText pattern,
             PreparedSearchText[] mandatoryFragments,
             CaseMode resolvedCaseMode,
             in RegexExecutionPlan regexPlan)
@@ -190,7 +188,7 @@ internal sealed class SearchPlanExplainer(
 
             if (query.WholeLine)
             {
-                return !pattern.IsAscii;
+                return query.Pattern.AsSpan().IndexOfAnyExceptInRange('\0', '\x7F') >= 0;
             }
 
             if (resolvedCaseMode == CaseMode.Sensitive)

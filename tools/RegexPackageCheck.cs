@@ -33,6 +33,10 @@ internal static class RegexPackageCheck
             "Removed memory-profiler API entered the shipped assembly.");
         Require(!typeof(SiftIndex).Assembly.GetTypes().Any(type => type.Name.Contains("ManagedMemoryPeakMeasurement")),
             "Removed managed-memory sampler entered the shipped assembly.");
+        Require(typeof(SiftIndex).Assembly.GetType("Lokad.Sift.Storage.PostingsVisitor") is null &&
+            typeof(SiftIndex).Assembly.GetType("Lokad.Sift.Storage.MappedSegment")!
+                .GetMethod("VisitPostings", inspectionFlags | System.Reflection.BindingFlags.Public) is null,
+            "Benchmark-only postings inspection entered the shipped assembly.");
         var documents = Enumerable.Range(0, 300)
             .Select(i => ($"src/noise-{i}.txt", "omega noise\n"))
             .Concat([("src/a.txt", "alpha123\nblue\n"), ("docs/unicode.txt", "café\n")]).ToArray();
@@ -68,6 +72,14 @@ internal static class RegexPackageCheck
         Require(snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter { PathRegex = "src/a\\.txt$", IncludeGlobs = ["src/*.txt"] }, hits).HitsReturned == 1,
             "Path filtering failed.");
+        hits.Values.Clear();
+        Require(snapshot.Search(new SearchQuery("(?x:al pha)", PatternMode.Regex, CaseMode.Sensitive),
+            new(), hits).HitsReturned == 1 && snapshot.Materialize(hits.Values.Single(), 0, 0).MatchText == "alpha",
+            "Scoped whitespace regex changed matching semantics.");
+        hits.Values.Clear();
+        Require(snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter { PathRegex = @"src/[]a]\.txt$" }, hits).HitsReturned == 1,
+            "Leading literal class delimiter excluded a matching path.");
         using var overlay = index.OpenOverlaySnapshot();
         await overlay.Update(new Documents([("src/a.txt", "alpha999\n")] ), []);
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
