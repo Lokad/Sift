@@ -98,7 +98,50 @@ internal static class RegexPackageCheck
         using var overlay = index.OpenOverlaySnapshot();
         await overlay.Update(new Documents([("src/a.txt", "alpha999\n")] ), []);
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
+        await VerifyUnicodeAndEmptyQueries(engine);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyUnicodeAndEmptyQueries(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            RegexEngine = engine,
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0,
+            DirectScanCandidateDensityThreshold = 1.1
+        });
+        await index.Build(new Documents(new[] { ("hello😀.txt", "😀😁"), ("hello😁.txt", "😀") }
+            .Concat(Enumerable.Range(0, 64).Select(i => ($"noise/{i:D2}.txt", ""))).ToArray()));
+        using var snapshot = index.OpenSnapshot();
+        var hits = new Hits();
+        snapshot.Search(new SearchQuery("😀|😁", PatternMode.Regex, CaseMode.Sensitive), new(), hits);
+        Require(hits.Values.Select(hit => (hit.StartByte, hit.EndByte))
+            .SequenceEqual([(0, 4), (4, 8), (0, 4)]), "Unicode alternatives lost matches to byte pruning.");
+        hits.Values.Clear();
+        snapshot.Search(new SearchQuery("\uD83D", PatternMode.Regex, CaseMode.Sensitive), new(), hits);
+        Require(hits.Values.Select(hit => (hit.StartByte, hit.EndByte))
+            .SequenceEqual([(0, 0), (4, 4), (0, 0)]), "Surrogate regex returned invalid UTF-8 byte ranges.");
+        hits.Values.Clear();
+        snapshot.Search(new SearchQuery("", PatternMode.Literal, CaseMode.Sensitive),
+            new PathFilter { PathRegex = "hello😀|hello😁" }, hits);
+        Require(hits.Values.Count == 2, "Unicode path regex lost matches to byte pruning.");
+
+        var cacheHits = SiftProcessMetrics.RegexCacheHits;
+        var cacheMisses = SiftProcessMetrics.RegexCacheMisses;
+        var empty = new SearchQuery("", PatternMode.Regex, CaseMode.Sensitive)
+        {
+            WholeWord = true, WholeLine = true, Multiline = true, DotAll = true
+        };
+        var filter = new PathFilter { PathPrefix = "hello" };
+        var stats = snapshot.Search(empty, filter, new Hits());
+        var plan = snapshot.Explain(empty, filter);
+        Require(stats.HitsReturned == 2 && stats.BytesScanned == 0 && stats.DecodedChars == 0 &&
+            stats.RegexInvocations == 0 && stats.Utf8RegexInvocations == 0, "Empty query no longer lists paths directly.");
+        Require(!plan.NeedsUnicodeDecode && !plan.MayRequireWholeDocumentVerification &&
+            plan.RegexRouteReason == SiftRegexRouteReason.Literal, "Empty-query diagnostics require unused verification.");
+        Require(cacheHits == SiftProcessMetrics.RegexCacheHits && cacheMisses == SiftProcessMetrics.RegexCacheMisses,
+            "Empty query accessed the managed regex compilation cache.");
     }
 
     private static void Require(bool condition, string message)
