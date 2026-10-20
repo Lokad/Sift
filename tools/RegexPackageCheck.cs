@@ -99,7 +99,32 @@ internal static class RegexPackageCheck
         await overlay.Update(new Documents([("src/a.txt", "alpha999\n")] ), []);
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
         await VerifyUnicodeAndEmptyQueries(engine);
+        await VerifyGlobFilters(engine);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyGlobFilters(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new Documents([("src/file1.txt\n", "needle"), ("src/a\nb/file1.txt", "needle"),
+            ("src/file1.txt", "needle"), ("src/file\n.txt", "needle")]));
+        using var snapshot = index.OpenSnapshot();
+        foreach (var pattern in new[] { "", "needle" })
+        foreach (var (filter, expected) in new[]
+        {
+            (new PathFilter { IncludeGlobs = ["src/file?.txt"] },
+                new[] { "src/file\n.txt", "src/file1.txt" }),
+            (new PathFilter { IncludeGlobs = ["src/**/file?.txt"] },
+                new[] { "src/a\nb/file1.txt" }),
+            (new PathFilter { ExcludeGlobs = ["src/file?.txt"] },
+                new[] { "src/a\nb/file1.txt", "src/file1.txt\n" })
+        })
+        {
+            var hits = new Hits();
+            snapshot.Search(new SearchQuery(pattern, PatternMode.Literal, CaseMode.Sensitive), filter, hits);
+            Require(hits.Values.Select(hit => snapshot.Materialize(hit, 0, 0).Path).Order(StringComparer.Ordinal)
+                .SequenceEqual(expected), "Glob filters changed whole-path or newline semantics.");
+        }
     }
 
     private static async Task VerifyUnicodeAndEmptyQueries(ISiftRegexEngine? engine)

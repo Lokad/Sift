@@ -199,15 +199,15 @@ internal sealed class PathFilterMatcher
 
     internal static string GlobToRegex(string glob)
     {
-        var builder = new StringBuilder(glob.Length + 2);
-        builder.Append('^');
+        var builder = new StringBuilder(glob.Length + 4);
+        builder.Append(@"\A");
         for (var i = 0; i < glob.Length; i++)
         {
             var current = glob[i];
             if (current == '*')
             {
                 var isDouble = i + 1 < glob.Length && glob[i + 1] == '*';
-                builder.Append(isDouble ? ".*" : "[^/]*");
+                builder.Append(isDouble ? @"[\s\S]*" : "[^/]*");
                 if (isDouble)
                 {
                     i++;
@@ -231,7 +231,7 @@ internal sealed class PathFilterMatcher
             }
         }
 
-        builder.Append('$');
+        builder.Append(@"\z");
         return builder.ToString();
     }
 
