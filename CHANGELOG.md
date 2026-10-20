@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Removed unused internal helpers/defaults, reserved sidecar scaffolding, and
+  redundant search validation. Index format versions and read compatibility are
+  unchanged; overlay inspection helpers are confined to verification builds.
+- Simplified regex preparation while retaining lazy managed fallback and compiled
+  handle leases. Managed regex cache counters now count actual compilation-cache
+  lookups; native cache accesses are counted once per logical search, including
+  overlays. Reusing a prepared verifier no longer synthesizes managed cache hits.
+- Clarified that planner candidate estimates are heuristic rather than upper
+  bounds; retained the existing scoring behavior after a rarest-gram comparison.
+
 ## 0.3.0 - 2026-10-19
 
 ### Added

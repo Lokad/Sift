@@ -112,6 +112,8 @@ internal static class LiteralQueryPlanner
             }
 
             var selected = new List<SelectedGram>(Math.Min(grams.Count, options.MaxSelectedNgrams));
+            // Match the planner's independence heuristic when choosing how many
+            // grams to retain; this estimate is not a bound on actual candidates.
             var estimatedCandidates = (double)scopeDocuments;
             foreach (var gram in grams)
             {

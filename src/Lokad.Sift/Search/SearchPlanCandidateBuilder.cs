@@ -118,7 +118,7 @@ internal ref struct SearchPlanCandidateBuilder
                 {
                     candidates.Add(CreateRegexIndexedCandidate(
                         advisoryPlan.Value,
-                        SearchPlanner.EstimateCandidateUpperBound(
+                        SearchPlanner.EstimateCandidateDocuments(
                             advisoryPlan.Value.SelectedGrams,
                             scope.Count)));
                 }
@@ -130,7 +130,7 @@ internal ref struct SearchPlanCandidateBuilder
             {
                 candidates.Add(CreateRegexIndexedCandidate(
                     alternationPlan.Value,
-                    SearchPlanner.EstimateCandidateUpperBound(
+                    SearchPlanner.EstimateCandidateDocuments(
                         alternationPlan.Value.SelectedGrams,
                         scope.Count)));
             }
@@ -160,7 +160,7 @@ internal ref struct SearchPlanCandidateBuilder
             var selected = MergeFragmentGrams(fragmentPlans, anchor);
             if (selected.Length > 0)
             {
-                var estimatedCandidates = SearchPlanner.EstimateCandidateUpperBound(selected, scope.Count);
+                var estimatedCandidates = SearchPlanner.EstimateCandidateDocuments(selected, scope.Count);
                 var indexed = LiteralPlan.Intersection(
                     scope.Count,
                     scope.Bytes,
@@ -182,7 +182,7 @@ internal ref struct SearchPlanCandidateBuilder
             _features.RegexPlan.DirectScanCostMultiplier;
         var seedByteLength = literalPlan.SeedByteLength;
         var estimatedCandidates = literalPlan.UsesIndex && literalPlan.SelectedGrams.Length > 0
-            ? SearchPlanner.EstimateCandidateUpperBound(literalPlan.SelectedGrams, literalPlan.ScopeDocuments)
+            ? SearchPlanner.EstimateCandidateDocuments(literalPlan.SelectedGrams, literalPlan.ScopeDocuments)
             : literalPlan.IsMissingGram ? 0 : literalPlan.ScopeDocuments;
         double? estimatedIndexedCost = literalPlan.UsesIndex
             ? literalPlan.IsMissingGram
@@ -320,7 +320,7 @@ internal ref struct SearchPlanCandidateBuilder
 
             var score = SearchPlanner.EstimateIndexedCost(
                 plan.SeedByteLength,
-                SearchPlanner.EstimateCandidateUpperBound(plan.SelectedGrams, _scope.Count),
+                SearchPlanner.EstimateCandidateDocuments(plan.SelectedGrams, _scope.Count),
                 plan.SelectedGrams,
                 _features.RegexPlan);
             if (score < bestScore)
@@ -403,7 +403,7 @@ internal ref struct SearchPlanCandidateBuilder
             }
 
             branch.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-            estimatedCandidates += SearchPlanner.EstimateCandidateUpperBound(
+            estimatedCandidates += SearchPlanner.EstimateCandidateDocuments(
                 CollectionsMarshal.AsSpan(branch),
                 _scope.Count);
             groupLengths.Add(branch.Count);
@@ -658,7 +658,7 @@ internal ref struct SearchPlanCandidateBuilder
 
         for (var count = 1; count < selected.Count; count++)
         {
-            if (SearchPlanner.EstimateCandidateUpperBound(CollectionsMarshal.AsSpan(selected)[..count], anchor.ScopeDocuments) <= targetCandidates)
+            if (SearchPlanner.EstimateCandidateDocuments(CollectionsMarshal.AsSpan(selected)[..count], anchor.ScopeDocuments) <= targetCandidates)
             {
                 return CollectionsMarshal.AsSpan(selected)[..count].ToArray();
             }

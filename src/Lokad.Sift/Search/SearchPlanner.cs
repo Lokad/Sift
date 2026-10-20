@@ -41,7 +41,9 @@ internal static class SearchPlanner
         return target == int.MaxValue ? target : Math.Max(target, 1);
     }
 
-    internal static double EstimateCandidateUpperBound(ReadOnlySpan<SelectedGram> selected, int scopeDocuments)
+    // Independence is a scoring heuristic, not a cardinality bound: n-grams can
+    // be strongly correlated. Exact candidate generation determines the work.
+    internal static double EstimateCandidateDocuments(ReadOnlySpan<SelectedGram> selected, int scopeDocuments)
     {
         if (scopeDocuments <= 0 || selected.Length == 0)
         {

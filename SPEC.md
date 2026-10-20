@@ -642,6 +642,11 @@ The planner shall use available statistics, including at least:
 
 The goal is an explicit planner architecture with explicit candidate enumeration and centralized scoring based on measured heuristics. It is not a requirement to build a globally predictive optimizer-style cost model.
 
+The current selectivity estimate multiplies n-gram frequencies under an
+independence assumption. Correlated grams can make it underestimate cardinality;
+it is a scoring heuristic, not an upper bound or a correctness filter. Exact
+candidate generation and verification remain authoritative.
+
 A plan that produces materially fewer candidates is preferred even if its index-side work is slightly higher.
 A plan that is expected to trigger substantial UTF-16 decoding is discouraged unless it materially reduces total work.
 
