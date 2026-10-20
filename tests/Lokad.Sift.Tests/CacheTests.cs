@@ -67,6 +67,64 @@ public sealed class CacheTests
         Assert.Equal(concurrency - 1, results.Sum(static result => result.Utf8RegexCacheHits));
     }
 
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public async Task NativeCacheAccessIsCountedOncePerSearch(bool overlay, int parallelism)
+    {
+        var engine = new RegexContractTestEngine();
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            RegexEngine = engine,
+            TargetSegmentDocumentCount = 1
+        });
+        await index.Build(new InMemoryDocumentSource([("a.txt", "alpha1"), ("b.txt", "alpha2")]));
+        using IIndexSnapshot snapshot = overlay
+            ? index.OpenOverlaySnapshot(new SearchOptions(parallelism))
+            : index.OpenSnapshot(new SearchOptions(parallelism));
+        if (snapshot is IOverlaySnapshot editable)
+            await editable.Update(new InMemoryDocumentSource([("c.txt", "alpha3"), ("d.txt", "alpha4")]), []);
+        var query = new SearchQuery("alpha[0-9]", PatternMode.Regex, CaseMode.Sensitive);
+
+        var cold = snapshot.Search(query, new(), new HitBuffer());
+        var warm = snapshot.Search(query, new(), new HitBuffer());
+
+        Assert.Equal(overlay ? 4 : 2, cold.HitsReturned);
+        Assert.Equal(cold.HitsReturned, warm.HitsReturned);
+        Assert.Equal(1, cold.Utf8RegexCacheMisses);
+        Assert.Equal(0, cold.Utf8RegexCacheHits);
+        Assert.Equal(0, warm.Utf8RegexCacheMisses);
+        Assert.Equal(1, warm.Utf8RegexCacheHits);
+        Assert.Equal(1, engine.Compilations);
+    }
+
+    [Fact]
+    public async Task ManagedCountersCountCompilationCacheLookups()
+    {
+        var query = new SearchQuery($"alpha[0-9]+(?#metrics-{Guid.NewGuid():N})", PatternMode.Regex, CaseMode.Sensitive);
+        using var firstIndex = SiftIndex.CreateInMemory();
+        await firstIndex.Build(new InMemoryDocumentSource([("a.txt", "alpha1")]));
+        using var firstSnapshot = firstIndex.OpenSnapshot();
+        var baselineHits = RegexVerifier.CacheHits;
+        var baselineMisses = RegexVerifier.CacheMisses;
+
+        Assert.Equal(1, firstSnapshot.Search(query, new(), new HitBuffer()).HitsReturned);
+        Assert.Equal(baselineMisses + 1, RegexVerifier.CacheMisses);
+        Assert.Equal(baselineHits, RegexVerifier.CacheHits);
+        Assert.Equal(1, firstSnapshot.Search(query, new(), new HitBuffer()).HitsReturned);
+        Assert.Equal(baselineMisses + 1, RegexVerifier.CacheMisses);
+        Assert.Equal(baselineHits, RegexVerifier.CacheHits);
+
+        using var secondIndex = SiftIndex.CreateInMemory();
+        await secondIndex.Build(new InMemoryDocumentSource([("a.txt", "alpha2")]));
+        using var secondSnapshot = secondIndex.OpenSnapshot();
+        Assert.Equal(1, secondSnapshot.Search(query, new(), new HitBuffer()).HitsReturned);
+        Assert.Equal(baselineMisses + 1, RegexVerifier.CacheMisses);
+        Assert.Equal(baselineHits + 1, RegexVerifier.CacheHits);
+    }
+
     [Fact]
     public void BoundedLruCacheEvictsLeastRecentlyUsedEntry()
     {

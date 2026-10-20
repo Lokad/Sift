@@ -45,6 +45,12 @@ accepted engine runs; managed fallback reports its actual non-backtracking usage
 Use [the package check](tools/verify-regex-package.ps1) to qualify the exact Release
 package with isolated core-only and producer-backed consumers.
 
+`SearchStats.Utf8RegexCacheHits` and `Utf8RegexCacheMisses` count one native
+prepared-query cache lookup per logical search, including overlays. `Explain`
+can warm that cache before a search. The process-wide `SiftProcessMetrics`
+managed regex hit/miss counters count actual compilation-cache lookups; reusing
+an index's prepared query does not access that managed cache.
+
 ## C# example
 
 ```csharp

@@ -31,8 +31,7 @@ internal readonly record struct PreparedQueryKey(
 
 internal sealed class PreparedSearchQuery
 {
-    private readonly Lazy<PreparedRegexExecution> _regexExecution;
-    private int _utf8RegexReturned;
+    private readonly Lazy<PreparedRegexVerifier>? _fallbackRegex;
 
     public PreparedSearchQuery(
         CaseMode resolvedCaseMode,
@@ -45,7 +44,7 @@ internal sealed class PreparedSearchQuery
         PreparedSearchText[] leadingLiterals,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
         PreparedOrderedAnchor[][] orderedAnchorGroups,
-        Func<PreparedRegexExecution> prepareRegexExecution)
+        Func<PreparedRegexVerifier>? prepareFallbackRegex)
     {
         ResolvedCaseMode = resolvedCaseMode;
         RegexPlan = regexPlan;
@@ -57,9 +56,9 @@ internal sealed class PreparedSearchQuery
         LeadingLiterals = leadingLiterals;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
         OrderedAnchorGroups = orderedAnchorGroups;
-        _regexExecution = new Lazy<PreparedRegexExecution>(
-            prepareRegexExecution,
-            LazyThreadSafetyMode.ExecutionAndPublication);
+        _fallbackRegex = prepareFallbackRegex is null
+            ? null
+            : new Lazy<PreparedRegexVerifier>(prepareFallbackRegex, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public CaseMode ResolvedCaseMode { get; }
@@ -75,28 +74,7 @@ internal sealed class PreparedSearchQuery
 
     internal void DisposeCompiledRegex() => RegexPlan.PreparedUtf8Regex?.Regex.Dispose();
 
-    internal void RecordExplanationAccess() => Interlocked.Exchange(ref _utf8RegexReturned, 1);
-
-    public PreparedRegexExecutionAccess GetRegexExecution()
-    {
-        var execution = _regexExecution.Value;
-        bool? utf8RegexCacheHit = execution.Utf8Regex is { } utf8Regex
-            ? utf8Regex.CacheHit || Interlocked.Exchange(ref _utf8RegexReturned, 1) != 0
-            : null;
-        return new PreparedRegexExecutionAccess(execution, utf8RegexCacheHit);
-    }
-}
-
-internal readonly record struct PreparedRegexExecutionAccess(
-    PreparedRegexExecution Execution,
-    bool? Utf8RegexCacheHit)
-{
-    public PreparedUtf8Regex? Utf8Regex => Execution.Utf8Regex;
-
-    public PreparedRegexVerifier? GetFallbackRegex()
-    {
-        return Execution.GetFallbackRegex();
-    }
+    public PreparedRegexVerifier? GetFallbackRegex() => RegexPlan.PreparedFallbackRegex ?? _fallbackRegex?.Value;
 }
 
 internal sealed class PreparedLiteralQuery(
@@ -166,71 +144,6 @@ internal sealed class PreparedSearchText(string text, byte[] utf8Bytes)
         }
 
         return prepared;
-    }
-}
-
-internal sealed class PreparedRegexExecution
-{
-    public static PreparedRegexExecution None { get; } = new(null, prepareFallbackRegex: null);
-
-    private readonly Lazy<PreparedRegexVerifier>? _fallbackRegex;
-    private int _fallbackReturned;
-
-    public PreparedRegexExecution(
-        PreparedUtf8Regex? utf8Regex,
-        Func<PreparedRegexVerifier>? prepareFallbackRegex)
-    {
-        Utf8Regex = utf8Regex;
-        _fallbackRegex = prepareFallbackRegex is null
-            ? null
-            : new Lazy<PreparedRegexVerifier>(
-                prepareFallbackRegex,
-                LazyThreadSafetyMode.ExecutionAndPublication);
-    }
-
-    public PreparedRegexExecution(PreparedRegexVerifier fallbackRegex)
-        : this(null, () => fallbackRegex)
-    {
-    }
-
-    public PreparedUtf8Regex? Utf8Regex { get; }
-
-    public PreparedRegexVerifier? GetFallbackRegex()
-    {
-        if (_fallbackRegex is null)
-        {
-            return null;
-        }
-
-        var fallback = _fallbackRegex.Value;
-        if (Interlocked.Exchange(ref _fallbackReturned, 1) != 0)
-        {
-            RegexVerifier.RecordPreparedCacheHit();
-        }
-
-        return fallback;
-    }
-
-    public static PreparedRegexExecution Create(
-        SearchQuery query,
-        CaseMode resolvedCaseMode,
-        in RegexExecutionPlan regexPlan)
-    {
-        if (query.PatternMode != PatternMode.Regex || regexPlan.IsExactLiteral)
-        {
-            return None;
-        }
-
-        if (regexPlan.PreparedUtf8Regex is { } preparedUtf8Regex)
-        {
-            return new PreparedRegexExecution(
-                preparedUtf8Regex,
-                () => RegexVerifier.Prepare(query, resolvedCaseMode));
-        }
-
-        return regexPlan.PreparedFallbackRegex is { } fallbackRegex
-            ? new PreparedRegexExecution(fallbackRegex)
-            : throw new InvalidOperationException("The regex execution plan has no fallback verifier.");
     }
 }
 

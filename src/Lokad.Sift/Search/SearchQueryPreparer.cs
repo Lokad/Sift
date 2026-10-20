@@ -77,7 +77,7 @@ internal static class SearchQueryPreparer
                     ? []
                     : PreparedMandatoryFragment.CreateMany(mandatoryTexts, resolvedCaseMode),
                 PreparedOrderedAnchor.CreateGroups(anchors.OrderedAnchorGroups),
-                () => PreparedRegexExecution.Create(query, resolvedCaseMode, regexPlan));
+                regexPlan.UsesUtf8Regex ? () => RegexVerifier.Prepare(query, resolvedCaseMode) : null);
         }
         catch
         {
@@ -133,7 +133,7 @@ internal static class SearchQueryPreparer
                     if (compiled is null || !Enum.IsDefined(RegexEngineGuards.GetInputDomain(compiled)))
                         throw new InvalidOperationException("The supplied regex engine returned an invalid compiled pattern.");
                     return RegexExecutionPlan.ForUtf8Regex(program,
-                        new PreparedUtf8Regex(compiled, false, query.RegexTimeoutPolicy));
+                        new PreparedUtf8Regex(compiled, query.RegexTimeoutPolicy));
                 }
                 if (compiled is not null)
                     throw new InvalidOperationException("A declining regex engine returned a compiled pattern.");

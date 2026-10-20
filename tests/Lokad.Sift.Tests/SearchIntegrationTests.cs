@@ -1548,33 +1548,6 @@ public sealed class SearchIntegrationTests
         Assert.Empty(collector.Hits);
     }
 
-    [Fact]
-    public async Task RegexVerifierExposesCacheHitAndMissCounters()
-    {
-        using var fixture = new CorpusFixture(
-            ("src/a.txt", "alpha beta\n"),
-            ("src/b.txt", "beta gamma\n"));
-        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
-        {
-            DirectScanCandidateDensityThreshold = 1.1
-        });
-        await index.Build(fixture.CreateSource());
-
-        var pattern = $"(?<word>b(eta|ingo))(?#cache-{Guid.NewGuid():N})";
-        var baselineHits = RegexVerifier.CacheHits;
-        var baselineMisses = RegexVerifier.CacheMisses;
-
-        using var snapshot = index.OpenSnapshot();
-        var firstCollector = new HitBuffer();
-        snapshot.Search(new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), firstCollector);
-        var secondCollector = new HitBuffer();
-        snapshot.Search(new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), secondCollector);
-
-        Assert.True(RegexVerifier.CacheMisses >= baselineMisses + 1);
-        Assert.True(RegexVerifier.CacheHits >= baselineHits + 1);
-    }
-
-
     private static bool MatchesPathFilter(string path, PathFilter filter)
     {
         if (!string.IsNullOrWhiteSpace(filter.PathPrefix) && !path.StartsWith(filter.PathPrefix, StringComparison.Ordinal))

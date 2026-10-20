@@ -53,7 +53,8 @@ internal sealed class RegexExecutionContext
         return operation;
     }
 
-    public PreparedSearchQuery Prepare(Operation operation, SearchQuery query, CancellationToken cancellationToken)
+    public PreparedSearchQuery Prepare(Operation operation, SearchQuery query, CancellationToken cancellationToken,
+        out bool cacheHit)
     {
         var key = PreparedQueryKey.FromQuery(query);
         while (true)
@@ -62,7 +63,8 @@ internal sealed class RegexExecutionContext
             Entry entry;
             lock (_sync)
             {
-                if (!_queries.TryGetValue(key, out entry!))
+                cacheHit = _queries.TryGetValue(key, out entry!);
+                if (!cacheHit)
                 {
                     entry = new Entry(key, new QueryCell(token =>
                         SearchQueryPreparer.Create(key, _engine, token.ThrowIfCancellationRequested)));

@@ -453,7 +453,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             cancellationToken);
         var effectiveCancellationToken = deadlineCancellation?.Token ?? cancellationToken;
         PreparedSearch prepared;
-        try { prepared = _baseSnapshot.PrepareSearch(query, pathFilter, effectiveCancellationToken); }
+        try { prepared = _baseSnapshot.PrepareValidatedSearch(query, pathFilter, effectiveCancellationToken); }
         catch (RegexEngineFailureException exception)
         {
             exception.DispatchInfo.Throw();
@@ -515,7 +515,8 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
         var baseStats = _baseSnapshot.SearchPrepared(
             query,
-            prepared,
+            // Both generations share one cache lookup, already counted by overlayStats.
+            prepared with { Utf8RegexCacheHit = null },
             collector,
             _hiddenPathVisibility,
             new SearchLimits(remainingHits, remainingDocuments, remainingBytes),

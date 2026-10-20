@@ -164,9 +164,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
             using var regexOperation = _regexContext.EnterOperation();
-            var prepared = _regexContext.Prepare(regexOperation, query, CancellationToken.None);
-            // Capability resolution during Explain has already warmed compilation.
-            prepared.RecordExplanationAccess();
+            var prepared = _regexContext.Prepare(regexOperation, query, CancellationToken.None, out _);
             return _planExplainer.Explain(query, pathFilter, prepared);
         }
         catch (RegexEngineFailureException exception)
@@ -202,7 +200,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             using var callbackScope = ReentrancyGuard.Enter(this);
             using var operation = BeginOperation();
-            using var prepared = PrepareSearch(query, pathFilter, effectiveToken);
+            using var prepared = PrepareValidatedSearch(query, pathFilter, effectiveToken);
             return SearchPreparedCore(query, prepared, collector, pathVisibility: null,
                 SearchLimits.FromQuery(query), effectiveToken, cancellationToken, watch);
         }
@@ -229,17 +227,17 @@ internal sealed class SearchSnapshot : IIndexSnapshot
     internal static SearchStats PreparationStopped(ValueStopwatch watch, SearchStopReason reason) =>
         new SearchMetrics().ToSearchStats(watch.ElapsedMilliseconds, 0, reason);
 
-    internal PreparedSearch PrepareSearch(SearchQuery query, PathFilter pathFilter,
-        CancellationToken cancellationToken = default)
+    // Both search entry points validate before constructing their deadline.
+    internal PreparedSearch PrepareValidatedSearch(SearchQuery query, PathFilter pathFilter,
+        CancellationToken cancellationToken)
     {
-        ValidateQuery(query);
-        ValidatePathFilter(pathFilter);
         var operation = _regexContext.EnterOperation();
         try
         {
+            var prepared = _regexContext.Prepare(operation, query, cancellationToken, out var cacheHit);
             return new PreparedSearch(
-                _regexContext.Prepare(operation, query, cancellationToken),
-                PathFilterMatcher.Prepare(pathFilter), operation);
+                prepared, PathFilterMatcher.Prepare(pathFilter), operation,
+                prepared.RegexPlan.UsesUtf8Regex ? cacheHit : null);
         }
         catch
         {
@@ -288,8 +286,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return CanUseSegmentParallelSearch(limits)
                 ? SearchParallel(
                     query,
-                    prepared.Matcher,
-                    prepared.Query,
+                    prepared,
                     ownedCollector,
                     pathVisibility,
                     limits,
@@ -298,8 +295,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     watch)
                 : SearchSequential(
                     query,
-                    prepared.Matcher,
-                    prepared.Query,
+                    prepared,
                     ownedCollector,
                     pathVisibility,
                     limits,
@@ -331,8 +327,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SearchStats SearchSequential(
         SearchQuery query,
-        PathFilterMatcher matcher,
-        PreparedSearchQuery preparedQuery,
+        in PreparedSearch prepared,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         in SearchLimits limits,
@@ -340,8 +335,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         CancellationToken callerCancellationToken,
         ValueStopwatch watch)
     {
-        var preparedRegex = preparedQuery.GetRegexExecution();
-        var metrics = SearchMetrics.ForRegex(preparedRegex);
+        var preparedQuery = prepared.Query;
+        var matcher = prepared.Matcher;
+        var metrics = SearchMetrics.ForQueryCache(prepared.Utf8RegexCacheHit);
         var hitsReturned = 0;
         var matchedDocuments = 0;
         var stopReason = SearchStopReason.None;
@@ -368,7 +364,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     query,
                     matcher,
                     preparedQuery,
-                    preparedRegex,
                     pathVisibility,
                     watch,
                     collector,
@@ -406,8 +401,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
     private SearchStats SearchParallel(
         SearchQuery query,
-        PathFilterMatcher matcher,
-        PreparedSearchQuery preparedQuery,
+        in PreparedSearch prepared,
         IHitCollector collector,
         IPathVisibility? pathVisibility,
         SearchLimits limits,
@@ -418,8 +412,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 #if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _parallelSearchCount);
 #endif
-        var preparedRegex = preparedQuery.GetRegexExecution();
-        var metrics = SearchMetrics.ForRegex(preparedRegex);
+        var preparedQuery = prepared.Query;
+        var matcher = prepared.Matcher;
+        var metrics = SearchMetrics.ForQueryCache(prepared.Utf8RegexCacheHit);
         var hitsReturned = 0;
         var matchedDocuments = 0;
         (SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)? lastMatchedDocument = null;
@@ -480,7 +475,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                                         query,
                                         matcher,
                                         preparedQuery,
-                                        preparedRegex,
                                         pathVisibility,
                                         watch,
                                         bufferedCollector,
@@ -1082,7 +1076,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         SearchQuery query,
         PathFilterMatcher matcher,
         PreparedSearchQuery preparedQuery,
-        PreparedRegexExecutionAccess preparedRegex,
         IPathVisibility? pathVisibility,
         ValueStopwatch watch,
         IHitCollector collector,
@@ -1244,7 +1237,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         predecodedText,
                         preparedQuery.RegexPlan.ExactLiteral);
                 }
-                else if (preparedRegex.Utf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
+                else if (preparedQuery.RegexPlan.PreparedUtf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
                 {
                     Utf8RegexVerifier.TrySearchDocument(
                         cache.Segment,
@@ -1260,7 +1253,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         ref metrics.Utf8RegexMatchesEnumerated,
                         ref documentStopReason);
                 }
-                else if ((fallbackRegex ??= preparedRegex.GetFallbackRegex()) is { } preparedFallbackRegex)
+                else if ((fallbackRegex ??= preparedQuery.GetFallbackRegex()) is { } preparedFallbackRegex)
                 {
                     RegexVerifier.TrySearchDocument(
                         cache.Segment,
@@ -1920,7 +1913,8 @@ internal readonly record struct SearchLimits(
 internal readonly record struct PreparedSearch(
     PreparedSearchQuery Query,
     PathFilterMatcher Matcher,
-    RegexExecutionContext.Operation ContextOperation) : IDisposable
+    RegexExecutionContext.Operation ContextOperation,
+    bool? Utf8RegexCacheHit) : IDisposable
 {
     public void Dispose() => ContextOperation.Dispose();
 }
@@ -1944,12 +1938,12 @@ internal struct SearchMetrics
     public long Utf8RegexCacheHits;
     public long Utf8RegexCacheMisses;
 
-    public static SearchMetrics ForRegex(PreparedRegexExecutionAccess preparedRegex)
+    public static SearchMetrics ForQueryCache(bool? cacheHit)
     {
         return new SearchMetrics
         {
-            Utf8RegexCacheHits = preparedRegex.Utf8RegexCacheHit == true ? 1 : 0,
-            Utf8RegexCacheMisses = preparedRegex.Utf8RegexCacheHit == false ? 1 : 0
+            Utf8RegexCacheHits = cacheHit == true ? 1 : 0,
+            Utf8RegexCacheMisses = cacheHit == false ? 1 : 0
         };
     }
 

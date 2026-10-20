@@ -1279,5 +1279,4 @@ internal enum Utf8RegexAtomKind
 
 internal sealed record PreparedUtf8Regex(
     ISiftCompiledRegex Regex,
-    bool CacheHit,
     RegexTimeoutPolicy RegexTimeoutPolicy);

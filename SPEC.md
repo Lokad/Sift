@@ -1200,7 +1200,8 @@ Also expose process-level counters/events for:
 * segment count
 * dead fraction
 * mmap bytes
-* cache hit ratio for fallback regex instances
+* cache hit ratio for actual managed regex compilation-cache lookups; prepared
+  verifier reuse does not synthesize additional cache hits
 
 ---
 

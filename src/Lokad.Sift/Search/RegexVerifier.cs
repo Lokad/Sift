@@ -23,7 +23,6 @@ internal static class RegexVerifier
     public static long CacheMisses => Interlocked.Read(ref _cacheMisses);
     public static int CacheCount => Cache.Count;
     public static int CachePatternCharacters => Cache.Weight;
-    internal static void RecordPreparedCacheHit() => Interlocked.Increment(ref _cacheHits);
 
     public static bool TrySearchDocument(
         MappedSegment segment,

@@ -602,7 +602,9 @@ public sealed class SearchStats
     public int NonBacktrackingRegexInvocations { get; }
     public int Utf8RegexMatchedDocuments { get; }
     public long Utf8RegexMatchesEnumerated { get; }
+    /// <summary>Gets native prepared-query cache hits; counted once per logical search, including overlays.</summary>
     public long Utf8RegexCacheHits { get; }
+    /// <summary>Gets native prepared-query cache misses; coalesced callers count as hits.</summary>
     public long Utf8RegexCacheMisses { get; }
     public int HitsReturned { get; }
     public SearchStopReason StopReason { get; }
