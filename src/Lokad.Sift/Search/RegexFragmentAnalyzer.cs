@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 
 namespace Lokad.Sift.Search;
@@ -81,11 +82,14 @@ internal static class RegexFragmentAnalyzer
             }
         }
 
+        var exactLiteral = result.ExactLiteral is { } literal && IsWellFormedUtf16(literal)
+            ? literal
+            : null;
         return new PatternAnalysis(
-            result.ExactLiteral is not null && !requiresIgnoreCase,
-            result.ExactLiteral,
-            requiresIgnoreCase ? [] : SelectBestFragments(result.Fragments, limit),
-            SelectBestFragments([.. merged], limit));
+            exactLiteral is not null && !requiresIgnoreCase,
+            exactLiteral,
+            requiresIgnoreCase ? [] : SelectUtf8Fragments(result.Fragments, limit),
+            SelectUtf8Fragments([.. merged], limit));
     }
 
     private static NodeResult AnalyzeSyntaxNode(Utf8RegexNode node, int limit)
@@ -165,7 +169,27 @@ internal static class RegexFragmentAnalyzer
             return [];
         }
 
-        return SelectBestFragments(result.Fragments, limit);
+        return SelectUtf8Fragments(result.Fragments, limit);
+    }
+
+    private static string[] SelectUtf8Fragments(string[] fragments, int limit)
+    {
+        // Regex analysis uses UTF-16 code units. Prefixes, suffixes and quantified
+        // atoms may split a surrogate pair; replacement encoding is not a sound
+        // byte constraint. Keep those deductions out of content and path pruning.
+        return SelectBestFragments(fragments, limit).Where(IsWellFormedUtf16).ToArray();
+    }
+
+    private static bool IsWellFormedUtf16(string text)
+    {
+        var remaining = text.AsSpan();
+        while (!remaining.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(remaining, out _, out var consumed) != OperationStatus.Done)
+                return false;
+            remaining = remaining[consumed..];
+        }
+        return true;
     }
 
     private static string[] SelectBestFragments(string[] fragments, int limit)
