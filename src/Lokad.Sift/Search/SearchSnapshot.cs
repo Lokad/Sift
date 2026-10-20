@@ -1196,16 +1196,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     query.PatternMode == PatternMode.Regex &&
                     preparedQuery.ResolvedCaseMode == CaseMode.Insensitive &&
                     !CanUseUtf8RegexForDocument(document);
-                string? predecodedText = null;
                 if (!usesLiteralVerifier &&
                     !needsUnicodeCaseFoldVerification &&
                     !PassesMandatoryPrecheck(
                         contentBytes,
                         preparedQuery.MandatoryFragmentsForPrecheck,
                         preparedQuery.ResolvedCaseMode,
-                        searchCancellationToken,
-                        ref metrics.DecodedChars,
-                        out predecodedText))
+                        searchCancellationToken))
                 {
                     continue;
                 }
@@ -1242,7 +1239,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         ref metrics.DecodedChars,
                         ref hitsReturned,
                         ref documentStopReason,
-                        predecodedText,
                         preparedQuery.RegexPlan.ExactLiteral);
                 }
                 else if (preparedQuery.RegexPlan.PreparedUtf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
@@ -1274,8 +1270,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         ref hitsReturned,
                         ref metrics.FallbackRegexInvocations,
                         ref metrics.NonBacktrackingRegexInvocations,
-                        ref documentStopReason,
-                        predecodedText);
+                        ref documentStopReason);
                 }
                 else
                 {
@@ -1332,7 +1327,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         ref long decodedChars,
         ref int hitsReturned,
         ref SearchStopReason stopReason,
-        string? predecodedText,
         string? literalOverride)
     {
         var contentBytes = segment.GetContentBytes(document);
@@ -1360,11 +1354,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return;
         }
 
-        var text = predecodedText ?? Encoding.UTF8.GetString(contentBytes);
-        if (predecodedText is null)
-        {
-            decodedChars += text.Length;
-        }
+        var text = Encoding.UTF8.GetString(contentBytes);
+        decodedChars += text.Length;
         var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var searchIndex = 0;
         var offsetCursor = new Utf8OffsetCursor();
@@ -1484,9 +1475,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken, ref long decodedChars, out string? predecodedText)
+    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken)
     {
-        predecodedText = null;
         if (preparedMandatoryFragments.Length == 0)
         {
             return true;
@@ -1498,32 +1488,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (contentBytes.IndexOf(fragment.Utf8Bytes) < 0)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        var requiresUnicodeDecode = false;
-        for (var i = 0; i < preparedMandatoryFragments.Length; i++)
-        {
-            if (!preparedMandatoryFragments[i].IsAscii)
-            {
-                requiresUnicodeDecode = true;
-                break;
-            }
-        }
-
-        if (requiresUnicodeDecode)
-        {
-            predecodedText = Encoding.UTF8.GetString(contentBytes);
-            decodedChars += predecodedText.Length;
-            foreach (var fragment in preparedMandatoryFragments)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (predecodedText.IndexOf(fragment.Text, StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     return false;
                 }

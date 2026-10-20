@@ -142,17 +142,13 @@ internal sealed class PreparedSearchText(string text, byte[] utf8Bytes)
 }
 
 internal sealed class PreparedMandatoryFragment(
-    string text,
     byte[] utf8Bytes,
     byte[] loweredAsciiBytes,
-    int[] asciiPrefixTable,
-    bool isAscii)
+    int[] asciiPrefixTable)
 {
-    public string Text { get; } = text;
     public byte[] Utf8Bytes { get; } = utf8Bytes;
     public byte[] LoweredAsciiBytes { get; } = loweredAsciiBytes;
     public int[] AsciiPrefixTable { get; } = asciiPrefixTable;
-    public bool IsAscii { get; } = isAscii;
 
     public static PreparedMandatoryFragment[] CreateMany(
         PreparedSearchText[] mandatoryTexts,
@@ -166,18 +162,18 @@ internal sealed class PreparedMandatoryFragment(
         var prepared = new PreparedMandatoryFragment[mandatoryTexts.Length];
         for (var i = 0; i < mandatoryTexts.Length; i++)
         {
-            var text = mandatoryTexts[i].Text;
             var utf8Bytes = mandatoryTexts[i].Utf8Bytes;
-            var isAscii = utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
-            var loweredAsciiBytes = resolvedCaseMode == CaseMode.Insensitive && isAscii
+            // Insensitive regex prechecks are prepared only from byte-analyzed
+            // ASCII fragments; other insensitive patterns have no byte anchors.
+            var loweredAsciiBytes = resolvedCaseMode == CaseMode.Insensitive
                 ? SearchQueryPreparer.LowerAscii(utf8Bytes)
                 : [];
             prepared[i] = new PreparedMandatoryFragment(
-                text,
                 utf8Bytes,
                 loweredAsciiBytes,
-                SearchQueryPreparer.BuildPrefixTable(loweredAsciiBytes),
-                isAscii);
+                resolvedCaseMode == CaseMode.Insensitive
+                    ? SearchQueryPreparer.BuildPrefixTable(loweredAsciiBytes)
+                    : []);
         }
 
         return prepared;

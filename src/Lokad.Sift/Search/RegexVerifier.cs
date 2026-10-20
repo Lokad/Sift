@@ -35,18 +35,13 @@ internal static class RegexVerifier
         ref int hitsReturned,
         ref int regexInvocations,
         ref int nonBacktrackingRegexInvocations,
-        ref SearchStopReason stopReason,
-        string? predecodedText)
+        ref SearchStopReason stopReason)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
-        using var decodedBuffer = predecodedText is null
-            ? RentedCharBuffer.Decode(contentBytes, ref decodedChars)
-            : default;
-        var text = predecodedText is not null
-            ? predecodedText.AsSpan()
-            : decodedBuffer.AsSpan();
+        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, ref decodedChars);
+        var text = decodedBuffer.AsSpan();
 
         regexInvocations++;
         if (prepared.UsesNonBacktracking)

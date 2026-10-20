@@ -240,7 +240,7 @@ internal sealed class PathFilterMatcher
         var fragments = new List<string>(4);
         if (!string.IsNullOrWhiteSpace(filter.PathRegex))
         {
-            foreach (var fragment in LiteralFragmentSet.PruneContained(RegexFragmentAnalyzer.ExtractMandatoryFragments(filter.PathRegex)))
+            foreach (var fragment in RegexFragmentAnalyzer.ExtractMandatoryFragments(filter.PathRegex))
             {
                 if (fragment.Length >= 3)
                 {

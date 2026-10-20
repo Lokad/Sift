@@ -76,7 +76,7 @@ internal readonly record struct SearchQueryAnchors(
             {
                 return exactRegexLiteral is not null
                     ? [exactRegexLiteral]
-                    : LiteralFragmentSet.PruneContained(analysis.MandatoryFragments);
+                    : analysis.MandatoryFragments;
             }
 
             return query.Pattern.Length == 0 ? [] : [query.Pattern];

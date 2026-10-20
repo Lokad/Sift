@@ -42,11 +42,22 @@ public sealed class PathMatcherTests
     }
 
     [Fact]
-    public async Task PathRegexAccelerationPrunesContainedMandatoryFragments()
+    public async Task PathRegexAccelerationPreservesContentMatches()
     {
-        var matcher = PathFilterMatcher.Prepare(new Lokad.Sift.PathFilter { PathRegex = "special-file" });
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/special-file.txt", "alpha---beta"),
+            ("src/special-file.other.txt", "unrelated"), ("src/other.txt", "alpha---beta")]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery("alpha.*beta", PatternMode.Regex, CaseMode.Sensitive);
+        var filter = new PathFilter { PathRegex = "special-file" };
+        var hits = new HitBuffer();
 
-        Assert.NotEmpty(matcher.GetPathTrigrams());
+        snapshot.Search(query, filter, hits);
+        var plan = snapshot.Explain(query, filter);
+
+        Assert.Equal("src/special-file.txt", snapshot.Materialize(Assert.Single(hits.Hits), 0, 0).Path);
+        Assert.True(plan.UsesPathIndex);
+        Assert.Equal(new[] { "alpha", "beta" }, plan.MandatoryFragments);
     }
 }
 
