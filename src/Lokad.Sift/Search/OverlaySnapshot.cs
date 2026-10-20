@@ -1004,6 +1004,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         }
     }
 
+#if SIFT_INTERNAL_VERIFICATION
     internal MaintenanceStats GetOverlayMaintenanceStats()
     {
         return _overlayIndex.GetMaintenanceStats();
@@ -1014,6 +1015,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         using var state = BeginRead();
         return _baseTombstones.Count;
     }
+#endif
 
     private sealed class OverlayHitCollector : IHitCollector
     {

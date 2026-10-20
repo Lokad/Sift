@@ -267,7 +267,8 @@ Required regions:
 16. `PathTriIcPost`
 17. `Stats`
 
-Reserve additional region ids for future sidecars, but do not make the base format depend on them.
+The reader requires exactly these 17 regions. Other region IDs are rejected;
+future extensions require an explicit format policy when implemented.
 
 ### 6.3 Document table
 

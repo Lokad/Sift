@@ -16,8 +16,6 @@ internal readonly record struct SearchQueryAnchors(
     CaseMode AdvisoryCaseMode,
     SearchOrderedAnchorGroup[] OrderedAnchorGroups)
 {
-    public bool HasMandatoryTexts => MandatoryTexts.Length > 0;
-
     public static SearchQueryAnchors Create(
         SearchQuery query,
         CaseMode resolvedCaseMode,

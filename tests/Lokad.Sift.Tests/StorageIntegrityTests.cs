@@ -513,6 +513,43 @@ public sealed class StorageIntegrityTests
         Assert.Throws<InvalidDataException>(() => storage.OpenSegment(manifest.Segments[0].SegmentId));
     }
 
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 18)]
+    [InlineData(false, 25)]
+    [InlineData(false, int.MaxValue)]
+    [InlineData(true, 0)]
+    [InlineData(true, 18)]
+    [InlineData(true, 25)]
+    [InlineData(true, int.MaxValue)]
+    public async Task UnknownRegionIdsAreRejected(bool checksumTable, int regionId)
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+        }
+
+        var segmentPath = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+        using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Position = checksumTable ? 52 : 44;
+            var offset = new byte[sizeof(long)];
+            stream.ReadExactly(offset);
+            stream.Position = BinaryPrimitives.ReadInt64LittleEndian(offset);
+            var id = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(id, regionId);
+            stream.Write(id);
+        }
+
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        using var snapshot = reopened.OpenSnapshot();
+        Assert.Throws<InvalidDataException>(() => snapshot.Search(
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), new HitBuffer()));
+        Assert.True(reopened.RequiresRebuild);
+    }
+
     [Fact]
     public async Task StaleTempEntriesAreRecovered()
     {
@@ -1271,21 +1308,6 @@ public sealed class StorageIntegrityTests
         Assert.Equal(1, stats.HitsReturned);
     }
 
-
-    [Fact]
-    public async Task SegmentFormatReservesFutureSidecarRegionIds()
-    {
-        Assert.Equal(17, SegmentFormat.RegionCount);
-        Assert.Equal(SegmentFormat.RegionCount + 1, SegmentFormat.ReservedRegionIdStart);
-        Assert.Equal((int)SegmentRegionId.ReservedSidecar08, SegmentFormat.ReservedRegionIdEnd);
-
-        for (var regionId = SegmentFormat.ReservedRegionIdStart; regionId <= SegmentFormat.ReservedRegionIdEnd; regionId++)
-        {
-            Assert.True(SegmentFormat.IsReservedRegionId((SegmentRegionId)regionId));
-        }
-
-        Assert.False(SegmentFormat.IsReservedRegionId(SegmentRegionId.Stats));
-    }
 
     [Fact]
     public async Task LargePostingsCarrySkipCheckpoints()

@@ -26,17 +26,7 @@ internal enum SegmentRegionId
     PathTriCsPost = 14,
     PathTriIcLex = 15,
     PathTriIcPost = 16,
-    Stats = 17,
-
-    // Reserved sidecar slots keep the on-disk id space explicit without changing the base format layout.
-    ReservedSidecar01 = 18,
-    ReservedSidecar02 = 19,
-    ReservedSidecar03 = 20,
-    ReservedSidecar04 = 21,
-    ReservedSidecar05 = 22,
-    ReservedSidecar06 = 23,
-    ReservedSidecar07 = 24,
-    ReservedSidecar08 = 25
+    Stats = 17
 }
 
 internal static class SegmentFormat
@@ -49,8 +39,6 @@ internal static class SegmentFormat
     public const int PreviousManifestFormatVersion = 3;
     public const int LegacyManifestFormatVersion = 2;
     public const int RegionCount = 17;
-    public const int ReservedRegionIdStart = 18;
-    public const int ReservedRegionIdEnd = 25;
     public const int DocumentRowSize = 58;
     public const int HeaderSize = 60;
     public const int RegionDirectoryEntrySize = 20;
@@ -86,11 +74,5 @@ internal static class SegmentFormat
     public static int GetLexiconEntrySize(SegmentRegionId regionId)
     {
         return GetLexiconSuffixSize(regionId) + 12;
-    }
-
-    public static bool IsReservedRegionId(SegmentRegionId regionId)
-    {
-        var value = (int)regionId;
-        return value >= ReservedRegionIdStart && value <= ReservedRegionIdEnd;
     }
 }

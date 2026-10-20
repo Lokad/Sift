@@ -22,7 +22,7 @@ internal sealed unsafe class MappedSegment : IDisposable
     private readonly ReadOnlyMemory<byte> _backingMemory;
     private readonly UnmanagedByteMemoryManager? _mappedContentMemory;
     private readonly (long Offset, long Length)[] _regions =
-        new (long Offset, long Length)[SegmentFormat.ReservedRegionIdEnd + 1];
+        new (long Offset, long Length)[SegmentFormat.RegionCount + 1];
     private int _disposed;
 
     public MappedSegment(
@@ -107,7 +107,6 @@ internal sealed unsafe class MappedSegment : IDisposable
     }
 
     public SegmentId SegmentId { get; private set; }
-    public long BuildTimestampTicks { get; private set; }
     public int DocumentCount { get; private set; }
     public long ContentBytes { get; private set; }
     public int RegionCount { get; private set; }
@@ -736,7 +735,6 @@ internal sealed unsafe class MappedSegment : IDisposable
         }
 
         SegmentId = new SegmentId(Read<ulong>(12));
-        BuildTimestampTicks = Read<long>(20);
         DocumentCount = Read<int>(28);
         ContentBytes = Read<long>(32);
         RegionCount = Read<int>(40);

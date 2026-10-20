@@ -216,7 +216,6 @@ internal readonly record struct SearchQueryFeatures(
     public SearchQueryAnchors Anchors => Prepared.Anchors;
     public RegexExecutionPlan RegexPlan => Prepared.RegexPlan;
     public PreparedLiteralQuery? Literal => Prepared.Literal;
-    public PreparedSearchText Pattern => Prepared.Pattern;
     public PreparedSearchText[] MandatoryTexts => Prepared.MandatoryTexts;
     public PreparedSearchText[] AdvisoryTexts => Prepared.AdvisoryTexts;
     public PreparedSearchText[] LeadingLiterals => Prepared.LeadingLiterals;

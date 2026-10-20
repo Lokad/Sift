@@ -23,6 +23,10 @@ internal static class RegexPackageCheck
         }
         Require(typeof(SiftIndex).GetProperty("Storage", inspectionFlags) is null,
             "Test-only storage inspection entered the shipped assembly.");
+        var overlayType = typeof(SiftIndex).Assembly.GetType("Lokad.Sift.Search.OverlaySnapshot")!;
+        Require(overlayType.GetMethod("GetOverlayMaintenanceStats", inspectionFlags) is null &&
+            overlayType.GetMethod("GetRetainedTombstoneCount", inspectionFlags) is null,
+            "Test-only overlay inspection entered the shipped assembly.");
         Require(typeof(SiftOptions).GetProperty("MeasurePeakManagedMemory") is null &&
             typeof(BuildStats).GetProperty("PeakManagedBytes") is null &&
             typeof(CompactStats).GetProperty("PeakManagedBytes") is null,

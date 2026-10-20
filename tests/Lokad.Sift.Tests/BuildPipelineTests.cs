@@ -43,21 +43,18 @@ public sealed class BuildPipelineTests
     }
 
     [Fact]
-    public async Task PartitionDocumentsSplitsOnTargetContentBytes()
+    public async Task BuildSplitsOnTargetContentBytes()
     {
-        var largeSize = (int)(IndexBuilder.DefaultTargetSegmentContentBytes / 2) + 1;
-        var documents = new[]
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
         {
-            CreateStoredDocument("src/a.txt", largeSize),
-            CreateStoredDocument("src/b.txt", largeSize),
-            CreateStoredDocument("src/c.txt", 16)
-        };
+            TargetSegmentContentBytes = 8
+        });
+        var stats = await index.Build(new InMemoryDocumentSource(
+            [("src/a.txt", "aaaaa"), ("src/b.txt", "bbbbb"), ("src/c.txt", "c")]));
 
-        var partitions = IndexBuilder.PartitionDocuments(documents);
-
-        Assert.Equal(2, partitions.Count);
-        Assert.Equal(["src/a.txt"], partitions[0].Select(static doc => doc.Path).ToArray());
-        Assert.Equal(["src/b.txt", "src/c.txt"], partitions[1].Select(static doc => doc.Path).ToArray());
+        Assert.Equal(3, stats.IndexedDocuments);
+        Assert.Equal(2, stats.SegmentCount);
+        Assert.Equal([1, 2], index.Storage.ReadManifest().Segments.Select(static segment => segment.DocumentCount));
     }
 
     [Fact]
@@ -119,25 +116,18 @@ public sealed class BuildPipelineTests
     }
 
     [Fact]
-    public async Task PartitionDocumentsCanUseCustomThresholds()
+    public async Task BuildSplitsOnTargetDocumentCount()
     {
-        var documents = new[]
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
         {
-            CreateStoredDocument("src/a.txt", 5),
-            CreateStoredDocument("src/b.txt", 5),
-            CreateStoredDocument("src/c.txt", 5)
-        };
-
-        var partitions = IndexBuilder.PartitionDocuments(documents, new SiftOptions
-        {
-            TargetSegmentContentBytes = 8,
-            TargetSegmentDocumentCount = 8
+            TargetSegmentDocumentCount = 1
         });
+        var stats = await index.Build(new InMemoryDocumentSource(
+            [("src/a.txt", "aaaaa"), ("src/b.txt", "bbbbb"), ("src/c.txt", "ccccc")]));
 
-        Assert.Equal(3, partitions.Count);
-        Assert.Equal(["src/a.txt"], partitions[0].Select(static doc => doc.Path).ToArray());
-        Assert.Equal(["src/b.txt"], partitions[1].Select(static doc => doc.Path).ToArray());
-        Assert.Equal(["src/c.txt"], partitions[2].Select(static doc => doc.Path).ToArray());
+        Assert.Equal(3, stats.IndexedDocuments);
+        Assert.Equal(3, stats.SegmentCount);
+        Assert.All(index.Storage.ReadManifest().Segments, static segment => Assert.Equal(1, segment.DocumentCount));
     }
 
     [Fact]
@@ -275,21 +265,6 @@ public sealed class BuildPipelineTests
                 [document],
                 cancellation.Token));
         Assert.Equal(1, document.ContentReadCount);
-    }
-
-    private static StoredDocument CreateStoredDocument(string path, int contentLength)
-    {
-        return new StoredDocument
-        {
-            Path = path,
-            PathUtf8 = System.Text.Encoding.UTF8.GetBytes(path),
-            Content = new byte[contentLength],
-            LineCount = 1,
-            EncodedLineIndex = [0, 0, 0, 0, 0],
-            Flags = 0,
-            MTimeUtcTicks = 0,
-            ContentHash64 = 0
-        };
     }
 
     private sealed class ObservingDocumentSource : IDocumentSource

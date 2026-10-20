@@ -17,9 +17,6 @@ internal sealed class IndexBuilder
         Action<IReadOnlyList<StoredDocument>> publishPartition);
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-    internal const int DefaultMaxDocumentBytes = 32 * 1024 * 1024;
-    internal const int DefaultTargetSegmentDocumentCount = 50_000;
-    internal const long DefaultTargetSegmentContentBytes = 64L * 1024 * 1024;
     private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
 
@@ -504,33 +501,6 @@ internal sealed class IndexBuilder
             documents,
             ingestion.RejectedDocuments);
     }
-
-#if SIFT_INTERNAL_VERIFICATION
-    public static List<List<StoredDocument>> PartitionDocuments(IReadOnlyList<StoredDocument> documents)
-    {
-        return PartitionDocuments(documents, new SiftOptions());
-    }
-
-    public static List<List<StoredDocument>> PartitionDocuments(
-        IReadOnlyList<StoredDocument> documents,
-        SiftOptions options)
-    {
-        var partitions = new List<List<StoredDocument>>();
-        var partitioner = new StoredDocumentPartitioner(
-            options,
-            collectAcceptedPaths: false,
-            materializeDocuments: false,
-            static (_, contentBytes) => contentBytes,
-            partition => partitions.Add([.. partition]));
-        foreach (var document in documents)
-        {
-            partitioner.Add(document);
-        }
-
-        _ = partitioner.Complete();
-        return partitions;
-    }
-#endif
 
     private static StoredDocument? Normalize(
         SubmittedDocument document,
