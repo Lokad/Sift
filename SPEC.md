@@ -754,6 +754,16 @@ outside Sift's delivery scope. Timeouts, cancellation,
 invalid provider ranges, and unexpected failures do not request fallback after
 partial hit publication. Preparation observes the query deadline and timeout policy.
 
+Literal and managed regex document scans check the effective cancellation token
+between matches, including matches rejected by boundary checks. Caller cancellation
+throws with the caller's token; expiry of the search deadline returns
+`MaxElapsedTime`. An in-progress BCL match uses the existing regex safety timeout;
+cooperative checkpoints run before and after each match step. Regex nesting limits
+count structural parentheses while respecting comments, inline whitespace-option
+scopes, escapes and character-class boundaries. Syntax validation still belongs
+to the verifier. Unsupported class subtraction is excluded from fallback fragment
+extraction so that path acceleration cannot manufacture mandatory delimiters.
+
 Rules:
 
 * the planner must classify patterns into:

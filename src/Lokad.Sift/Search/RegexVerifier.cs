@@ -30,6 +30,7 @@ internal static class RegexVerifier
         PreparedRegexVerifier prepared,
         int hitLimit,
         IHitCollector collector,
+        CancellationToken cancellationToken,
         ref long decodedChars,
         ref int hitsReturned,
         ref int regexInvocations,
@@ -37,6 +38,7 @@ internal static class RegexVerifier
         ref SearchStopReason stopReason,
         string? predecodedText)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         using var decodedBuffer = predecodedText is null
@@ -57,8 +59,14 @@ internal static class RegexVerifier
 
         try
         {
-            foreach (var match in prepared.Regex.EnumerateMatches(text))
+            var matches = prepared.Regex.EnumerateMatches(text);
+            while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                var hasMatch = matches.MoveNext();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!hasMatch) break;
+                var match = matches.Current;
                 if (hitsReturned >= hitLimit)
                 {
                     return matched;

@@ -17,6 +17,12 @@ The core package has no runtime NuGet dependencies. Regex search uses invariant
 pattern supports it. Classic backtracking has a one-second match timeout;
 `RegexTimeoutPolicy` controls whether a timeout stops the search or throws.
 
+Search observes caller cancellation and `MaxElapsedMilliseconds` between matches
+within a document. A running .NET regex match is bounded by the existing safety
+timeout. `MaxPatternNesting` applies to structural parentheses in content and path
+regexes, respecting comments, escapes, character classes and inline whitespace
+option scopes.
+
 Applications can supply byte-oriented verification through
 `SiftOptions.RegexEngine`, an implementation of Sift's own `ISiftRegexEngine`
 contract. The application references its chosen producer directly; no adapter

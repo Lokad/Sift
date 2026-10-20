@@ -530,6 +530,14 @@ internal static class RegexFragmentAnalyzer
 
                 if (current == '-')
                 {
+                    if (_index < _pattern.Length && _pattern[_index] == '[')
+                    {
+                        // Subtraction has nested class delimiters. Give up rather than
+                        // mistaking a remaining ']' for a mandatory literal outside it.
+                        _unsupported = true;
+                        return NodeResult.None;
+                    }
+
                     literalCount = 2;
                     continue;
                 }

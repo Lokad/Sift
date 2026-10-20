@@ -1261,6 +1261,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         preparedFallbackRegex,
                         documentHitLimit,
                         collector,
+                        searchCancellationToken,
                         ref metrics.DecodedChars,
                         ref hitsReturned,
                         ref metrics.FallbackRegexInvocations,
@@ -1438,6 +1439,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (hitsReturned >= hitLimit)
             {
                 return;
@@ -1446,6 +1448,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             var relativeIndex = caseSensitive
                 ? contentBytes[offset..].IndexOf(needle)
                 : IndexOfAsciiInsensitive(contentBytes[offset..], needle, prefixTable, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (relativeIndex < 0)
             {
                 return;
