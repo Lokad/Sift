@@ -30,9 +30,16 @@
 - Removed the unused prepared-pattern byte copy and advisory seed wrapper/state.
   Postings-statistics inspection now resides entirely in the benchmark harness.
 - Corrected documented direct-scan defaults and literal-verifier behavior.
+- Removed redundant gram-trimming guards and the unreachable empty-literal
+  document branch. Planning costs and n-gram budgets retain their existing policy.
 
 ### Fixed
 
+- Exact-literal regex verification now returns non-overlapping matches, including
+  ASCII and Unicode literals; literal search retains overlapping occurrences.
+- Empty-group regexes enumerate every .NET zero-length match. Whole-word and
+  whole-line exact-literal regexes use managed verification to retain filtering
+  and anchor behavior, including CRLF. The truly empty-query path shortcut is unchanged.
 - Scoped whitespace regex options now use managed matching instead of unsafe
   literal promotion or mandatory-fragment filtering. Uppercase scoped ignore-case
   options retain ignore-case semantics.

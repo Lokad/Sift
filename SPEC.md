@@ -137,8 +137,11 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 
 ### 4.4 Search semantics
 
-* Literal mode is exact substring search
-* Regex mode follows `.NET regex` semantics
+* Literal mode is exact substring search, including overlapping occurrences
+* Regex mode follows `.NET regex` semantics, including non-overlapping enumeration
+  and progression after zero-length matches
+* A truly empty query lists one hit per document without scanning content;
+  nonempty empty-group regex syntax still enumerates .NET's zero-length matches
 * `WholeWord` and `WholeLine` are verifier semantics, not index semantics
 * `Multiline` applies to verification against the entire document content
 * The index is document-granular; the verifier is line/match granular
@@ -738,6 +741,11 @@ Whole-line literal mode:
 * compare match bounds with the surrounding line bounds, excluding a trailing CR
 
 ### 9.2 Regex verifier
+
+The exact-literal shortcut applies to nonempty case-sensitive literals without
+`WholeWord`/`WholeLine`. It advances past the entire accepted match. Empty groups
+and boundary-constrained exact-literal forms use managed verification, preserving
+regex enumeration, word filtering and anchor semantics (including CRLF behavior).
 
 The preferred exact verifier is a **custom byte-oriented UTF-8 regex engine** for the supported fast subset. `.NET Regex` remains the semantic oracle and fallback verifier for constructs outside the supported subset.
 

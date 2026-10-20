@@ -67,6 +67,13 @@ Regex analysis gives up conservatively on scoped whitespace options (`x`/`X`)
 and character classes starting with a literal `]`. These patterns retain .NET
 matching semantics through managed verification.
 
+Literal searches include overlapping occurrences. Regex searches follow .NET's
+non-overlapping enumeration, including zero-length match progression. Nonempty
+exact-literal regexes without whole-word/whole-line constraints can use literal
+verification; empty or boundary-constrained exact-literal forms use managed matching.
+A truly empty query remains a path-listing shortcut: one hit per document with
+no content scan.
+
 ## C# example
 
 ```csharp
