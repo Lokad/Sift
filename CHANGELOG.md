@@ -34,6 +34,8 @@
   when every branch is covered; insufficient budgets fall back to a safe plan.
 - Fallback regex matching no longer loses branches when advisory seeds are capped,
   short, or dense.
+- Context materialization accepts large byte budgets, including `int.MaxValue`,
+  without integer overflow. Shared context limits and UTF-8 boundaries are retained.
 - Case-sensitive ASCII literal and managed regex scans now observe caller
   cancellation and search deadlines between matches within one document.
 - Regex nesting limits now respect comments, scoped whitespace options, control

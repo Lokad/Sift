@@ -176,11 +176,6 @@ internal static class HitMaterializer
     {
         truncated = false;
         var lineCount = LineMap.GetLineCount(encodedLineIndex);
-        if (lineCount == 0)
-        {
-            return [];
-        }
-
         startLine = Math.Max(startLine, 1);
         endLine = Math.Min(endLine, lineCount);
         if (startLine > endLine)
@@ -200,7 +195,7 @@ internal static class HitMaterializer
 
             var start = LineMap.GetLineStart(encodedLineIndex, line);
             var end = LineMap.GetLineEndExclusive(encodedLineIndex, line, contentBytes.Length);
-            var materializedEnd = Math.Min(end, start + remainingBytes);
+            var materializedEnd = start + Math.Min(end - start, remainingBytes);
             if (materializedEnd < end && !asciiDocument)
             {
                 while (materializedEnd > start &&
