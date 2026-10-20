@@ -17,7 +17,7 @@ internal static class LiteralQueryPlanner
         bool selectAllGrams,
         SiftOptions options)
     {
-        if (scopeDocuments == 0 || pattern.Length == 0)
+        if (scopeDocuments <= 0 || pattern.Length == 0)
         {
             return null;
         }
@@ -95,33 +95,18 @@ internal static class LiteralQueryPlanner
 
         static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)
         {
-            if (grams.Count == 0)
-            {
-                return [];
-            }
-
-            if (scopeDocuments <= 0)
-            {
-                return [grams[0]];
-            }
-
             var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(scopeDocuments, options);
             if (targetCandidates == int.MaxValue)
             {
                 return grams.ToArray();
             }
 
-            var selected = new List<SelectedGram>(Math.Min(grams.Count, options.MaxSelectedNgrams));
+            var selected = new List<SelectedGram>(grams.Count);
             // Match the planner's independence heuristic when choosing how many
             // grams to retain; this estimate is not a bound on actual candidates.
             var estimatedCandidates = (double)scopeDocuments;
             foreach (var gram in grams)
             {
-                if (selected.Count >= options.MaxSelectedNgrams)
-                {
-                    break;
-                }
-
                 selected.Add(gram);
                 var ratio = Math.Clamp((double)gram.DocFreq / scopeDocuments, 0d, 1d);
                 estimatedCandidates *= ratio;
