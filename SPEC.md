@@ -140,7 +140,8 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 * Literal mode is exact substring search, including overlapping occurrences
 * Regex mode follows `.NET regex` semantics, including non-overlapping enumeration
   and progression after zero-length matches
-* A truly empty query lists one hit per document without scanning content;
+* A truly empty query lists one hit per document without scanning content or
+  preparing a content regex, regardless of case or boundary flags;
   nonempty empty-group regex syntax still enumerates .NET's zero-length matches
 * `WholeWord` and `WholeLine` are verifier semantics, not index semantics
 * `Multiline` applies to verification against the entire document content
@@ -610,6 +611,12 @@ Transfer rules:
 
 Analyzer limits are acceptable. Unsound extraction is forbidden.
 
+Analysis follows .NET's UTF-16 code-unit semantics, including quantifiers.
+Only well-formed Unicode fragments may become UTF-8 byte constraints. Shared
+prefixes/suffixes and quantified atoms can split surrogate pairs; discard unsafe
+deductions before content or path pruning rather than replacement-encoding them.
+An unsafe deduction can reduce acceleration, never the set of returned matches.
+
 Scoped whitespace options (`x`/`X`) and character classes beginning with a literal
 `]` conservatively disable fallback analysis. These patterns still use .NET
 matching; analysis must not turn their syntax into literal text or mandatory
@@ -742,10 +749,13 @@ Whole-line literal mode:
 
 ### 9.2 Regex verifier
 
-The exact-literal shortcut applies to nonempty case-sensitive literals without
-`WholeWord`/`WholeLine`. It advances past the entire accepted match. Empty groups
-and boundary-constrained exact-literal forms use managed verification, preserving
-regex enumeration, word filtering and anchor semantics (including CRLF behavior).
+The exact-literal shortcut applies to nonempty case-sensitive, well-formed Unicode
+literals without `WholeWord`/`WholeLine`. It advances past the entire accepted
+match. Empty groups, boundary-constrained exact-literal forms and lone-surrogate
+regexes use managed verification, preserving regex enumeration, word filtering,
+UTF-8 boundary projection and anchor semantics (including CRLF behavior).
+Truly empty queries use the path-listing shortcut; their plans require neither
+Unicode decoding nor whole-document content verification.
 
 The preferred exact verifier is a **custom byte-oriented UTF-8 regex engine** for the supported fast subset. `.NET Regex` remains the semantic oracle and fallback verifier for constructs outside the supported subset.
 

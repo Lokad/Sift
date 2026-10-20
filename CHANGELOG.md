@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Truly empty queries skip content regex analysis/compilation. Plan diagnostics
+  reflect path listing without decoding or whole-document content verification;
+  nonempty empty-group regex enumeration is unchanged.
 - Removed unused internal helpers/defaults, reserved sidecar scaffolding, and
   redundant search validation. Index format versions and read compatibility are
   unchanged; overlay inspection helpers are confined to verification builds.
@@ -35,6 +38,10 @@
 
 ### Fixed
 
+- Regex content and path pruning discard fragments that split UTF-16 surrogate
+  pairs, preventing missed supplementary-character alternatives and quantified
+  matches. Raw lone-surrogate regexes use managed matching for correct UTF-8
+  byte-boundary projection.
 - Exact-literal regex verification now returns non-overlapping matches, including
   ASCII and Unicode literals; literal search retains overlapping occurrences.
 - Empty-group regexes enumerate every .NET zero-length match. Whole-word and

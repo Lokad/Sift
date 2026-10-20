@@ -70,9 +70,12 @@ matching semantics through managed verification.
 Literal searches include overlapping occurrences. Regex searches follow .NET's
 non-overlapping enumeration, including zero-length match progression. Nonempty
 exact-literal regexes without whole-word/whole-line constraints can use literal
-verification; empty or boundary-constrained exact-literal forms use managed matching.
-A truly empty query remains a path-listing shortcut: one hit per document with
-no content scan.
+verification when the literal is valid Unicode; empty or boundary-constrained
+exact-literal forms and lone-surrogate regexes use managed matching. Regex-derived
+byte constraints also require valid Unicode, so shared prefixes or suffixes that
+split surrogate pairs cannot discard content or path matches.
+A truly empty query skips content regex preparation and remains a path-listing
+shortcut: one hit per document with no content scan.
 
 ## C# example
 
