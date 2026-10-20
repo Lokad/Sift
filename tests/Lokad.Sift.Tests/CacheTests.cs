@@ -5,6 +5,47 @@ namespace Lokad.Sift.Tests;
 [Collection("ProcessMetrics")]
 public sealed class CacheTests
 {
+    [Fact]
+    public async Task EmptyQueriesDoNotPrepareContentVerifiers()
+    {
+        using var engine = new RegexContractTestEngine { FailCompile = true };
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new InMemoryDocumentSource(
+            [("src/a.txt", "abc"), ("src/b.txt", ""), ("other.txt", "xyz")]));
+        using var snapshot = index.OpenSnapshot();
+        var baselineHits = SiftProcessMetrics.RegexCacheHits;
+        var baselineMisses = SiftProcessMetrics.RegexCacheMisses;
+        foreach (var mode in new[] { PatternMode.Literal, PatternMode.Regex })
+        foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive, CaseMode.Smart })
+        foreach (var boundaryFlags in new[] { false, true })
+        {
+            var query = new SearchQuery("", mode, caseMode)
+            {
+                WholeWord = boundaryFlags, WholeLine = boundaryFlags,
+                Multiline = boundaryFlags, DotAll = boundaryFlags
+            };
+            var filter = new PathFilter { PathPrefix = "src/" };
+            var hits = new HitBuffer();
+
+            var stats = snapshot.Search(query, filter, hits);
+            var plan = snapshot.Explain(query, filter);
+
+            Assert.Equal(2, hits.Hits.Count);
+            Assert.All(hits.Hits, hit => Assert.Equal((0, 0), (hit.StartByte, hit.EndByte)));
+            Assert.Equal(0, stats.BytesScanned);
+            Assert.Equal(0, stats.DecodedChars);
+            Assert.Equal(0, stats.RegexInvocations);
+            Assert.Equal(0, stats.Utf8RegexInvocations);
+            Assert.False(plan.NeedsUnicodeDecode);
+            Assert.False(plan.MayRequireWholeDocumentVerification);
+            Assert.False(plan.CanUseNonBacktracking);
+            Assert.Equal(SiftRegexRouteReason.Literal, plan.RegexRouteReason);
+        }
+        Assert.Equal(0, engine.Compilations);
+        Assert.Equal(baselineHits, SiftProcessMetrics.RegexCacheHits);
+        Assert.Equal(baselineMisses, SiftProcessMetrics.RegexCacheMisses);
+    }
+
     [Theory]
     [InlineData(PatternMode.Literal)]
     [InlineData(PatternMode.Regex)]

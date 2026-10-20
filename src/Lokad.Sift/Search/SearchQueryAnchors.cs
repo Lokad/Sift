@@ -21,6 +21,9 @@ internal readonly record struct SearchQueryAnchors(
         in RegexExecutionPlan regexPlan,
         in RegexFragmentAnalyzer.PatternAnalysis analysis)
     {
+        if (query.Pattern.Length == 0)
+            return new SearchQueryAnchors([], [], []);
+
         if (query.PatternMode == PatternMode.Regex &&
             resolvedCaseMode == CaseMode.Insensitive &&
             !regexPlan.HasByteAnalysis)

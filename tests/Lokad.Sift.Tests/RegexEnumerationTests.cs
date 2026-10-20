@@ -109,6 +109,42 @@ public sealed class RegexEnumerationTests
     }
 
     [Theory]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public async Task TrulyEmptyQueriesPreserveOverlayVisibilityLimitsAndCancellation(bool overlay, int parallelism)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
+        await index.Build(new InMemoryDocumentSource([("a.txt", "😀"), ("b.txt", "abc")]));
+        using IIndexSnapshot snapshot = overlay
+            ? index.OpenOverlaySnapshot(new SearchOptions(parallelism))
+            : index.OpenSnapshot(new SearchOptions(parallelism));
+        if (snapshot is IOverlaySnapshot editable)
+            await editable.Update(new InMemoryDocumentSource([("c.txt", "def")]), [new DocumentKey("a.txt")]);
+        var query = new SearchQuery("", PatternMode.Regex, CaseMode.Sensitive)
+        {
+            WholeWord = true, WholeLine = true, Multiline = true, DotAll = true
+        };
+        var hits = new HitBuffer();
+
+        var stats = snapshot.Search(query, new(), hits);
+
+        Assert.Equal(overlay ? new[] { "b.txt", "c.txt" } : new[] { "a.txt", "b.txt" },
+            hits.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).Order(StringComparer.Ordinal));
+        Assert.Equal(0, stats.BytesScanned);
+        Assert.Equal(0, stats.RegexInvocations);
+        var limited = snapshot.Search(query with { MaxHits = 1 }, new(), new HitBuffer());
+        Assert.Equal(1, limited.HitsReturned);
+        Assert.Equal(SearchStopReason.MaxHits, limited.StopReason);
+        using var cancellation = new CancellationTokenSource();
+        var delivered = 0;
+        Assert.ThrowsAny<OperationCanceledException>(() => snapshot.Search(query, new(),
+            new CallbackCollector(() => { delivered++; cancellation.Cancel(); return true; }), cancellation.Token));
+        Assert.Equal(1, delivered);
+    }
+
+    [Theory]
     [InlineData("aa", "aaaaa", "snapshot")]
     [InlineData("aa", "aaaaa", "overlay")]
     [InlineData("aa", "aaaaa", "parallel")]

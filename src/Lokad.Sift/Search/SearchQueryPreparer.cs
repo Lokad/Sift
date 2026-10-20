@@ -53,7 +53,9 @@ internal static class SearchQueryPreparer
     internal static PreparedSearchQuery Create(PreparedQueryKey key, ISiftRegexEngine? engine, Action checkpoint)
     {
         var query = key.ToSearchQuery();
-        var analyzed = AnalysisCache.GetOrAdd(key, Analyze, out _);
+        var analyzed = query.Pattern.Length == 0
+            ? Analyze(key)
+            : AnalysisCache.GetOrAdd(key, Analyze, out _);
         var resolvedCaseMode = analyzed.CaseMode;
         var regexPlan = ResolveRegexExecution(query, analyzed, engine, checkpoint);
         try
@@ -90,7 +92,7 @@ internal static class SearchQueryPreparer
             : query.CaseMode;
         Utf8RegexProgram? program = null;
         RegexFragmentAnalyzer.PatternAnalysis fragments = default;
-        if (query.PatternMode == PatternMode.Regex)
+        if (query.PatternMode == PatternMode.Regex && query.Pattern.Length > 0)
         {
             if (Utf8RegexAnalysis.TryParseSyntax(query, resolved, out var syntax))
             {
@@ -106,6 +108,9 @@ internal static class SearchQueryPreparer
         ISiftRegexEngine? engine, Action checkpoint)
     {
         if (query.PatternMode != PatternMode.Regex) return RegexExecutionPlan.Literal;
+        // Raw empty queries list paths before content verification, regardless
+        // of regex or boundary flags. Nonempty empty-group syntax is different.
+        if (query.Pattern.Length == 0) return RegexExecutionPlan.ForExactLiteral(string.Empty);
         // Empty matches and boundary-constrained regexes use managed enumeration.
         // Invariant regex folding also differs from ordinal/ASCII literal folding.
         if (analysis.CaseMode == CaseMode.Sensitive && analysis.Fragments.IsExactLiteral &&

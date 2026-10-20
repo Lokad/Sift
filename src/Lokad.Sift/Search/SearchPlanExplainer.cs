@@ -94,9 +94,10 @@ internal sealed class SearchPlanExplainer(
                 regexPlan) ||
             usesUnicodeFallback;
         var mayRequireWholeDocumentVerification =
-            query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral ||
-            query.WholeLine ||
-            query.Multiline;
+            query.Pattern.Length > 0 &&
+            (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral ||
+             query.WholeLine ||
+             query.Multiline);
         var selectedNgrams = SelectedNgramMerger.Materialize(selected);
         var resolvedCandidateKind = candidateKind ??
             SearchPlanKinds.GetCandidateKind(
@@ -171,6 +172,11 @@ internal sealed class SearchPlanExplainer(
             CaseMode resolvedCaseMode,
             in RegexExecutionPlan regexPlan)
         {
+            if (query.Pattern.Length == 0)
+            {
+                return false;
+            }
+
             if (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral && !regexPlan.UsesUtf8Regex)
             {
                 return true;
