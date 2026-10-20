@@ -1338,24 +1338,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         var pattern = literalOverride ?? query.Pattern;
-        if (pattern.Length == 0)
-        {
-            var shouldContinue = collector.OnHit(new RawHit(
-                segment.SegmentId,
-                new DocumentOrdinal(document.Ordinal),
-                0,
-                0,
-                1,
-                1));
-            hitsReturned++;
-            if (!shouldContinue)
-            {
-                stopReason = SearchStopReason.CollectorStopped;
-            }
-
-            return;
-        }
-
         var needle = preparedLiteral?.Needle ?? Encoding.UTF8.GetBytes(pattern);
         var asciiNeedle = preparedLiteral?.IsAscii ?? needle.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
         var asciiDocument = query.WholeWord && asciiNeedle && contentBytes.IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
@@ -1364,7 +1346,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             asciiNeedle &&
             (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
         {
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1374,7 +1356,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             var loweredNeedle = preparedLiteral?.LoweredAsciiNeedle ?? SearchQueryPreparer.LowerAscii(needle);
             var prefixTable = preparedLiteral?.AsciiPrefixTable ?? SearchQueryPreparer.BuildPrefixTable(loweredNeedle);
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1438,11 +1420,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 return;
             }
 
-            searchIndex = found + 1;
+            searchIndex = query.PatternMode == PatternMode.Literal ? found + 1 : end;
         }
     }
 
-    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ref int hitsReturned, ref SearchStopReason stopReason)
+    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, bool allowOverlaps, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ref int hitsReturned, ref SearchStopReason stopReason)
     {
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)
@@ -1498,7 +1480,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 return;
             }
 
-            offset = start + 1;
+            offset = allowOverlaps ? start + 1 : end;
         }
     }
 

@@ -106,9 +106,11 @@ internal static class SearchQueryPreparer
         ISiftRegexEngine? engine, Action checkpoint)
     {
         if (query.PatternMode != PatternMode.Regex) return RegexExecutionPlan.Literal;
-        // Invariant regex folding differs from ordinal/ASCII literal folding.
+        // Empty matches and boundary-constrained regexes use managed enumeration.
+        // Invariant regex folding also differs from ordinal/ASCII literal folding.
         if (analysis.CaseMode == CaseMode.Sensitive && analysis.Fragments.IsExactLiteral &&
-            analysis.Fragments.ExactLiteral is { } literal)
+            !query.WholeWord && !query.WholeLine &&
+            analysis.Fragments.ExactLiteral is { Length: > 0 } literal)
             return RegexExecutionPlan.ForExactLiteral(literal);
 
         var reason = engine is null ? SiftRegexRouteReason.NoEngine : SiftRegexRouteReason.UnsupportedPattern;

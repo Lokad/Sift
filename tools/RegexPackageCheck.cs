@@ -39,7 +39,8 @@ internal static class RegexPackageCheck
             "Benchmark-only postings inspection entered the shipped assembly.");
         var documents = Enumerable.Range(0, 300)
             .Select(i => ($"src/noise-{i}.txt", "omega noise\n"))
-            .Concat([("src/a.txt", "alpha123\nblue\n"), ("docs/unicode.txt", "café\n")]).ToArray();
+            .Concat([("src/a.txt", "alpha123\nblue\n"), ("docs/unicode.txt", "café\n"),
+                ("docs/repeated.txt", "aaaa")]).ToArray();
         using var index = SiftIndex.CreateInMemory(new SiftOptions
         {
             RegexEngine = engine,
@@ -80,6 +81,20 @@ internal static class RegexPackageCheck
         Require(snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
             new PathFilter { PathRegex = @"src/[]a]\.txt$" }, hits).HitsReturned == 1,
             "Leading literal class delimiter excluded a matching path.");
+        hits.Values.Clear();
+        snapshot.Search(new SearchQuery("aa", PatternMode.Regex, CaseMode.Sensitive), new(), hits);
+        Require(hits.Values.Select(hit => (hit.StartByte, hit.EndByte)).SequenceEqual([(0, 2), (2, 4)]),
+            "Optimized regex enumeration returned overlapping matches.");
+        hits.Values.Clear();
+        snapshot.Search(new SearchQuery("aa", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
+        Require(hits.Values.Select(hit => (hit.StartByte, hit.EndByte)).SequenceEqual([(0, 2), (1, 3), (2, 4)]),
+            "Literal enumeration lost overlapping matches.");
+        hits.Values.Clear();
+        snapshot.Search(new SearchQuery("(?:)", PatternMode.Regex, CaseMode.Sensitive),
+            new PathFilter { PathPrefix = "docs/repeated.txt" }, hits);
+        Require(hits.Values.Select(hit => (hit.StartByte, hit.EndByte))
+                .SequenceEqual(Enumerable.Range(0, 5).Select(offset => (offset, offset))),
+            "Empty-group regex enumeration lost zero-length matches.");
         using var overlay = index.OpenOverlaySnapshot();
         await overlay.Update(new Documents([("src/a.txt", "alpha999\n")] ), []);
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
