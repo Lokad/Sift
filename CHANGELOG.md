@@ -22,6 +22,18 @@
 - Removed unreachable postings intersection branches and redundant planner
   forwarding methods. The existing SIMD hardware fallback, planner decisions,
   public diagnostics and index compatibility are preserved.
+- Removed the unreachable conversion from sparse intersections to dense bitsets;
+  initial density routing and candidate results are unchanged.
+
+### Fixed
+
+- Case-sensitive ASCII literal and managed regex scans now observe caller
+  cancellation and search deadlines between matches within one document.
+- Regex nesting limits now respect comments, scoped whitespace options, control
+  escapes and character classes, preventing bypasses and false rejections for
+  both content and path regexes.
+- Path regex fragment extraction now gives up conservatively on character-class
+  subtraction, preventing nested class delimiters from excluding valid matches.
 
 ## 0.3.0 - 2026-10-19
 

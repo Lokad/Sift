@@ -218,30 +218,6 @@ internal static class CandidateGenerator
                     return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
                 }
 
-                if (i + 1 < grams.Length && current.Length * 4 >= segment.DocumentCount)
-                {
-                    using var candidateBits = new PooledBitSet(segment.DocumentCount);
-                    using var postingsBits = new PooledBitSet(segment.DocumentCount);
-                    for (var currentIndex = 0; currentIndex < current.Length; currentIndex++)
-                    {
-                        candidateBits.Set((int)current[currentIndex]);
-                    }
-
-                    for (var remainingIndex = i + 1; remainingIndex < grams.Length; remainingIndex++)
-                    {
-                        if (!segment.TryGetPostings(pair, grams[remainingIndex], out var remainingPostings, out _))
-                        {
-                            return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
-                        }
-
-                        postingsBytesRead += remainingPostings.Length;
-                        postingsBits.Clear();
-                        PostingsCodec.DecodeIntoBitSet(remainingPostings, postingsBits);
-                        candidateBits.And(postingsBits);
-                    }
-
-                    return new CandidateResult(OrdinalSet.FromSorted(candidateBits.ToOrdinals()), postingsBytesRead);
-                }
             }
 
             return new CandidateResult(

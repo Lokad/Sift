@@ -1,10 +1,46 @@
 using Lokad.Sift.Search;
 using Lokad.Sift.LowLevel;
+using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Tests;
 
 public sealed class CandidateGenerationTests
 {
+    [Theory]
+    [InlineData(49, false)]
+    [InlineData(49, true)]
+    [InlineData(50, false)]
+    [InlineData(50, true)]
+    [InlineData(51, false)]
+    [InlineData(51, true)]
+    public async Task MultipleGramCandidatesRespectScopesAcrossTheDensityBoundary(int count, bool explicitOrdinals)
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource(Enumerable.Range(0, 200)
+            .Select(i => ($"{i:D3}.txt", i % 3 == 0 ? "alpha gamma" : "alpha beta")).ToArray()));
+        var storage = index.Storage;
+        var entry = Assert.Single(storage.ReadManifest().Segments);
+        using var segment = storage.OpenSegment(entry, CancellationToken.None);
+        var scope = explicitOrdinals
+            ? OrdinalSet.FromSorted(Enumerable.Range(0, count).Select(i => (uint)i).ToArray())
+            : OrdinalSet.FromRange(0, (uint)count, DeadOrdinalSet.Empty);
+        var pair = new IndexRegionPair(SegmentRegionId.ContentTriCsLex, SegmentRegionId.ContentTriCsPost);
+        int[] grams = [TestHelpers.EncodeGram("alp"), TestHelpers.EncodeGram("bet")];
+
+        var result = CandidateGenerator.Generate(segment, scope, pair, grams);
+
+        var actual = new List<uint>();
+        foreach (var ordinal in result.Ordinals) actual.Add(ordinal);
+        Assert.Equal(Enumerable.Range(0, count).Where(i => i % 3 != 0).Select(i => (uint)i), actual);
+        long expectedBytes = 0;
+        foreach (var gram in grams)
+        {
+            Assert.True(segment.TryGetPostings(pair, gram, out var postings, out _));
+            expectedBytes += postings.Length;
+        }
+        Assert.Equal(expectedBytes, result.PostingsBytesRead);
+    }
+
     [Fact]
     public void PostingsEncodingPreservesWireBytesAcrossDeltaWidths()
     {
