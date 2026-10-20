@@ -607,6 +607,12 @@ Transfer rules:
 
 Analyzer limits are acceptable. Unsound extraction is forbidden.
 
+Scoped whitespace options (`x`/`X`) and character classes beginning with a literal
+`]` conservatively disable fallback analysis. These patterns still use .NET
+matching; analysis must not turn their syntax into literal text or mandatory
+fragments. Scoped ignore-case options are recognized in either letter case and
+cannot establish case-sensitive mandatory fragments or an exact-literal route.
+
 Language-specific parsing or language-specific semantic recognition is out of scope for the planner. Pattern analysis must remain query-driven and corpus-language agnostic; it may classify regex structure, literals, alternations, anchors, and repetition, but it must not depend on hard-coded knowledge such as C# declarations, Go receivers, Java annotations, or framework-specific API names.
 
 #### 8.3.2 Encoding rule
@@ -623,12 +629,12 @@ For case-insensitive planning:
 
 Plan selection must be cost-aware.
 
-Use the following default thresholds, configurable:
+Default planning limits:
 
-* `MinIndexedFragmentBytes = 2`
+* minimum indexed fragment length: 2 bytes (internal constant)
 * `MaxSelectedNgrams = 24`
-* `DirectScanScopeBytesThreshold = 64 MiB`
-* `DirectScanScopeDocumentsThreshold = 8192`
+* `DirectScanScopeBytesThreshold = 1 MiB`
+* `DirectScanScopeDocumentsThreshold = 256`
 
 Plan choice:
 
@@ -713,9 +719,9 @@ Use a custom byte-oriented literal verifier.
 Fast path:
 
 * operate directly on normalized UTF-8 content bytes
-* choose anchor byte by rarity from corpus byte-frequency stats
-* SIMD-scan for anchor
-* confirm full literal by direct byte compare
+* case-sensitive ASCII literals use span-based substring search
+* ASCII-insensitive literals use folded bytes and a prepared prefix table
+* check whole-word and whole-line constraints on each candidate match
 
 Case-insensitive literal mode:
 
@@ -729,7 +735,7 @@ Whole-word literal mode:
 
 Whole-line literal mode:
 
-* use line index to limit comparison to line spans
+* compare match bounds with the surrounding line bounds, excluding a trailing CR
 
 ### 9.2 Regex verifier
 

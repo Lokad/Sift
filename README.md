@@ -63,6 +63,10 @@ budget cannot do so, Sift uses a safe plan. `SearchPlan.AdvisorySeeds` are diagn
 hints and never exclude candidates. Fallback patterns without a proven indexable
 constraint scan their scope, which may examine more candidates.
 
+Regex analysis gives up conservatively on scoped whitespace options (`x`/`X`)
+and character classes starting with a literal `]`. These patterns retain .NET
+matching semantics through managed verification.
+
 ## C# example
 
 ```csharp

@@ -27,9 +27,17 @@
 - Removed unsafe advisory-seed candidate pruning and its seed-selection plumbing.
   Advisory seeds remain available in plan diagnostics; fallback patterns without
   a proven indexable constraint scan their scope and may examine more candidates.
+- Removed the unused prepared-pattern byte copy and advisory seed wrapper/state.
+  Postings-statistics inspection now resides entirely in the benchmark harness.
+- Corrected documented direct-scan defaults and literal-verifier behavior.
 
 ### Fixed
 
+- Scoped whitespace regex options now use managed matching instead of unsafe
+  literal promotion or mandatory-fragment filtering. Uppercase scoped ignore-case
+  options retain ignore-case semantics.
+- Character classes starting with a literal `]` no longer produce unsound
+  mandatory fragments that omit content or path matches.
 - N-gram budgets no longer omit regex alternatives. An indexed union is used only
   when every branch is covered; insufficient budgets fall back to a safe plan.
 - Fallback regex matching no longer loses branches when advisory seeds are capped,
