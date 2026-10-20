@@ -61,7 +61,6 @@ internal static class SearchQueryPreparer
         {
             var anchors = SearchQueryAnchors.Create(query, resolvedCaseMode, regexPlan, analyzed.Fragments);
             var mandatoryTexts = PreparedSearchText.CreateMany(anchors.MandatoryTexts);
-            var advisoryTexts = PreparedSearchText.CreateMany(anchors.AdvisoryTexts);
             var usesLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
             return new PreparedSearchQuery(
                 resolvedCaseMode,
@@ -70,7 +69,6 @@ internal static class SearchQueryPreparer
                 PreparedLiteralQuery.Create(query, resolvedCaseMode, regexPlan.ExactLiteral),
                 new PreparedSearchText(query.Pattern, Encoding.UTF8.GetBytes(query.Pattern)),
                 mandatoryTexts,
-                advisoryTexts,
                 PreparedSearchText.CreateMany(
                     regexPlan.Utf8RegexProgram?.LeadingLiteralSet ?? []),
                 usesLiteralVerifier

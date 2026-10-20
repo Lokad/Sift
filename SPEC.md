@@ -660,11 +660,18 @@ The planner may introduce explicit structural plan families, but those families 
 
 N-gram selection rule:
 
-* always include at least the rarest n-gram from every mandatory fragment
+* for intersections, select useful grams from mandatory fragments; omitting a
+  conjunctive constraint only broadens candidates
+* for unions, cover every alternative, including in a union of intersections;
+  if the budget cannot cover them all, decline that candidate and use a safe plan
 * then add additional n-grams by increasing `DocFreq` until:
 
   * estimated candidate set is small enough, or
   * `MaxSelectedNgrams` is reached
+
+Planning budgets must not change the match set. Advisory seeds are lossy
+diagnostics, not exhaustive branch coverage, and must not exclude candidates.
+Fallback patterns without a proven indexable constraint scan their scope.
 
 ### 8.5 Candidate generation
 

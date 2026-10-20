@@ -57,6 +57,12 @@ can warm that cache before a search. The process-wide `SiftProcessMetrics`
 managed regex hit/miss counters count actual compilation-cache lookups; reusing
 an index's prepared query does not access that managed cache.
 
+Planning budgets such as `MaxSelectedNgrams` bound acceleration work without
+changing regex results. An indexed union must cover every alternative; when the
+budget cannot do so, Sift uses a safe plan. `SearchPlan.AdvisorySeeds` are diagnostic
+hints and never exclude candidates. Fallback patterns without a proven indexable
+constraint scan their scope, which may examine more candidates.
+
 ## C# example
 
 ```csharp

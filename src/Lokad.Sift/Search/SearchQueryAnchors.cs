@@ -13,7 +13,6 @@ internal readonly record struct SearchOrderedAnchorGroup(SearchOrderedAnchor[] A
 internal readonly record struct SearchQueryAnchors(
     string[] MandatoryTexts,
     string[] AdvisoryTexts,
-    CaseMode AdvisoryCaseMode,
     SearchOrderedAnchorGroup[] OrderedAnchorGroups)
 {
     public static SearchQueryAnchors Create(
@@ -28,7 +27,7 @@ internal readonly record struct SearchQueryAnchors(
         {
             // A mandatory byte fragment is not mandatory under invariant Unicode
             // regex folding unless the pattern has byte-safe semantics for ASCII documents.
-            return new SearchQueryAnchors([], [], CaseMode.Sensitive, []);
+            return new SearchQueryAnchors([], [], []);
         }
 
         var mandatoryFragments = GetMandatoryFragments(query, regexPlan.ExactLiteral, analysis);
@@ -36,13 +35,12 @@ internal readonly record struct SearchQueryAnchors(
             query,
             regexPlan.ExactLiteral,
             mandatoryFragments,
-            analysis,
-            out var advisoryCaseMode);
+            analysis);
         var utf8RegexProgram = regexPlan.Utf8RegexProgram;
         var regexGroups = utf8RegexProgram?.OrderedAnchorGroups;
         if (utf8RegexProgram is null || regexGroups is null || regexGroups.Length == 0)
         {
-            return new SearchQueryAnchors(mandatoryFragments, advisorySeeds, advisoryCaseMode, []);
+            return new SearchQueryAnchors(mandatoryFragments, advisorySeeds, []);
         }
 
         var orderedAnchorGroups = new SearchOrderedAnchorGroup[regexGroups.Length];
@@ -64,7 +62,7 @@ internal readonly record struct SearchQueryAnchors(
             orderedAnchorGroups[groupIndex] = new SearchOrderedAnchorGroup(anchors);
         }
 
-        return new SearchQueryAnchors(mandatoryFragments, advisorySeeds, advisoryCaseMode, orderedAnchorGroups);
+        return new SearchQueryAnchors(mandatoryFragments, advisorySeeds, orderedAnchorGroups);
 
         static string[] GetMandatoryFragments(
             SearchQuery query,
@@ -85,20 +83,14 @@ internal readonly record struct SearchQueryAnchors(
             SearchQuery query,
             string? exactRegexLiteral,
             string[] mandatoryFragments,
-            in RegexFragmentAnalyzer.PatternAnalysis analysis,
-            out CaseMode advisoryCaseMode)
+            in RegexFragmentAnalyzer.PatternAnalysis analysis)
         {
-            advisoryCaseMode = query.CaseMode == CaseMode.Insensitive
-                ? CaseMode.Insensitive
-                : CaseMode.Sensitive;
-
             if (query.PatternMode != PatternMode.Regex || exactRegexLiteral is not null)
             {
                 return [];
             }
 
             var advisoryPlan = analysis.AdvisorySeeds;
-            advisoryCaseMode = advisoryPlan.RequiresIgnoreCase ? CaseMode.Insensitive : advisoryCaseMode;
             var seeds = advisoryPlan.Seeds;
             if (seeds.Length == 0)
             {

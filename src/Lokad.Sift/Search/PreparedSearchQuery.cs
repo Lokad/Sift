@@ -40,7 +40,6 @@ internal sealed class PreparedSearchQuery
         PreparedLiteralQuery? literal,
         PreparedSearchText pattern,
         PreparedSearchText[] mandatoryTexts,
-        PreparedSearchText[] advisoryTexts,
         PreparedSearchText[] leadingLiterals,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
         PreparedOrderedAnchor[][] orderedAnchorGroups,
@@ -52,7 +51,6 @@ internal sealed class PreparedSearchQuery
         Literal = literal;
         Pattern = pattern;
         MandatoryTexts = mandatoryTexts;
-        AdvisoryTexts = advisoryTexts;
         LeadingLiterals = leadingLiterals;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
         OrderedAnchorGroups = orderedAnchorGroups;
@@ -67,7 +65,6 @@ internal sealed class PreparedSearchQuery
     public PreparedLiteralQuery? Literal { get; }
     public PreparedSearchText Pattern { get; }
     public PreparedSearchText[] MandatoryTexts { get; }
-    public PreparedSearchText[] AdvisoryTexts { get; }
     public PreparedSearchText[] LeadingLiterals { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
     public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }

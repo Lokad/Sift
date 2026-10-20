@@ -2691,19 +2691,20 @@ public sealed class SearchIntegrationTests
         Assert.Contains("foo", plan.AdvisorySeeds);
         Assert.Contains("bar", plan.AdvisorySeeds);
         Assert.False(plan.CanUseNonBacktracking);
+        Assert.False(plan.UsesIndex);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(new SearchQuery("(foo|bar)\\1", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
 
         Assert.Equal(2, stats.HitsReturned);
-        Assert.True(stats.CandidateDocumentsAfterIndex < stats.ScopeDocuments);
+        Assert.Equal(stats.ScopeDocuments, stats.CandidateDocumentsAfterIndex);
         Assert.Equal(
             ["src/00250.txt", "src/01750.txt"],
             collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray());
     }
 
     [Fact]
-    public async Task InlineOptionRegexUsesAdvisorySeedsForFallbackNarrowing()
+    public async Task InlineOptionRegexKeepsAdvisorySeedsWithoutUnsafePruning()
     {
         var documents = Enumerable.Range(0, 4000)
             .Select(static i => ($"src/{i:D5}.txt", i switch
@@ -2731,12 +2732,13 @@ public sealed class SearchIntegrationTests
         Assert.Equal(SearchPatternKind.RegexFallback, plan.PatternKind);
         Assert.Contains("debug", plan.AdvisorySeeds);
         Assert.Contains("true", plan.AdvisorySeeds);
+        Assert.False(plan.UsesIndex);
 
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter(), collector);
 
         Assert.Equal(2, stats.HitsReturned);
-        Assert.True(stats.CandidateDocumentsAfterIndex < stats.ScopeDocuments);
+        Assert.Equal(stats.ScopeDocuments, stats.CandidateDocumentsAfterIndex);
         Assert.Equal(
             ["src/00125.txt", "src/01125.txt"],
             collector.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path).OrderBy(static path => path, StringComparer.Ordinal).ToArray());

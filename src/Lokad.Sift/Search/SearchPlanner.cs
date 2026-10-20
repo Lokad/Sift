@@ -192,11 +192,9 @@ internal readonly record struct SearchQueryFeatures(
     PreparedSearchQuery Prepared)
 {
     public CaseMode ResolvedCaseMode => Prepared.ResolvedCaseMode;
-    public SearchQueryAnchors Anchors => Prepared.Anchors;
     public RegexExecutionPlan RegexPlan => Prepared.RegexPlan;
     public PreparedLiteralQuery? Literal => Prepared.Literal;
     public PreparedSearchText[] MandatoryTexts => Prepared.MandatoryTexts;
-    public PreparedSearchText[] AdvisoryTexts => Prepared.AdvisoryTexts;
     public PreparedSearchText[] LeadingLiterals => Prepared.LeadingLiterals;
     public bool IsLiteralLike => Query.PatternMode == PatternMode.Literal || RegexPlan.IsExactLiteral;
     public bool HasMandatoryFragments => MandatoryTexts.Length > 0;

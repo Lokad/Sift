@@ -24,9 +24,16 @@
   public diagnostics and index compatibility are preserved.
 - Removed the unreachable conversion from sparse intersections to dense bitsets;
   initial density routing and candidate results are unchanged.
+- Removed unsafe advisory-seed candidate pruning and its seed-selection plumbing.
+  Advisory seeds remain available in plan diagnostics; fallback patterns without
+  a proven indexable constraint scan their scope and may examine more candidates.
 
 ### Fixed
 
+- N-gram budgets no longer omit regex alternatives. An indexed union is used only
+  when every branch is covered; insufficient budgets fall back to a safe plan.
+- Fallback regex matching no longer loses branches when advisory seeds are capped,
+  short, or dense.
 - Case-sensitive ASCII literal and managed regex scans now observe caller
   cancellation and search deadlines between matches within one document.
 - Regex nesting limits now respect comments, scoped whitespace options, control

@@ -105,25 +105,8 @@ internal ref struct SearchPlanCandidateBuilder
 
         if (!features.HasMandatoryFragments)
         {
-            // Supported byte analysis has an exhaustive leading-literal set.
-            // The fallback advisory selector can omit dense branches, so it
-            // must not replace that sound set when execution uses managed Regex.
-            if (!features.RegexPlan.HasByteAnalysis && features.AdvisoryTexts.Length > 0)
-            {
-                var advisoryPlan = TryCreateLiteralSetPlan(
-                    features.Anchors.AdvisoryCaseMode,
-                    features.AdvisoryTexts,
-                    isAdvisory: true);
-                if (advisoryPlan.HasValue)
-                {
-                    candidates.Add(CreateRegexIndexedCandidate(
-                        advisoryPlan.Value,
-                        SearchPlanner.EstimateCandidateDocuments(
-                            advisoryPlan.Value.SelectedGrams,
-                            scope.Count)));
-                }
-            }
-
+            // Only exhaustive leading literals can exclude candidates. Advisory
+            // seeds are lossy diagnostics and cannot establish branch coverage.
             var alternationPlan = TryCreateLeadingLiteralSetPlan(
                 leadingPlans);
             if (alternationPlan.HasValue)
@@ -443,9 +426,7 @@ internal ref struct SearchPlanCandidateBuilder
             _options.MaxSelectedNgrams));
         IndexRegionPair? pair = null;
         var gramLength = 0;
-        for (var i = 0;
-             i < leadingLiterals.Length && selected.Count < _options.MaxSelectedNgrams;
-             i++)
+        for (var i = 0; i < leadingLiterals.Length; i++)
         {
             var literalPlan = leadingPlans[i];
             if (!literalPlan.HasValue || literalPlan.Value.IsMissingGram || literalPlan.Value.SelectedGrams.Length == 0)
@@ -465,6 +446,9 @@ internal ref struct SearchPlanCandidateBuilder
             }
 
             TryAddSelectedGram(selected, indexed.SelectedGrams[0]);
+            // Visit every alternative even when earlier branches filled the budget:
+            // later branches may share a gram, or make this union unsafe to use.
+            if (selected.Count > _options.MaxSelectedNgrams) return null;
         }
 
         if (selected.Count == 0 || pair is null)
@@ -480,124 +464,6 @@ internal ref struct SearchPlanCandidateBuilder
             [.. selected],
             pair.Value,
             gramLength);
-    }
-
-    private LiteralPlan? TryCreateLiteralSetPlan(
-        CaseMode resolvedCaseMode,
-        PreparedSearchText[] literals,
-        bool isAdvisory)
-    {
-        if (literals.Length == 0)
-        {
-            return null;
-        }
-
-        var selected = new List<SelectedGram>(Math.Min(
-            literals.Length,
-            _options.MaxSelectedNgrams));
-        IndexRegionPair? pair = null;
-        var gramLength = 0;
-        var foundAny = false;
-        for (var i = 0;
-             i < literals.Length && selected.Count < _options.MaxSelectedNgrams;
-             i++)
-        {
-            if (literals[i].Text.Length < 3 || IsPoisonousSeedText(literals[i].Text))
-            {
-                continue;
-            }
-
-            var literalPlan = SelectIndexedLiteralCandidate(
-                literals[i],
-                resolvedCaseMode,
-                selectAllGrams: false);
-            if (!literalPlan.HasValue || literalPlan.Value.SelectedGrams.Length == 0)
-            {
-                continue;
-            }
-
-            var indexed = literalPlan.Value;
-            if (isAdvisory && IsPoisonousSeedPlan(indexed))
-            {
-                continue;
-            }
-
-            if (indexed.IsMissingGram)
-            {
-                foundAny = true;
-                continue;
-            }
-
-            if (pair is null)
-            {
-                pair = indexed.IndexPair;
-                gramLength = indexed.GramLength;
-            }
-            else if (!pair.Value.Equals(indexed.IndexPair) || gramLength != indexed.GramLength)
-            {
-                continue;
-            }
-
-            TryAddSelectedGram(selected, indexed.SelectedGrams[0]);
-            foundAny = true;
-        }
-
-        if (!foundAny)
-        {
-            return null;
-        }
-
-        if (selected.Count == 0 || pair is null)
-        {
-            return LiteralPlan.Missing(_scope.Count, _scope.Bytes, 0, default, 3);
-        }
-
-        selected.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
-        return LiteralPlan.Union(
-            _scope.Count,
-            _scope.Bytes,
-            gramLength,
-            [.. selected],
-            pair.Value,
-            gramLength);
-    }
-
-    private static bool IsPoisonousSeedText(string value)
-    {
-        var hasLetterOrDigit = false;
-        var punctuationCount = 0;
-        for (var i = 0; i < value.Length; i++)
-        {
-            if (char.IsLetterOrDigit(value[i]))
-            {
-                hasLetterOrDigit = true;
-            }
-            else if (!char.IsWhiteSpace(value[i]))
-            {
-                punctuationCount++;
-            }
-        }
-
-        if (!hasLetterOrDigit)
-        {
-            return true;
-        }
-
-        return punctuationCount > 0 && punctuationCount * 2 >= value.Length;
-    }
-
-    private bool IsPoisonousSeedPlan(in LiteralPlan plan)
-    {
-        if (plan.IsMissingGram || plan.SelectedGrams.Length == 0 || _scope.Count <= 0)
-        {
-            return true;
-        }
-
-        var density = (double)plan.SelectedGrams[0].DocFreq / _scope.Count;
-        var densityThreshold = _options.DirectScanCandidateDensityThreshold > 0
-            ? Math.Min(_options.DirectScanCandidateDensityThreshold * 0.5d, 0.35d)
-            : 0.35d;
-        return density >= densityThreshold;
     }
 
     private static void AddBranchGrams(
