@@ -6,6 +6,58 @@ namespace Lokad.Sift.Tests;
 public sealed class CandidateGenerationTests
 {
     [Fact]
+    public void PostingsEncodingPreservesWireBytesAcrossDeltaWidths()
+    {
+        uint[] ordinals = [0, 127, 255, 16639, 2113791, 270549247];
+        byte[] expected = [0, 0, 127, 128, 1, 128, 128, 1, 128, 128, 128, 1, 128, 128, 128, 128, 1];
+        var destination = Enumerable.Repeat((byte)0xCC, expected.Length + 8).ToArray();
+
+        var written = PostingsCodec.Encode(ordinals, destination);
+
+        Assert.Equal(expected.Length, written);
+        Assert.Equal(expected, destination[..written]);
+        Assert.All(destination[written..], value => Assert.Equal(0xCC, value));
+        Assert.Equal(expected, PostingsCodec.Encode(ordinals));
+        Assert.Equal(ordinals, PostingsCodec.Decode(destination.AsSpan(0, written)));
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(4095, 0)]
+    [InlineData(4096, 16)]
+    [InlineData(4097, 17)]
+    [InlineData(4353, 18)]
+    public void PostingsEncodingRespectsCapacityAndCheckpointBoundaries(int count, int checkpoints)
+    {
+        var ordinals = CreateRange(0, count, 1);
+        var expectedLength = count + (checkpoints == 0 ? 1 : 5 + checkpoints * 8);
+        var destination = Enumerable.Repeat((byte)0xCC, expectedLength + 8).ToArray();
+
+        var written = PostingsCodec.Encode(ordinals, destination);
+
+        Assert.Equal(expectedLength, written);
+        Assert.Equal(expectedLength, PostingsCodec.GetEncodedLength(ordinals));
+        Assert.All(destination[written..], value => Assert.Equal(0xCC, value));
+        var payload = destination.AsSpan(0, written);
+        var view = PostingsCodec.Parse(payload);
+        Assert.Equal(checkpoints > 0, view.IsCheckpointed);
+        Assert.Equal(checkpoints * 8, view.Checkpoints.Length);
+        if (checkpoints > 0)
+        {
+            Assert.Equal(new byte[] { 0, 0, 0, 0, 1, 0, 0, 0 }, view.Checkpoints[..8].ToArray());
+            var last = view.Checkpoints[^8..];
+            Assert.Equal((uint)((checkpoints - 1) * 256),
+                System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(last));
+            Assert.Equal((checkpoints - 1) * 256 + 1,
+                System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(last[4..]));
+        }
+
+        PostingsCodec.Validate(payload, count, count);
+        Assert.Equal(ordinals, PostingsCodec.Decode(payload));
+        Assert.Throws<IndexOutOfRangeException>(() => PostingsCodec.Encode(ordinals, new byte[written - 1]));
+    }
+
+    [Fact]
     public void PostingsCodecAdaptiveIntersectionMatchesPlainEncoding()
     {
         var right = CreateRange(0, 1536, 3);

@@ -13,6 +13,12 @@
   overlays. Reusing a prepared verifier no longer synthesizes managed cache hits.
 - Clarified that planner candidate estimates are heuristic rather than upper
   bounds; retained the existing scoring behavior after a rarest-gram comparison.
+- Removed unused planner/reclamation result fields, regex analysis state, and
+  internal convenience helpers. Search costs, regex greediness, snapshot leases,
+  and reclamation durability are preserved; public API signatures are unchanged.
+- Reduced postings generation to one sizing pass followed by encoding, using the
+  written byte count for lexicon entries. Index format versions and bytes remain
+  unchanged, including version 3 read compatibility.
 
 ## 0.3.0 - 2026-10-19
 

@@ -457,6 +457,12 @@ For each temporary bucket stream:
 3. emit postings list
 4. emit lexicon entry with `DocFreq`, `PostingsOffset`, `PostingsBytes`
 
+The in-memory postings builder sizes each list once for the combined allocation,
+then encodes into the remaining destination capacity. Encoding returns the byte
+count for the lexicon entry; it does not repeat the sizing traversal. The final
+written length must match the allocation. Plain and checkpointed wire layouts
+remain unchanged.
+
 ### 7.6 Publication
 
 Publication must be crash-safe:

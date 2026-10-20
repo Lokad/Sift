@@ -37,22 +37,11 @@ internal static class PostingsCodec
         return totalBytes;
     }
 
-    internal static void Encode(ReadOnlySpan<uint> ordinals, Span<byte> payload)
-    {
-        if (payload.Length != GetEncodedLength(ordinals))
-        {
-            throw new ArgumentException("The postings destination has an invalid length.", nameof(payload));
-        }
-
-        if (ordinals.Length >= CheckpointThreshold)
-        {
-            EncodeCheckpointed(ordinals, payload);
-        }
-        else
-        {
-            EncodePlain(ordinals, payload);
-        }
-    }
+    // The destination may have spare capacity; return the length of the encoded prefix.
+    internal static int Encode(ReadOnlySpan<uint> ordinals, Span<byte> payload) =>
+        ordinals.Length >= CheckpointThreshold
+            ? EncodeCheckpointed(ordinals, payload)
+            : EncodePlain(ordinals, payload);
 
     public static PostingsView Parse(ReadOnlySpan<byte> payload)
     {
@@ -226,7 +215,7 @@ internal static class PostingsCodec
             : IntersectSortedSequential(left, view.Data, destination);
     }
 
-    private static void EncodePlain(ReadOnlySpan<uint> ordinals, Span<byte> payload)
+    private static int EncodePlain(ReadOnlySpan<uint> ordinals, Span<byte> payload)
     {
         payload[0] = PlainEncoding;
         var cursor = 1;
@@ -236,9 +225,11 @@ internal static class PostingsCodec
             cursor += VarInt.WriteUInt32(payload[cursor..], ordinals[i] - previous);
             previous = ordinals[i];
         }
+
+        return cursor;
     }
 
-    private static void EncodeCheckpointed(ReadOnlySpan<uint> ordinals, Span<byte> payload)
+    private static int EncodeCheckpointed(ReadOnlySpan<uint> ordinals, Span<byte> payload)
     {
         var checkpointCount = (ordinals.Length + CheckpointInterval - 1) / CheckpointInterval;
         var checkpointHeaderBytes = 1 + 4 + checkpointCount * 8;
@@ -261,6 +252,8 @@ internal static class PostingsCodec
 
             previous = ordinal;
         }
+
+        return dataCursor;
     }
 
     private static PostingsView ParseCheckpointed(ReadOnlySpan<byte> payload)

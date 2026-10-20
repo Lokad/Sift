@@ -852,17 +852,21 @@ internal sealed unsafe class DirectIndexedGramBuilder : IDisposable
 
                 var gram = _touched[i];
                 var docFreq = _docFrequencies[i];
-                var postingsBytes = PostingsCodec.GetEncodedLength(_ordinals.AsSpan(ordinalsOffset, docFreq));
+                var postingsBytes = PostingsCodec.Encode(
+                    _ordinals.AsSpan(ordinalsOffset, docFreq),
+                    postingsBlob[postingsOffset..]);
                 var entryOffset = SegmentFormat.LexiconHeaderSize + i * entrySize;
                 SegmentIndexBuilder.WriteSuffix(lexicon.Slice(entryOffset, suffixSize), gram, suffixSize);
                 LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize, 4), postingsOffset);
                 LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 4, 4), postingsBytes);
                 LittleEndianCodec.WriteInt32(lexicon.Slice(entryOffset + suffixSize + 8, 4), docFreq);
-                PostingsCodec.Encode(
-                    _ordinals.AsSpan(ordinalsOffset, docFreq),
-                    postingsBlob.Slice(postingsOffset, postingsBytes));
                 postingsOffset = checked(postingsOffset + postingsBytes);
                 ordinalsOffset += docFreq;
+            }
+
+            if (postingsOffset != totalBytes)
+            {
+                throw new InvalidOperationException("The encoded postings length does not match its allocation.");
             }
 
             return index;
