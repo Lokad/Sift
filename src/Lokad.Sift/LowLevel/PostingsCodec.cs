@@ -11,7 +11,6 @@ internal static class PostingsCodec
 
     private const byte PlainEncoding = 0;
     private const byte CheckpointedEncoding = 1;
-    private const int TinyIntersectionThreshold = 256;
     private const int SimdBlockIntersectionThreshold = 2048;
     private const int ScalarBlockSize = 4;
 
@@ -205,7 +204,7 @@ internal static class PostingsCodec
         var smaller = Math.Min(left.Length, docFreq);
         if (smaller >= SimdBlockIntersectionThreshold)
         {
-            return IntersectSortedAdaptive(left, view, docFreq, destination, useSimd: true);
+            return IntersectSortedAdaptive(left, view, docFreq, destination);
         }
 
         ValidateDocumentFrequency(view.Data, docFreq);
@@ -330,7 +329,7 @@ internal static class PostingsCodec
         return count;
     }
 
-    private static int IntersectSortedAdaptive(ReadOnlySpan<uint> left, PostingsView view, int docFreq, Span<uint> result, bool useSimd)
+    private static int IntersectSortedAdaptive(ReadOnlySpan<uint> left, PostingsView view, int docFreq, Span<uint> result)
     {
         if (TryGetApproximateRange(view, out var rightFirst, out var rightLast) &&
             (left[0] > rightLast || left[^1] < rightFirst))
@@ -341,27 +340,15 @@ internal static class PostingsCodec
         var rentedRight = ArrayPool<uint>.Shared.Rent(docFreq);
         try
         {
-            var rightLength = DecodeOrdinals(view, rentedRight.AsSpan(0, docFreq));
-            var right = rentedRight.AsSpan(0, rightLength);
-            if (right.Length == 0)
-            {
-                return 0;
-            }
+            var right = rentedRight.AsSpan(0, docFreq);
+            DecodeOrdinals(view, right);
 
             if (left[0] > right[^1] || right[0] > left[^1])
             {
                 return 0;
             }
 
-            var smaller = Math.Min(left.Length, right.Length);
-            if (smaller <= TinyIntersectionThreshold)
-            {
-                return IntersectSortedScalar(left, right, result);
-            }
-
-            return useSimd
-                ? IntersectSortedBlockMergeSimd(left, right, result)
-                : IntersectSortedBlockMerge(left, right, result);
+            return IntersectSortedBlockMergeSimd(left, right, result);
         }
         finally
         {
@@ -414,7 +401,7 @@ internal static class PostingsCodec
         return count;
     }
 
-    private static int DecodeOrdinals(PostingsView view, Span<uint> values)
+    private static void DecodeOrdinals(PostingsView view, Span<uint> values)
     {
         var count = 0;
         uint current = 0;
@@ -429,8 +416,6 @@ internal static class PostingsCodec
         {
             throw new InvalidDataException("Sift postings do not match their document frequency.");
         }
-
-        return count;
     }
 
     private static bool TryGetApproximateRange(PostingsView view, out uint first, out uint last)
@@ -452,34 +437,6 @@ internal static class PostingsCodec
         }
 
         return true;
-    }
-
-    private static int IntersectSortedScalar(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right, Span<uint> result)
-    {
-        var count = 0;
-        var i = 0;
-        var j = 0;
-        while (i < left.Length && j < right.Length)
-        {
-            var leftValue = left[i];
-            var rightValue = right[j];
-            if (leftValue == rightValue)
-            {
-                result[count++] = leftValue;
-                i++;
-                j++;
-            }
-            else if (leftValue < rightValue)
-            {
-                i++;
-            }
-            else
-            {
-                j++;
-            }
-        }
-
-        return count;
     }
 
     private static int IntersectSortedBlockMerge(ReadOnlySpan<uint> left, ReadOnlySpan<uint> right, Span<uint> result)

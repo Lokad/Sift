@@ -81,12 +81,15 @@ public sealed class CandidateGenerationTests
         Assert.Equal(new uint[] { 2, 6, 14, 2048, 6000, 9998 }, result);
     }
 
-    [Fact]
-    public void PostingsCodecAdaptiveIntersectionRejectsDisjointCheckpointedRanges()
+    [Theory]
+    [InlineData(4)]
+    [InlineData(2048)]
+    [InlineData(5000)]
+    public void PostingsCodecIntersectionRejectsDisjointCheckpointedRanges(int leftCount)
     {
         var right = CreateRange(10_000, 5000, 1);
         var payload = PostingsCodec.Encode(right);
-        var left = new uint[] { 1, 10, 100, 9999 };
+        var left = CreateRange(0, leftCount, 1);
 
         var result = PostingsCodec.IntersectSorted(left, payload, right.Length);
 
@@ -94,15 +97,40 @@ public sealed class CandidateGenerationTests
     }
 
     [Theory]
-    [InlineData(2500)]
-    [InlineData(3500)]
-    public void PostingsCodecAdaptiveIntersectionRejectsMismatchedDocumentFrequency(int documentFrequency)
+    [InlineData(3000, 2500)]
+    [InlineData(3000, 3500)]
+    [InlineData(5000, 4500)]
+    [InlineData(5000, 5500)]
+    public void PostingsCodecAdaptiveIntersectionRejectsMismatchedDocumentFrequency(int count, int documentFrequency)
     {
-        var ordinals = CreateRange(0, 3000, 1);
+        var ordinals = CreateRange(0, count, 1);
         var payload = PostingsCodec.Encode(ordinals);
 
         Assert.Throws<InvalidDataException>(() =>
             PostingsCodec.IntersectSorted(ordinals, payload, documentFrequency));
+    }
+
+    [Theory]
+    [InlineData(2047, 3000)]
+    [InlineData(2048, 3000)]
+    [InlineData(2049, 3000)]
+    [InlineData(4095, 5000)]
+    [InlineData(4096, 5000)]
+    [InlineData(4097, 5000)]
+    [InlineData(5000, 2047)]
+    [InlineData(5000, 2048)]
+    [InlineData(5000, 2049)]
+    public void PostingsIntersectionMatchesSetIntersectionAcrossStrategyBoundaries(int rightCount, int leftCount)
+    {
+        var right = CreateRange(3, rightCount, 3);
+        var left = CreateRange(0, leftCount, 2);
+        var payload = PostingsCodec.Encode(right);
+        var destination = Enumerable.Repeat(uint.MaxValue, Math.Min(leftCount, rightCount) + 4).ToArray();
+
+        var count = PostingsCodec.IntersectSorted(left, payload, rightCount, destination);
+
+        Assert.Equal(left.Intersect(right), destination[..count]);
+        Assert.All(destination[count..], ordinal => Assert.Equal(uint.MaxValue, ordinal));
     }
 
     [Theory]
