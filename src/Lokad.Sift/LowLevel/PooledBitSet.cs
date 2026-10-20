@@ -22,11 +22,6 @@ internal ref struct PooledBitSet
         _words[bit >> 5] |= 1u << (bit & 31);
     }
 
-    public bool Contains(int bit)
-    {
-        return (_words[bit >> 5] & (1u << (bit & 31))) != 0;
-    }
-
     public void And(PooledBitSet other)
     {
         for (var i = 0; i < _count; i++)

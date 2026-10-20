@@ -15,7 +15,6 @@ internal sealed class SearchPlanExplainer(
         var resolvedCaseMode = preparedQuery.ResolvedCaseMode;
         var matcher = PathFilterMatcher.Prepare(pathFilter);
         var regexPlan = preparedQuery.RegexPlan;
-        var anchors = preparedQuery.Anchors;
         var mandatoryFragments = preparedQuery.Anchors.MandatoryTexts;
         var advisorySeeds = preparedQuery.Anchors.AdvisoryTexts;
         var scopeDocuments = 0;

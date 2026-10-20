@@ -16,9 +16,6 @@ internal readonly struct DeadOrdinalSet : IEquatable<DeadOrdinalSet>
 
     public bool Contains(uint ordinal) => Span.BinarySearch(ordinal) >= 0;
 
-    public static DeadOrdinalSet Create(ReadOnlySpan<uint> ordinals)
-        => FromOwned(ordinals.ToArray());
-
     public static DeadOrdinalSet FromOwned(uint[] ordinals)
     {
         for (var i = 1; i < ordinals.Length; i++)

@@ -757,7 +757,6 @@ internal static class RegexFragmentAnalyzer
 
         private NodeResult ConsumeRange(NodeResult atom)
         {
-            var start = _index;
             _index++;
             var min = 0;
             while (_index < _pattern.Length && char.IsDigit(_pattern[_index]))

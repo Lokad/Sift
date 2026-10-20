@@ -126,8 +126,12 @@ public sealed class SearchIntegrationTests
             new PathFilter { PathRegex = nested }));
     }
 
-    [Fact]
-    public async Task InvalidLargeQuantifierDoesNotEscapeAsArithmeticOverflow()
+    [Theory]
+    [InlineData("a{999999999999999999999999999999}")]
+    [InlineData("a+??")]
+    [InlineData("a{1,3}??")]
+    [InlineData("a{3,1}?")]
+    public async Task SearchRejectsInvalidQuantifiersWithArgumentException(string pattern)
     {
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
@@ -135,7 +139,7 @@ public sealed class SearchIntegrationTests
 
         var exception = Record.Exception(() => snapshot.Search(
             new SearchQuery(
-                "a{999999999999999999999999999999}",
+                pattern,
                 PatternMode.Regex,
                 CaseMode.Sensitive),
             new PathFilter(),
@@ -887,8 +891,18 @@ public sealed class SearchIntegrationTests
         Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }
 
-    [Fact]
-    public async Task SupportedLazyQuantifierRegexUsesManagedVerifierByDefault()
+    [Theory]
+    [InlineData("a.+b")]
+    [InlineData("a.+?b")]
+    [InlineData("a.{1,7}b")]
+    [InlineData("a.{1,7}?b")]
+    [InlineData("ax+")]
+    [InlineData("ax+?")]
+    [InlineData("ax*")]
+    [InlineData("ax*?")]
+    [InlineData("ax?")]
+    [InlineData("ax??")]
+    public async Task SupportedQuantifiersPreserveManagedMatchRanges(string pattern)
     {
         using var fixture = new CorpusFixture(("src/a.txt", "axxxbxxb"));
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
@@ -899,10 +913,10 @@ public sealed class SearchIntegrationTests
 
         using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
-        var stats = snapshot.Search(new SearchQuery("a.+?b", PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
-        Assert.Single(collector.Hits);
-        var hit = snapshot.Materialize(collector.Hits[0], 0, 0);
-        Assert.Equal("axxxb", hit.MatchText);
+        var stats = snapshot.Search(new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive), new PathFilter(), collector);
+        var expected = Regex.Matches("axxxbxxb", pattern, RegexOptions.CultureInvariant | RegexOptions.Multiline)
+            .Select(match => (match.Index, match.Index + match.Length));
+        Assert.Equal(expected, collector.Hits.Select(hit => (hit.StartByte, hit.EndByte)));
         Assert.Equal(0, stats.Utf8RegexInvocations);
         Assert.Equal(stats.RegexInvocations, stats.FallbackRegexInvocations);
     }

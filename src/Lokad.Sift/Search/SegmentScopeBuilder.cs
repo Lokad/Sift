@@ -42,11 +42,6 @@ internal ref struct SegmentScopeBuilder(
         }
 
         var pathIndexCandidates = scopedOrdinals.Count;
-        var pathVerificationKind = matcher.RequiresPathVerification
-            ? matcher.RequiresStringPathVerification
-                ? PathVerificationKind.String
-                : PathVerificationKind.Utf8
-            : PathVerificationKind.None;
 
         if (!matcher.RequiresPathVerification && !matcher.UsesPathIndex)
         {
@@ -64,8 +59,7 @@ internal ref struct SegmentScopeBuilder(
                         cache.LiveNonAsciiDocuments,
                         cache.LiveNonAsciiBytes),
                     prefixDocuments,
-                    pathIndexCandidates,
-                    pathVerificationKind);
+                    pathIndexCandidates);
             }
 
             var metrics = GetScopeMetrics(ordinals);
@@ -76,8 +70,7 @@ internal ref struct SegmentScopeBuilder(
                     metrics.NonAsciiDocuments,
                     metrics.NonAsciiBytes),
                 prefixDocuments,
-                pathIndexCandidates,
-                pathVerificationKind);
+                pathIndexCandidates);
         }
 
         var acceptedOrdinals = GC.AllocateUninitializedArray<uint>(scopedOrdinals.Count);
@@ -135,15 +128,13 @@ internal ref struct SegmentScopeBuilder(
                 nonAsciiDocuments,
                 nonAsciiBytes),
             prefixDocuments,
-            pathIndexCandidates,
-            pathVerificationKind);
+            pathIndexCandidates);
     }
 
     private SegmentPathScope CreateResult(
         SegmentScope scope,
         int prefixDocuments,
-        int pathIndexCandidates,
-        PathVerificationKind pathVerificationKind)
+        int pathIndexCandidates)
     {
         double estimatedCost = prefixDocuments;
         if (matcher.UsesPathIndex)
@@ -151,19 +142,12 @@ internal ref struct SegmentScopeBuilder(
             estimatedCost += pathIndexCandidates * 0.5d;
         }
 
-        estimatedCost += pathVerificationKind switch
+        if (matcher.RequiresPathVerification)
         {
-            PathVerificationKind.Utf8 => scope.Count,
-            PathVerificationKind.String => scope.Count * 4d,
-            _ => 0d
-        };
+            estimatedCost += matcher.RequiresStringPathVerification ? scope.Count * 4d : scope.Count;
+        }
 
-        return new SegmentPathScope(
-            scope,
-            prefixDocuments,
-            pathIndexCandidates,
-            pathVerificationKind,
-            estimatedCost);
+        return new SegmentPathScope(scope, estimatedCost);
     }
 
     private int[] SelectPathTrigrams(
@@ -237,9 +221,6 @@ internal ref struct SegmentScopeBuilder(
 
 internal readonly record struct SegmentPathScope(
     SegmentScope Scope,
-    int PrefixDocuments,
-    int PathIndexCandidates,
-    PathVerificationKind PathVerificationKind,
     double EstimatedCost);
 
 internal readonly record struct ScopeMetrics(

@@ -327,8 +327,6 @@ internal sealed class InMemorySiftStorage : ISiftStorage, ISnapshotIndependentCo
                 _snapshotSegmentReferences.ContainsKey(segment.Key))
             .ToArray();
         return new SegmentReclamationStats(
-            ReclaimedSegmentCount: 0,
-            ReclaimedSegmentBytes: 0,
             DeferredSegmentCount: deferredSegments.Length,
             DeferredSegmentBytes: deferredSegments.Sum(static segment => (long)segment.Value.Length),
             FailedSegmentCount: 0,
@@ -351,8 +349,6 @@ internal sealed class InMemorySiftStorage : ISiftStorage, ISnapshotIndependentCo
         }
 
         var manifestSegmentIds = _manifest.Segments.Select(static segment => segment.SegmentId).ToHashSet();
-        var reclaimedSegmentCount = 0;
-        long reclaimedSegmentBytes = 0;
         var deferredSegmentCount = 0;
         long deferredSegmentBytes = 0;
         foreach (var segment in _segments.ToArray())
@@ -370,13 +366,9 @@ internal sealed class InMemorySiftStorage : ISiftStorage, ISnapshotIndependentCo
             }
 
             _segments.Remove(segment.Key);
-            reclaimedSegmentCount++;
-            reclaimedSegmentBytes += segment.Value.Length;
         }
 
         var reclamation = new SegmentReclamationStats(
-            reclaimedSegmentCount,
-            reclaimedSegmentBytes,
             deferredSegmentCount,
             deferredSegmentBytes,
             FailedSegmentCount: 0,

@@ -160,12 +160,12 @@ internal static class Utf8RegexAnalysis
                 return false;
             }
 
-            if (!TryParseQuantifier(out var min, out var max, out var lazy))
+            if (!TryParseQuantifier(out var min, out var max))
             {
                 return false;
             }
 
-            node = min == 1 && max == 1 ? atom : new Utf8RegexRepeat(atom, min, max, lazy);
+            node = min == 1 && max == 1 ? atom : new Utf8RegexRepeat(atom, min, max);
             return true;
         }
 
@@ -489,11 +489,10 @@ internal static class Utf8RegexAnalysis
             return true;
         }
 
-        private bool TryParseQuantifier(out int min, out int max, out bool lazy)
+        private bool TryParseQuantifier(out int min, out int max)
         {
             min = 1;
             max = 1;
-            lazy = false;
             if (_index >= _pattern.Length)
             {
                 return true;
@@ -505,32 +504,31 @@ internal static class Utf8RegexAnalysis
                     _index++;
                     min = 1;
                     max = int.MaxValue;
-                    lazy = ConsumeLazy();
+                    ConsumeLazy();
                     return true;
                 case '*':
                     _index++;
                     min = 0;
                     max = int.MaxValue;
-                    lazy = ConsumeLazy();
+                    ConsumeLazy();
                     return true;
                 case '?':
                     _index++;
                     min = 0;
                     max = 1;
-                    lazy = ConsumeLazy();
+                    ConsumeLazy();
                     return true;
                 case '{':
-                    return TryParseRange(out min, out max, out lazy);
+                    return TryParseRange(out min, out max);
                 default:
                     return true;
             }
         }
 
-        private bool TryParseRange(out int min, out int max, out bool lazy)
+        private bool TryParseRange(out int min, out int max)
         {
             min = 0;
             max = 0;
-            lazy = false;
             _index++;
             if (!TryReadInt(out min))
             {
@@ -557,7 +555,7 @@ internal static class Utf8RegexAnalysis
             }
 
             _index++;
-            lazy = ConsumeLazy();
+            ConsumeLazy();
             return true;
         }
 
@@ -584,15 +582,12 @@ internal static class Utf8RegexAnalysis
             return _index > start;
         }
 
-        private bool ConsumeLazy()
+        private void ConsumeLazy()
         {
             if (_index < _pattern.Length && _pattern[_index] == '?')
             {
                 _index++;
-                return true;
             }
-
-            return false;
         }
 
         private bool Consume(char value)
@@ -1262,7 +1257,7 @@ internal sealed record Utf8RegexSequence(Utf8RegexNode[] Children) : Utf8RegexNo
 
 internal sealed record Utf8RegexAlternation(Utf8RegexNode[] Options) : Utf8RegexNode;
 
-internal sealed record Utf8RegexRepeat(Utf8RegexNode Child, int Min, int Max, bool Lazy) : Utf8RegexNode;
+internal sealed record Utf8RegexRepeat(Utf8RegexNode Child, int Min, int Max) : Utf8RegexNode;
 
 internal sealed record Utf8RegexAtom(Utf8RegexAtomKind Kind, byte Literal, bool[]? AsciiSet, bool Negated) : Utf8RegexNode;
 

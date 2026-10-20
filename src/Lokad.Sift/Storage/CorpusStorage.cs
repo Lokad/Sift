@@ -1301,8 +1301,6 @@ internal sealed partial class CorpusStorage : ISiftStorage
             // No manifest means no authoritative reachability set: preserve every complete pack.
             var physicalBytes = physicalSegments.Sum(static segment => segment.Bytes);
             return CompleteReclamation(new SegmentReclamationStats(
-                ReclaimedSegmentCount: 0,
-                ReclaimedSegmentBytes: 0,
                 DeferredSegmentCount: 0,
                 DeferredSegmentBytes: 0,
                 FailedSegmentCount: 0,
@@ -1325,8 +1323,6 @@ internal sealed partial class CorpusStorage : ISiftStorage
             // A malformed or inaccessible lease could name any retired pack, so delete none.
             var retired = physicalSegments.Where(segment => !manifestSegmentIds.Contains(segment.SegmentId)).ToArray();
             return CompleteReclamation(new SegmentReclamationStats(
-                ReclaimedSegmentCount: 0,
-                ReclaimedSegmentBytes: 0,
                 DeferredSegmentCount: 0,
                 DeferredSegmentBytes: 0,
                 FailedSegmentCount: 0,
@@ -1338,8 +1334,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
                 protection.OldestLeasedGeneration));
         }
 
-        var reclaimedSegmentCount = 0;
-        long reclaimedSegmentBytes = 0;
+        var directoryChanged = false;
         var deferredSegmentCount = 0;
         long deferredSegmentBytes = 0;
         var failedSegmentCount = 0;
@@ -1364,14 +1359,12 @@ internal sealed partial class CorpusStorage : ISiftStorage
                 Directory.Delete(segment.DirectoryPath, recursive: true);
                 ForgetSegmentValidationGate(segment.SegmentId);
                 CreditCapacity(segment.Bytes);
-                reclaimedSegmentCount++;
-                reclaimedSegmentBytes += segment.Bytes;
+                directoryChanged = true;
             }
             catch (DirectoryNotFoundException)
             {
                 ForgetSegmentValidationGate(segment.SegmentId);
-                reclaimedSegmentCount++;
-                reclaimedSegmentBytes += segment.Bytes;
+                directoryChanged = true;
             }
             catch (IOException)
             {
@@ -1385,14 +1378,12 @@ internal sealed partial class CorpusStorage : ISiftStorage
             }
         }
 
-        if (reclaimedSegmentCount > 0)
+        if (directoryChanged)
         {
             FlushDirectoryEntry(SegmentsPath);
         }
 
         return CompleteReclamation(new SegmentReclamationStats(
-            reclaimedSegmentCount,
-            reclaimedSegmentBytes,
             deferredSegmentCount,
             deferredSegmentBytes,
             failedSegmentCount,
@@ -1417,8 +1408,6 @@ internal sealed partial class CorpusStorage : ISiftStorage
         if (manifest is null)
         {
             return new SegmentReclamationStats(
-                ReclaimedSegmentCount: 0,
-                ReclaimedSegmentBytes: 0,
                 DeferredSegmentCount: 0,
                 DeferredSegmentBytes: 0,
                 FailedSegmentCount: 0,
@@ -1443,8 +1432,6 @@ internal sealed partial class CorpusStorage : ISiftStorage
         if (protection.IsBlocked)
         {
             return new SegmentReclamationStats(
-                ReclaimedSegmentCount: 0,
-                ReclaimedSegmentBytes: 0,
                 DeferredSegmentCount: 0,
                 DeferredSegmentBytes: 0,
                 FailedSegmentCount: 0,
@@ -1460,8 +1447,6 @@ internal sealed partial class CorpusStorage : ISiftStorage
             .Where(segment => protection.ProtectedSegmentIds.Contains(segment.SegmentId))
             .ToArray();
         return new SegmentReclamationStats(
-            ReclaimedSegmentCount: 0,
-            ReclaimedSegmentBytes: 0,
             DeferredSegmentCount: deferredSegments.Length,
             DeferredSegmentBytes: deferredSegments.Sum(static segment => segment.Bytes),
             FailedSegmentCount: 0,

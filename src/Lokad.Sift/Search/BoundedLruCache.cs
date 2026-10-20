@@ -11,11 +11,6 @@ internal sealed class BoundedLruCache<TKey, TValue>
     private readonly object _sync = new();
     private int _weight;
 
-    public BoundedLruCache(int capacity)
-        : this(capacity, capacity, static _ => 1)
-    {
-    }
-
     public BoundedLruCache(
         int capacity,
         int maximumWeight,

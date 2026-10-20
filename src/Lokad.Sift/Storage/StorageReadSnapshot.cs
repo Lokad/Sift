@@ -20,8 +20,6 @@ internal sealed class StorageReadSnapshot : IDisposable
 }
 
 internal readonly record struct SegmentReclamationStats(
-    int ReclaimedSegmentCount,
-    long ReclaimedSegmentBytes,
     int DeferredSegmentCount,
     long DeferredSegmentBytes,
     int FailedSegmentCount,

@@ -203,9 +203,6 @@ internal static class SearchPlanner
         return new SegmentSearchPlan(
             pathScope.Scope,
             contentPlan,
-            pathScope.PrefixDocuments,
-            pathScope.PathIndexCandidates,
-            pathScope.PathVerificationKind,
             pathScope.EstimatedCost);
     }
 }
@@ -242,15 +239,5 @@ internal readonly record struct SearchPlannerDecision(
 internal readonly record struct SegmentSearchPlan(
     SegmentScope Scope,
     SearchPlannerDecision ContentPlan,
-    int PrefixDocuments,
-    int PathIndexCandidates,
-    PathVerificationKind PathVerificationKind,
     double EstimatedPathFilterCost);
-
-internal enum PathVerificationKind
-{
-    None,
-    Utf8,
-    String
-}
 

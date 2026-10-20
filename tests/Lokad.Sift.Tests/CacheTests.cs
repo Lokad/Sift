@@ -128,7 +128,7 @@ public sealed class CacheTests
     [Fact]
     public void BoundedLruCacheEvictsLeastRecentlyUsedEntry()
     {
-        var cache = new BoundedLruCache<int, string>(capacity: 2);
+        var cache = new BoundedLruCache<int, string>(capacity: 2, maximumWeight: 2, static _ => 1);
 
         Assert.Equal("one", cache.GetOrAdd(1, static _ => "one", out var firstHit));
         Assert.False(firstHit);
@@ -146,7 +146,7 @@ public sealed class CacheTests
     public async Task BoundedLruCacheCoalescesConcurrentCreation()
     {
         const int concurrency = 8;
-        var cache = new BoundedLruCache<int, string>(capacity: 2);
+        var cache = new BoundedLruCache<int, string>(capacity: 2, maximumWeight: 2, static _ => 1);
         using var barrier = new Barrier(concurrency);
         var creations = 0;
         var tasks = Enumerable.Range(0, concurrency)
@@ -175,7 +175,7 @@ public sealed class CacheTests
     [Fact]
     public async Task BoundedLruCacheDoesNotEvictAnInFlightFactory()
     {
-        var cache = new BoundedLruCache<int, string>(capacity: 1);
+        var cache = new BoundedLruCache<int, string>(capacity: 1, maximumWeight: 1, static _ => 1);
         var factoryStarted = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFactory = new TaskCompletionSource(
@@ -213,7 +213,7 @@ public sealed class CacheTests
     [Fact]
     public void BoundedLruCacheRemovesFaultedCreation()
     {
-        var cache = new BoundedLruCache<int, string>(capacity: 2);
+        var cache = new BoundedLruCache<int, string>(capacity: 2, maximumWeight: 2, static _ => 1);
 
         Assert.Throws<InvalidOperationException>(() =>
             cache.GetOrAdd(1, static _ => throw new InvalidOperationException("failure"), out _));
