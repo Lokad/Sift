@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Removed unreachable Unicode precheck decoding, its optional decoded-text
+  plumbing and unused fragment fields. Content/path planning now reuse the
+  analyzer's canonical fragments without a second containment-pruning pass.
 - Truly empty queries skip content regex analysis/compilation. Plan diagnostics
   reflect path listing without decoding or whole-document content verification;
   nonempty empty-group regex enumeration is unchanged.
@@ -38,6 +41,9 @@
 
 ### Fixed
 
+- Include/exclude globs now match complete paths consistently: generated regexes
+  reject unwanted trailing newlines and recursive wildcards can consume embedded
+  newlines. User-supplied path regex semantics are unchanged.
 - Regex content and path pruning discard fragments that split UTF-16 surrogate
   pairs, preventing missed supplementary-character alternatives and quantified
   matches. Raw lone-surrogate regexes use managed matching for correct UTF-8

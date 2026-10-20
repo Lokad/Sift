@@ -128,6 +128,11 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 * Prefix filters operate on canonical logical paths
 * Path regex operates on canonical logical paths
 * Globs are path-separator aware
+* Include/exclude globs match the complete path, including a literal trailing LF
+* `*`/`?` stay within a segment; `**` may consume separators and newlines
+* `**/` retains its literal slash requirement (at least one directory separator)
+* Generated glob regexes use strict whole-input anchors; user path regexes retain
+  .NET regex anchor and newline semantics
 
 ### 4.3 Case semantics
 
@@ -598,6 +603,9 @@ Implement a conservative regex analyzer.
 
 For every parsed node, compute a capped set of **mandatory literal fragments**.
 
+The analyzer publishes deduplicated fragments with contained fragments removed.
+Content and path planning reuse this canonical result without a second pruning pass.
+
 Transfer rules:
 
 * **literal node**: fragment = literal text
@@ -714,7 +722,12 @@ Before full verification, candidate documents must pass a **mandatory-fragment p
 Precheck implementation:
 
 * fixed-string queries: direct literal verifier only
-* regex queries: verify all mandatory fragments with vectorized substring search before invoking the selected regex verifier
+* regex queries: check proven mandatory fragments in UTF-8 before invoking the selected regex verifier
+
+Insensitive byte prechecks require ASCII byte analysis. Patterns without that
+analysis have no insensitive byte anchors, and non-ASCII documents requiring
+Unicode folding bypass these prechecks. Prechecking never decodes a document;
+the selected verifier handles Unicode semantics.
 
 This is critical: the index enforces presence of selected grams, not full fragment ordering or multiplicity.
 
@@ -809,7 +822,7 @@ Rules:
 * fallback runs over the **entire document text** in multiline mode
 * fallback runs over the **entire document text** in single-line mode as well; result projection remains line-oriented
 
-The verifier must not be called until the candidate document has passed mandatory-fragment prechecks.
+Only sound mandatory-fragment constraints may eliminate candidates before verification.
 
 ### 9.3 Decode policy
 
@@ -819,16 +832,15 @@ UTF-16 decoding is a last-resort operation.
 
 Per candidate document:
 
-* if a byte-oriented verifier is sufficient, do not decode
 * if the selected byte-oriented verifier is sufficient, do not decode
-* if Unicode boundary logic or `.NET Regex` fallback is required, decode once into pooled buffers
-* materialize `string` only when the selected fallback regex execution path requires it
+* decode within the literal verifier when Unicode literal/boundary semantics require it
+* managed regex verification decodes into a pooled character buffer at verification time
 
 Rules:
 
 * candidate elimination should happen on UTF-8 bytes whenever sound
-* mandatory-fragment prechecks must run before any regex execution
-* decoded text must not be materialized unless required by the selected fallback verifier path
+* run sound mandatory-fragment byte prechecks before regex execution
+* decoded text must not be materialized unless required by the selected verifier path
 * materialization of display/context text must happen only for accepted hits
 
 ### 9.4 Materialization

@@ -77,6 +77,10 @@ split surrogate pairs cannot discard content or path matches.
 A truly empty query skips content regex preparation and remains a path-listing
 shortcut: one hit per document with no content scan.
 
+Include/exclude globs match the complete canonical path. `*` and `?` stay within
+a path segment; `**` can cross separators and newline characters. A trailing
+newline is part of the path. User-supplied path regexes retain .NET anchor semantics.
+
 ## C# example
 
 ```csharp
