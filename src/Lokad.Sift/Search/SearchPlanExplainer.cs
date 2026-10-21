@@ -23,6 +23,7 @@ internal sealed class SearchPlanExplainer(
         var usesIndex = false;
         var usesUnicodeFallback = false;
         var nativeScopeDocuments = 0;
+        var needsUnicodeDecode = false;
         SearchCandidateKind? candidateKind = null;
         SearchCandidateCombination? candidateCombination = null;
         SearchVerifierKind? verifierKind = null;
@@ -48,6 +49,13 @@ internal sealed class SearchPlanExplainer(
             scopeBytes += segmentPlan.Scope.Bytes;
             segmentCount++;
             var chosenPlan = segmentPlan.ContentPlan.ChosenPlan;
+            if (query.Pattern.Length > 0 && segmentPlan.Scope.Count > 0)
+            {
+                needsUnicodeDecode |= preparedQuery.Literal is { } literal
+                    ? !literal.CanUseByteVerifier(query, segmentPlan.Scope.NonAsciiDocuments == 0)
+                    : !regexPlan.UsesUtf8Regex || segmentPlan.Scope.NonAsciiDocuments > 0;
+            }
+
             if (regexPlan.UsesUtf8Regex)
             {
                 usesUnicodeFallback |= segmentPlan.Scope.NonAsciiDocuments > 0;
@@ -86,13 +94,6 @@ internal sealed class SearchPlanExplainer(
         var patternKind = SearchPlanKinds.GetPatternKind(query, regexPlan);
         var canUseLiteralVerifier = query.PatternMode == PatternMode.Literal || regexPlan.IsExactLiteral;
         var canUseNonBacktracking = query.PatternMode == PatternMode.Regex && regexPlan.CanUseNonBacktracking;
-        var needsUnicodeDecode =
-            NeedsUnicodeDecode(
-                query,
-                preparedQuery.MandatoryTexts,
-                resolvedCaseMode,
-                regexPlan) ||
-            usesUnicodeFallback;
         var mayRequireWholeDocumentVerification =
             query.Pattern.Length > 0 &&
             (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral ||
@@ -164,53 +165,6 @@ internal sealed class SearchPlanExplainer(
             return aggregate is null || EqualityComparer<T>.Default.Equals(aggregate.Value, value)
                 ? value
                 : mixed;
-        }
-
-        static bool NeedsUnicodeDecode(
-            SearchQuery query,
-            PreparedSearchText[] mandatoryFragments,
-            CaseMode resolvedCaseMode,
-            in RegexExecutionPlan regexPlan)
-        {
-            if (query.Pattern.Length == 0)
-            {
-                return false;
-            }
-
-            if (query.PatternMode == PatternMode.Regex && !regexPlan.IsExactLiteral && !regexPlan.UsesUtf8Regex)
-            {
-                return true;
-            }
-
-            if (query.PatternMode == PatternMode.Regex && (regexPlan.IsExactLiteral || regexPlan.UsesUtf8Regex))
-            {
-                return false;
-            }
-
-            if (query.Multiline || query.DotAll)
-            {
-                return true;
-            }
-
-            if (query.WholeLine)
-            {
-                return query.Pattern.AsSpan().IndexOfAnyExceptInRange('\0', '\x7F') >= 0;
-            }
-
-            if (resolvedCaseMode == CaseMode.Sensitive)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < mandatoryFragments.Length; i++)
-            {
-                if (!mandatoryFragments[i].IsAscii)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
     }
 }

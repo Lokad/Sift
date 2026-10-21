@@ -511,6 +511,12 @@ public sealed class SearchPlan
     public bool UsesIndex { get; }
     public bool CanUseLiteralVerifier { get; }
     public bool CanUseNonBacktracking { get; }
+    /// <summary>Gets whether content verification may need UTF-16 decoding in the physical path scope.</summary>
+    /// <remarks>
+    ///     Evaluated before content candidate pruning, overlay visibility and search limits.
+    ///     A true value does not guarantee decoding occurs. Empty queries/scopes return false.
+    ///     Hit display/context materialization is excluded.
+    /// </remarks>
     public bool NeedsUnicodeDecode { get; }
     public bool MayRequireWholeDocumentVerification { get; }
     /// <summary>Gets the unitless estimated path-filter cost.</summary>

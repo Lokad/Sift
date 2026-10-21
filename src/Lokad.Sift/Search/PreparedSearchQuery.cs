@@ -84,6 +84,9 @@ internal sealed class PreparedLiteralQuery(
     public int[]? AsciiPrefixTable { get; } = asciiPrefixTable;
     public bool IsAscii { get; } = isAscii;
 
+    public bool CanUseByteVerifier(SearchQuery query, bool asciiDocument) =>
+        IsAscii && (!query.WholeWord || query.WholeLine || asciiDocument);
+
     public static PreparedLiteralQuery? Create(
         SearchQuery query,
         CaseMode resolvedCaseMode,

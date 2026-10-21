@@ -1232,14 +1232,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         document,
                         query,
                         preparedQuery.ResolvedCaseMode,
-                        preparedQuery.Literal,
+                        preparedQuery.Literal!,
                         documentHitLimit,
                         collector,
                         searchCancellationToken,
                         ref metrics.DecodedChars,
                         ref hitsReturned,
-                        ref documentStopReason,
-                        preparedQuery.RegexPlan.ExactLiteral);
+                        ref documentStopReason);
                 }
                 else if (preparedQuery.RegexPlan.PreparedUtf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
                 {
@@ -1320,36 +1319,31 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         SegmentDocument document,
         SearchQuery query,
         CaseMode resolvedCaseMode,
-        PreparedLiteralQuery? preparedLiteral,
+        PreparedLiteralQuery preparedLiteral,
         int hitLimit,
         IHitCollector collector,
         CancellationToken cancellationToken,
         ref long decodedChars,
         ref int hitsReturned,
-        ref SearchStopReason stopReason,
-        string? literalOverride)
+        ref SearchStopReason stopReason)
     {
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
-        var pattern = literalOverride ?? query.Pattern;
-        var needle = preparedLiteral?.Needle ?? Encoding.UTF8.GetBytes(pattern);
-        var asciiNeedle = preparedLiteral?.IsAscii ?? needle.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
-        var asciiDocument = query.WholeWord && asciiNeedle && contentBytes.IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
+        var pattern = preparedLiteral.Text;
+        var needle = preparedLiteral.Needle;
+        var asciiDocument = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
+        var useByteVerifier = preparedLiteral.CanUseByteVerifier(query, asciiDocument);
 
-        if (resolvedCaseMode == CaseMode.Sensitive &&
-            asciiNeedle &&
-            (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
+        if (resolvedCaseMode == CaseMode.Sensitive && useByteVerifier)
         {
             SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
 
-        if (resolvedCaseMode == CaseMode.Insensitive &&
-            asciiNeedle &&
-            (!query.WholeWord && !query.WholeLine || asciiDocument || query.WholeLine))
+        if (resolvedCaseMode == CaseMode.Insensitive && useByteVerifier)
         {
-            var loweredNeedle = preparedLiteral?.LoweredAsciiNeedle ?? SearchQueryPreparer.LowerAscii(needle);
-            var prefixTable = preparedLiteral?.AsciiPrefixTable ?? SearchQueryPreparer.BuildPrefixTable(loweredNeedle);
+            var loweredNeedle = preparedLiteral.LoweredAsciiNeedle!;
+            var prefixTable = preparedLiteral.AsciiPrefixTable!;
             SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
             return;
         }
