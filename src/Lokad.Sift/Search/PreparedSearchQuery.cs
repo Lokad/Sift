@@ -42,7 +42,6 @@ internal sealed class PreparedSearchQuery
         PreparedSearchText[] mandatoryTexts,
         PreparedSearchText[] leadingLiterals,
         PreparedMandatoryFragment[] mandatoryFragmentsForPrecheck,
-        PreparedOrderedAnchor[][] orderedAnchorGroups,
         Func<PreparedRegexVerifier>? prepareFallbackRegex)
     {
         ResolvedCaseMode = resolvedCaseMode;
@@ -52,7 +51,6 @@ internal sealed class PreparedSearchQuery
         MandatoryTexts = mandatoryTexts;
         LeadingLiterals = leadingLiterals;
         MandatoryFragmentsForPrecheck = mandatoryFragmentsForPrecheck;
-        OrderedAnchorGroups = orderedAnchorGroups;
         _fallbackRegex = prepareFallbackRegex is null
             ? null
             : new Lazy<PreparedRegexVerifier>(prepareFallbackRegex, LazyThreadSafetyMode.ExecutionAndPublication);
@@ -65,7 +63,6 @@ internal sealed class PreparedSearchQuery
     public PreparedSearchText[] MandatoryTexts { get; }
     public PreparedSearchText[] LeadingLiterals { get; }
     public PreparedMandatoryFragment[] MandatoryFragmentsForPrecheck { get; }
-    public PreparedOrderedAnchor[][] OrderedAnchorGroups { get; }
 
     internal void DisposeCompiledRegex() => RegexPlan.PreparedUtf8Regex?.Regex.Dispose();
 
@@ -179,48 +176,6 @@ internal sealed class PreparedMandatoryFragment(
                 resolvedCaseMode == CaseMode.Insensitive
                     ? SearchQueryPreparer.BuildPrefixTable(loweredAsciiBytes)
                     : []);
-        }
-
-        return prepared;
-    }
-}
-
-internal sealed class PreparedOrderedAnchor(
-    byte[] utf8Bytes,
-    byte[]? loweredAsciiBytes,
-    int[] asciiPrefixTable,
-    int? maxGapBytesFromPrevious,
-    bool sameLineFromPrevious)
-{
-    public byte[] Utf8Bytes { get; } = utf8Bytes;
-    public byte[]? LoweredAsciiBytes { get; } = loweredAsciiBytes;
-    public int[] AsciiPrefixTable { get; } = asciiPrefixTable;
-    public int? MaxGapBytesFromPrevious { get; } = maxGapBytesFromPrevious;
-    public bool SameLineFromPrevious { get; } = sameLineFromPrevious;
-
-    public static PreparedOrderedAnchor[][] CreateGroups(SearchOrderedAnchorGroup[] groups)
-    {
-        if (groups.Length == 0)
-        {
-            return [];
-        }
-
-        var prepared = new PreparedOrderedAnchor[groups.Length][];
-        for (var groupIndex = 0; groupIndex < groups.Length; groupIndex++)
-        {
-            var group = groups[groupIndex].Anchors;
-            prepared[groupIndex] = new PreparedOrderedAnchor[group.Length];
-            for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
-            {
-                var anchor = group[anchorIndex];
-                var lowered = anchor.IgnoreCase ? SearchQueryPreparer.LowerAscii(anchor.Utf8Bytes) : null;
-                prepared[groupIndex][anchorIndex] = new PreparedOrderedAnchor(
-                    anchor.Utf8Bytes,
-                    lowered,
-                    lowered is null ? [] : SearchQueryPreparer.BuildPrefixTable(lowered),
-                    anchor.MaxGapBytesFromPrevious,
-                    anchor.SameLineFromPrevious);
-            }
         }
 
         return prepared;

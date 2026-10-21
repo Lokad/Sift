@@ -1017,50 +1017,12 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task AsyncCallRegexBuildsOrderedAnchorGroups()
-    {
-        var query = new SearchQuery("\\b(?:Get|TryGet|Create|Load)[A-Z][A-Za-z0-9]+Async\\s*\\(", PatternMode.Regex, CaseMode.Sensitive);
-        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
-
-        Assert.NotNull(program.OrderedAnchorGroups);
-        var groups = program.OrderedAnchorGroups
-            .Select(static group => string.Join(">", group.Anchors.Select(static anchor => System.Text.Encoding.UTF8.GetString(anchor.Utf8Bytes))))
-            .OrderBy(static value => value, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Contains("Create>Async>(", groups);
-        Assert.Contains("Get>Async>(", groups);
-        Assert.Contains("Load>Async>(", groups);
-        Assert.Contains("TryGet>Async>(", groups);
-        Assert.All(
-            program.OrderedAnchorGroups,
-            static group => Assert.True(
-                group.Anchors.Length <= Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup));
-    }
-
-    [Fact]
-    public void OrderedAnchorGapOverflowBecomesUnbounded()
-    {
-        var query = new SearchQuery(
-            "foo.{0,1500000000}.{0,1500000000}bar",
-            PatternMode.Regex,
-            CaseMode.Sensitive);
-
-        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
-
-        var groups = Assert.IsType<Utf8RegexOrderedAnchorGroup[]>(program.OrderedAnchorGroups);
-        var group = Assert.Single(groups);
-        Assert.Null(group.Anchors[1].MaxGapBytesFromPrevious);
-    }
-
-    [Fact]
     public async Task AnchorOnlyAlternationDisablesLiteralPrechecks()
     {
         var query = new SearchQuery("foo|^$", PatternMode.Regex, CaseMode.Sensitive);
 
         var program = CompileUtf8Regex(query, CaseMode.Sensitive);
         Assert.Null(program.LeadingLiteralSet);
-        Assert.Null(program.OrderedAnchorGroups);
     }
 
     [Fact]
@@ -1093,7 +1055,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task OrderedAsyncCallPrecheckReducesVerifiedDocuments()
+    public async Task AsyncCallRegexRequiresTheCallSuffix()
     {
         var documents = Enumerable.Range(0, 2000)
             .Select(static index => ($"src/{index:D5}.cs", (index % 5) switch
@@ -1119,12 +1081,11 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
-        Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
         Assert.Equal(800, stats.HitsReturned);
     }
 
     [Fact]
-    public async Task OrderedAttributePrecheckUsesSameLineConstraint()
+    public async Task AttributeRegexEnforcesOrderAndLineBoundaries()
     {
         var documents = Enumerable.Range(0, 1200)
             .Select(static index => ($"src/{index:D5}.cs", (index % 4) switch
@@ -1149,14 +1110,13 @@ public sealed class SearchIntegrationTests
         var collector = new HitBuffer();
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
-        Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
         Assert.Equal(300, stats.HitsReturned);
     }
 
     [Theory]
     [InlineData("foo.{0,1}bar", "fooXX\nfoo bar")]
     [InlineData("foo[^\\r\\n]*bar", "foo\nmissing\nfoo bar")]
-    public async Task ConstrainedOrderedPrecheckRetriesLaterAnchorOccurrences(
+    public async Task RegexFindsLaterOccurrencesAfterAnInvalidPrefix(
         string pattern,
         string content)
     {
@@ -1175,7 +1135,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task ConstrainedOrderedPrecheckCanRunAboveDefaultCandidateLimit()
+    public async Task AttributeRegexPreservesOrderInALargeCandidateSet()
     {
         var documents = Enumerable.Range(0, 12000)
             .Select(static index => ($"src/{index:D5}.cs", (index % 4) switch
@@ -1201,7 +1161,6 @@ public sealed class SearchIntegrationTests
         var stats = snapshot.Search(query, new PathFilter { IncludeGlobs = ["**/*.cs"] }, collector);
 
         Assert.True(stats.CandidateDocumentsAfterIndex > 3000);
-        Assert.True(stats.CandidateDocumentsAfterPrecheck < stats.CandidateDocumentsAfterIndex);
         Assert.Equal(6000, stats.HitsReturned);
     }
 

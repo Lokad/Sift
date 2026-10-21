@@ -180,7 +180,7 @@ public sealed class RegexAdapterTests
             Assert.Equal(SearchStopReason.None, stats.StopReason);
             Assert.Equal(SearchVerifierKind.RegexFallback, plan.VerifierKind);
             Assert.Equal(0, stats.Utf8RegexInvocations);
-            Assert.Equal(missingTail ? 0 : 1, stats.NonBacktrackingRegexInvocations);
+            Assert.Equal(1, stats.NonBacktrackingRegexInvocations);
             Assert.Equal(positive ? 1 : 0, hits.Hits.Count);
             if (positive) Assert.Equal("red A blue B blue", snapshot.Materialize(hits.Hits[0], 0, 0).MatchText);
         }

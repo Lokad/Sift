@@ -128,8 +128,8 @@ internal static class RegexFragmentAnalyzer
                 }
             case Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal } atom:
                 return NodeResult.Literal(((char)atom.Literal).ToString());
-            // Keep character classes conservative. The normalized set no longer
-            // carries enough syntax information to distinguish every escaped form.
+            // Character classes are nonliteral barriers; exact matching belongs
+            // to the selected regex verifier.
             case Utf8RegexAtom { Kind: Utf8RegexAtomKind.CharClass }:
                 return NodeResult.RequiredNonLiteral;
             case Utf8RegexAtom

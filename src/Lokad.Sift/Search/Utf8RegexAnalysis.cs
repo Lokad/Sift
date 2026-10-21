@@ -8,8 +8,6 @@ namespace Lokad.Sift.Search;
 
 internal static class Utf8RegexAnalysis
 {
-    internal const int MaximumOrderedAnchorsPerGroup = 4;
-
     public static bool TryParseSyntax(
         SearchQuery query,
         CaseMode resolvedCaseMode,
@@ -181,7 +179,7 @@ internal static class Utf8RegexAnalysis
             switch (current)
             {
                 case '.':
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Dot, 0, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Dot, 0);
                     return true;
                 case '[':
                     return TryParseCharClass(out node);
@@ -192,9 +190,9 @@ internal static class Utf8RegexAnalysis
                         return true;
                     }
 
-                    if (TryParseEscapeClass(out var classSet, out var negated))
+                    if (TryParseEscapeClass())
                     {
-                        node = new Utf8RegexAtom(Utf8RegexAtomKind.CharClass, 0, classSet, negated);
+                        node = new Utf8RegexAtom(Utf8RegexAtomKind.CharClass, 0);
                         return true;
                     }
 
@@ -203,15 +201,15 @@ internal static class Utf8RegexAnalysis
                         return false;
                     }
 
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, literal, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, literal);
                     return true;
                 case '(':
                     return TryParseGroup(out node);
                 case '^':
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.StartAnchor, 0, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.StartAnchor, 0);
                     return true;
                 case '$':
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.EndAnchor, 0, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.EndAnchor, 0);
                     return true;
                 case ')':
                 case '|':
@@ -222,7 +220,7 @@ internal static class Utf8RegexAnalysis
                         return false;
                     }
 
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, (byte)current, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.Literal, (byte)current);
                     return true;
             }
         }
@@ -256,14 +254,11 @@ internal static class Utf8RegexAnalysis
                 return false;
             }
 
-            var negated = false;
             if (_pattern[_index] == '^')
             {
-                negated = true;
                 _index++;
             }
 
-            var set = new bool[128];
             var hasAny = false;
             while (_index < _pattern.Length && _pattern[_index] != ']')
             {
@@ -280,16 +275,10 @@ internal static class Utf8RegexAnalysis
                         return false;
                     }
 
-                    for (var current = start; current <= end; current++)
-                    {
-                        set[current] = true;
-                    }
-
                     hasAny = true;
                     continue;
                 }
 
-                set[start] = true;
                 hasAny = true;
             }
 
@@ -299,7 +288,7 @@ internal static class Utf8RegexAnalysis
             }
 
             _index++;
-            node = new Utf8RegexAtom(Utf8RegexAtomKind.CharClass, 0, set, negated);
+            node = new Utf8RegexAtom(Utf8RegexAtomKind.CharClass, 0);
             return true;
         }
 
@@ -430,37 +419,13 @@ internal static class Utf8RegexAnalysis
             return false;
         }
 
-        private bool TryParseEscapeClass(out bool[]? set, out bool negated)
+        private bool TryParseEscapeClass()
         {
-            set = null;
-            negated = false;
-            if (_index >= _pattern.Length)
+            if (_index >= _pattern.Length || _pattern[_index] is not ('d' or 'D' or 's' or 'S' or 'w' or 'W'))
             {
                 return false;
             }
 
-            set = _pattern[_index] switch
-            {
-                'd' => BuildAsciiSet(static value => value is >= (byte)'0' and <= (byte)'9'),
-                'D' => BuildAsciiSet(static value => value is >= (byte)'0' and <= (byte)'9'),
-                's' => BuildAsciiSet(static value => value is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'\f' or (byte)'\v'),
-                'S' => BuildAsciiSet(static value => value is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'\f' or (byte)'\v'),
-                'w' => BuildAsciiSet(static value => value is >= (byte)'A' and <= (byte)'Z' ||
-                                                  value is >= (byte)'a' and <= (byte)'z' ||
-                                                  value is >= (byte)'0' and <= (byte)'9' ||
-                                                  value == (byte)'_'),
-                'W' => BuildAsciiSet(static value => value is >= (byte)'A' and <= (byte)'Z' ||
-                                                  value is >= (byte)'a' and <= (byte)'z' ||
-                                                  value is >= (byte)'0' and <= (byte)'9' ||
-                                                  value == (byte)'_'),
-                _ => null
-            };
-            if (set is null)
-            {
-                return false;
-            }
-
-            negated = _pattern[_index] is 'D' or 'S' or 'W';
             _index++;
             return true;
         }
@@ -476,10 +441,10 @@ internal static class Utf8RegexAnalysis
             switch (_pattern[_index])
             {
                 case 'b':
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.WordBoundary, 0, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.WordBoundary, 0);
                     break;
                 case 'B':
-                    node = new Utf8RegexAtom(Utf8RegexAtomKind.NonWordBoundary, 0, null, false);
+                    node = new Utf8RegexAtom(Utf8RegexAtomKind.NonWordBoundary, 0);
                     break;
                 default:
                     return false;
@@ -601,36 +566,22 @@ internal static class Utf8RegexAnalysis
             return false;
         }
 
-        private static bool[] BuildAsciiSet(Func<byte, bool> predicate)
-        {
-            var set = new bool[128];
-            for (var value = 0; value < set.Length; value++)
-            {
-                set[value] = predicate((byte)value);
-            }
-
-            return set;
-        }
     }
 
     private sealed class Compiler
     {
         private const int MaxLeadingLiteralSetOptions = 16;
         private const int MaxLeadingLiteralSetBytes = 64;
-        private const int MaxOrderedAnchorGroups = 16;
-        private const int MaxOrderedAnchorBytes = 32;
 
         public static Utf8RegexProgram Compile(string pattern, Utf8RegexNode root, bool multiline, bool dotAll, bool ignoreCase)
         {
             var leadingLiteralSet = TryBuildLeadingLiteralSet(root, ignoreCase);
-            var orderedAnchorGroups = TryBuildOrderedAnchorGroups(root, ignoreCase);
             return new Utf8RegexProgram(
                 pattern,
                 multiline,
                 dotAll,
                 ignoreCase,
-                leadingLiteralSet,
-                orderedAnchorGroups);
+                leadingLiteralSet);
         }
 
         private static byte[][]? TryBuildLeadingLiteralSet(Utf8RegexNode root, bool ignoreCase)
@@ -807,399 +758,6 @@ internal static class Utf8RegexAnalysis
             };
         }
 
-        private static Utf8RegexOrderedAnchorGroup[]? TryBuildOrderedAnchorGroups(Utf8RegexNode root, bool ignoreCase)
-        {
-            if (!TryCollectOrderedAnchorGroups(root, ignoreCase, out var groups))
-            {
-                return null;
-            }
-
-            var filtered = new List<Utf8RegexOrderedAnchorGroup>(groups.Count);
-            for (var i = 0; i < groups.Count; i++)
-            {
-                var group = groups[i];
-                if (group.Count == 0)
-                {
-                    continue;
-                }
-
-                filtered.Add(new Utf8RegexOrderedAnchorGroup([.. group]));
-            }
-
-            return filtered.Count == 0 ? null : [.. filtered];
-        }
-
-        private static bool TryCollectOrderedAnchorGroups(Utf8RegexNode node, bool ignoreCase, out List<List<Utf8RegexOrderedAnchor>> groups)
-        {
-            switch (node)
-            {
-                case Utf8RegexSequence sequence:
-                    return TryCollectSequenceOrderedAnchorGroups(sequence, ignoreCase, out groups);
-                case Utf8RegexAlternation alternation:
-                    return TryCollectAlternationOrderedAnchorGroups(alternation, ignoreCase, out groups);
-                case Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal } atom:
-                    groups =
-                    [
-                        [
-                            new Utf8RegexOrderedAnchor([ignoreCase ? AsciiCase.Fold(atom.Literal) : atom.Literal], null, false)
-                        ]
-                    ];
-                    return true;
-                case Utf8RegexAtom atom when IsZeroWidth(atom):
-                    groups =
-                    [
-                        []
-                    ];
-                    return true;
-                default:
-                    groups = [];
-                    return false;
-            }
-        }
-
-        private static bool TryCollectSequenceOrderedAnchorGroups(Utf8RegexSequence sequence, bool ignoreCase, out List<List<Utf8RegexOrderedAnchor>> groups)
-        {
-            groups =
-            [
-                []
-            ];
-            var appendToExisting = true;
-            var anchorCount = 0;
-            OrderedAnchorSeparator? pendingSeparator = null;
-
-            for (var i = 0; i < sequence.Children.Length; i++)
-            {
-                var child = sequence.Children[i];
-                if (IsZeroWidth(child))
-                {
-                    continue;
-                }
-
-                if (!TryCollectOrderedAnchorGroups(child, ignoreCase, out var childGroups))
-                {
-                    if (TryAnalyzeOrderedAnchorSeparator(child, out var separator))
-                    {
-                        pendingSeparator = pendingSeparator is null
-                            ? separator
-                            : CombineSeparators(pendingSeparator.Value, separator);
-                    }
-                    else
-                    {
-                        pendingSeparator = null;
-                    }
-                    appendToExisting = false;
-                    continue;
-                }
-
-                if (!TryCombineOrderedAnchorGroups(groups, childGroups, appendToExisting, pendingSeparator, out groups))
-                {
-                    groups = [];
-                    return false;
-                }
-
-                appendToExisting = true;
-                pendingSeparator = null;
-                anchorCount = Math.Max(anchorCount, GetMaxAnchorCount(groups));
-                if (anchorCount > MaximumOrderedAnchorsPerGroup)
-                {
-                    groups = [];
-                    return false;
-                }
-            }
-
-            return HasAnyOrderedAnchor(groups);
-        }
-
-        private static bool TryCollectAlternationOrderedAnchorGroups(Utf8RegexAlternation alternation, bool ignoreCase, out List<List<Utf8RegexOrderedAnchor>> groups)
-        {
-            groups = [];
-            for (var i = 0; i < alternation.Options.Length; i++)
-            {
-                if (!TryCollectOrderedAnchorGroups(alternation.Options[i], ignoreCase, out var optionGroups))
-                {
-                    groups = [];
-                    return false;
-                }
-
-                var optionHasAnchor = false;
-                for (var j = 0; j < optionGroups.Count; j++)
-                {
-                    if (optionGroups[j].Count == 0)
-                    {
-                        continue;
-                    }
-
-                    optionHasAnchor = true;
-                    if (groups.Count >= MaxOrderedAnchorGroups)
-                    {
-                        groups = [];
-                        return false;
-                    }
-
-                    groups.Add(CloneAnchorGroup(optionGroups[j]));
-                }
-
-                if (!optionHasAnchor)
-                {
-                    groups = [];
-                    return false;
-                }
-            }
-
-            return groups.Count > 0;
-        }
-
-        private static bool TryCombineOrderedAnchorGroups(List<List<Utf8RegexOrderedAnchor>> prefixes, List<List<Utf8RegexOrderedAnchor>> suffixes, bool appendToExisting, OrderedAnchorSeparator? pendingSeparator, out List<List<Utf8RegexOrderedAnchor>> combined)
-        {
-            combined = new List<List<Utf8RegexOrderedAnchor>>(Math.Min(MaxOrderedAnchorGroups, prefixes.Count * Math.Max(1, suffixes.Count)));
-            for (var i = 0; i < prefixes.Count; i++)
-            {
-                for (var j = 0; j < suffixes.Count; j++)
-                {
-                    if (combined.Count >= MaxOrderedAnchorGroups)
-                    {
-                        combined = [];
-                        return false;
-                    }
-
-                    var merged = CloneAnchorGroup(prefixes[i]);
-                    var suffix = suffixes[j];
-                    if (suffix.Count > 0)
-                    {
-                        for (var anchorIndex = 0; anchorIndex < suffix.Count; anchorIndex++)
-                        {
-                            var anchor = suffix[anchorIndex];
-                            if (anchor.Utf8Bytes.Length == 0)
-                            {
-                                continue;
-                            }
-
-                            if (appendToExisting && anchorIndex == 0 && merged.Count > 0)
-                            {
-                                var last = merged[^1];
-                                if (last.Utf8Bytes.Length + anchor.Utf8Bytes.Length > MaxOrderedAnchorBytes)
-                                {
-                                    combined = [];
-                                    return false;
-                                }
-
-                                var appended = new byte[last.Utf8Bytes.Length + anchor.Utf8Bytes.Length];
-                                last.Utf8Bytes.CopyTo(appended, 0);
-                                anchor.Utf8Bytes.CopyTo(appended, last.Utf8Bytes.Length);
-                                merged[^1] = new Utf8RegexOrderedAnchor(appended, last.MaxGapBytesFromPrevious, last.SameLineFromPrevious);
-                            }
-                            else
-                            {
-                                if (anchor.Utf8Bytes.Length > MaxOrderedAnchorBytes)
-                                {
-                                    combined = [];
-                                    return false;
-                                }
-
-                                var maxGapFromPrevious = anchor.MaxGapBytesFromPrevious;
-                                var sameLineFromPrevious = anchor.SameLineFromPrevious;
-                                if (anchorIndex == 0 && merged.Count > 0 && pendingSeparator is not null)
-                                {
-                                    maxGapFromPrevious = pendingSeparator.Value.MaxGapBytes;
-                                    sameLineFromPrevious = pendingSeparator.Value.SameLineOnly;
-                                }
-
-                                merged.Add(new Utf8RegexOrderedAnchor([.. anchor.Utf8Bytes], maxGapFromPrevious, sameLineFromPrevious));
-                            }
-                        }
-                    }
-
-                    if (merged.Count > MaximumOrderedAnchorsPerGroup)
-                    {
-                        combined = [];
-                        return false;
-                    }
-
-                    combined.Add(merged);
-                }
-            }
-
-            return combined.Count > 0;
-        }
-
-        private static List<Utf8RegexOrderedAnchor> CloneAnchorGroup(List<Utf8RegexOrderedAnchor> source)
-        {
-            var clone = new List<Utf8RegexOrderedAnchor>(source.Count);
-            for (var i = 0; i < source.Count; i++)
-            {
-                clone.Add(new Utf8RegexOrderedAnchor([.. source[i].Utf8Bytes], source[i].MaxGapBytesFromPrevious, source[i].SameLineFromPrevious));
-            }
-
-            return clone;
-        }
-
-        private static bool HasAnyOrderedAnchor(List<List<Utf8RegexOrderedAnchor>> groups)
-        {
-            for (var i = 0; i < groups.Count; i++)
-            {
-                if (groups[i].Count > 0)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static int GetMaxAnchorCount(List<List<Utf8RegexOrderedAnchor>> groups)
-        {
-            var max = 0;
-            for (var i = 0; i < groups.Count; i++)
-            {
-                if (groups[i].Count > max)
-                {
-                    max = groups[i].Count;
-                }
-            }
-
-            return max;
-        }
-
-        private static bool TryAnalyzeOrderedAnchorSeparator(Utf8RegexNode node, out OrderedAnchorSeparator separator)
-        {
-            switch (node)
-            {
-                case Utf8RegexAtom atom:
-                    return TryAnalyzeOrderedAnchorSeparatorAtom(atom, out separator);
-                case Utf8RegexRepeat repeat:
-                    return TryAnalyzeOrderedAnchorSeparatorRepeat(repeat, out separator);
-                case Utf8RegexSequence sequence:
-                    return TryAnalyzeOrderedAnchorSeparatorSequence(sequence, out separator);
-                case Utf8RegexAlternation alternation:
-                    return TryAnalyzeOrderedAnchorSeparatorAlternation(alternation, out separator);
-                default:
-                    separator = default;
-                    return false;
-            }
-        }
-
-        private static bool TryAnalyzeOrderedAnchorSeparatorAtom(Utf8RegexAtom atom, out OrderedAnchorSeparator separator)
-        {
-            switch (atom.Kind)
-            {
-                case Utf8RegexAtomKind.CharClass:
-                    {
-                        if (atom.AsciiSet is not { } asciiSet)
-                        {
-                            separator = default;
-                            return false;
-                        }
-
-                        var excludesNewline = atom.Negated
-                            ? asciiSet[(byte)'\r'] && asciiSet[(byte)'\n']
-                            : !asciiSet[(byte)'\r'] && !asciiSet[(byte)'\n'];
-                        separator = new OrderedAnchorSeparator(1, excludesNewline);
-                        return true;
-                    }
-                case Utf8RegexAtomKind.Dot:
-                    separator = new OrderedAnchorSeparator(1, false);
-                    return true;
-                default:
-                    separator = default;
-                    return false;
-            }
-        }
-
-        private static bool TryAnalyzeOrderedAnchorSeparatorRepeat(Utf8RegexRepeat repeat, out OrderedAnchorSeparator separator)
-        {
-            if (!TryAnalyzeOrderedAnchorSeparator(repeat.Child, out var child))
-            {
-                separator = default;
-                return false;
-            }
-
-            int? maxGap = child.MaxGapBytes;
-            if (repeat.Max == int.MaxValue)
-            {
-                maxGap = null;
-            }
-            else if (maxGap is { } boundedGap)
-            {
-                maxGap = boundedGap == 0 || repeat.Max <= int.MaxValue / boundedGap
-                    ? boundedGap * repeat.Max
-                    : null;
-            }
-
-            separator = new OrderedAnchorSeparator(maxGap, child.SameLineOnly);
-            return true;
-        }
-
-        private static bool TryAnalyzeOrderedAnchorSeparatorSequence(Utf8RegexSequence sequence, out OrderedAnchorSeparator separator)
-        {
-            OrderedAnchorSeparator? combined = null;
-            for (var i = 0; i < sequence.Children.Length; i++)
-            {
-                var child = sequence.Children[i];
-                if (IsZeroWidth(child))
-                {
-                    continue;
-                }
-
-                if (!TryAnalyzeOrderedAnchorSeparator(child, out var childSeparator))
-                {
-                    separator = default;
-                    return false;
-                }
-
-                combined = combined is null ? childSeparator : CombineSeparators(combined.Value, childSeparator);
-            }
-
-            if (combined is null)
-            {
-                separator = default;
-                return false;
-            }
-
-            separator = combined.Value;
-            return true;
-        }
-
-        private static bool TryAnalyzeOrderedAnchorSeparatorAlternation(Utf8RegexAlternation alternation, out OrderedAnchorSeparator separator)
-        {
-            OrderedAnchorSeparator? combined = null;
-            for (var i = 0; i < alternation.Options.Length; i++)
-            {
-                if (!TryAnalyzeOrderedAnchorSeparator(alternation.Options[i], out var option))
-                {
-                    separator = default;
-                    return false;
-                }
-
-                combined = combined is null
-                    ? option
-                    : new OrderedAnchorSeparator(
-                        combined.Value.MaxGapBytes is null || option.MaxGapBytes is null
-                            ? null
-                            : Math.Max(combined.Value.MaxGapBytes.Value, option.MaxGapBytes.Value),
-                        combined.Value.SameLineOnly && option.SameLineOnly);
-            }
-
-            if (combined is null)
-            {
-                separator = default;
-                return false;
-            }
-
-            separator = combined.Value;
-            return true;
-        }
-
-        private static OrderedAnchorSeparator CombineSeparators(OrderedAnchorSeparator left, OrderedAnchorSeparator right)
-        {
-            return new OrderedAnchorSeparator(
-                left.MaxGapBytes is null || right.MaxGapBytes is null
-                    ? null
-                    : left.MaxGapBytes.Value <= int.MaxValue - right.MaxGapBytes.Value
-                        ? left.MaxGapBytes.Value + right.MaxGapBytes.Value
-                        : null,
-                left.SameLineOnly && right.SameLineOnly);
-        }
-
         private static bool ContainsLiteral(List<byte[]> set, byte[] candidate)
         {
             for (var i = 0; i < set.Count; i++)
@@ -1230,26 +788,13 @@ internal sealed record Utf8RegexProgram(
     bool Multiline,
     bool DotAll,
     bool IgnoreCase,
-    byte[][]? LeadingLiteralSet,
-    Utf8RegexOrderedAnchorGroup[]? OrderedAnchorGroups);
+    byte[][]? LeadingLiteralSet);
 
 internal sealed record Utf8RegexSyntax(
     Utf8RegexNode Root,
     bool Multiline,
     bool DotAll,
     bool IgnoreCase);
-
-internal readonly record struct Utf8RegexOrderedAnchorGroup(
-    Utf8RegexOrderedAnchor[] Anchors);
-
-internal readonly record struct Utf8RegexOrderedAnchor(
-    byte[] Utf8Bytes,
-    int? MaxGapBytesFromPrevious,
-    bool SameLineFromPrevious);
-
-internal readonly record struct OrderedAnchorSeparator(
-    int? MaxGapBytes,
-    bool SameLineOnly);
 
 internal abstract record Utf8RegexNode;
 
@@ -1259,7 +804,7 @@ internal sealed record Utf8RegexAlternation(Utf8RegexNode[] Options) : Utf8Regex
 
 internal sealed record Utf8RegexRepeat(Utf8RegexNode Child, int Min, int Max) : Utf8RegexNode;
 
-internal sealed record Utf8RegexAtom(Utf8RegexAtomKind Kind, byte Literal, bool[]? AsciiSet, bool Negated) : Utf8RegexNode;
+internal sealed record Utf8RegexAtom(Utf8RegexAtomKind Kind, byte Literal) : Utf8RegexNode;
 
 internal enum Utf8RegexAtomKind
 {

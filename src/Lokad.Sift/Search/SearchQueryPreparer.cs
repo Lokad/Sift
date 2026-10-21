@@ -74,7 +74,6 @@ internal static class SearchQueryPreparer
                 usesLiteralVerifier
                     ? []
                     : PreparedMandatoryFragment.CreateMany(mandatoryTexts, resolvedCaseMode),
-                PreparedOrderedAnchor.CreateGroups(anchors.OrderedAnchorGroups),
                 regexPlan.UsesUtf8Regex ? () => RegexVerifier.Prepare(query, resolvedCaseMode) : null);
         }
         catch

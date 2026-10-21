@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -15,9 +14,6 @@ namespace Lokad.Sift.Search;
 
 internal sealed class SearchSnapshot : IIndexSnapshot
 {
-    private const int OrderedAnchorPrecheckCandidateLimit = 3000;
-    private const int ConstrainedOrderedAnchorPrecheckCandidateLimit = 50000;
-    private const int MaxConstrainedGapSearchBytes = 512;
     private const int ParallelHitBufferCapacity = 256;
     private readonly IReadOnlyList<SegmentManifestEntry> _segments;
     private readonly Dictionary<SegmentId, SegmentManifestEntry> _segmentsById;
@@ -1115,9 +1111,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             candidates = CandidateGenerator.IncludeNonAsciiDocuments(cache.Segment, scope.Ordinals, candidates);
         }
         var usesLiteralVerifier = query.PatternMode == PatternMode.Literal || preparedQuery.RegexPlan.IsExactLiteral;
-        var useOrderedAnchorPrecheck = ShouldUseOrderedAnchorPrecheck(
-            preparedQuery.OrderedAnchorGroups,
-            candidates.Ordinals.Count);
         var metrics = new SearchMetrics
         {
             ScopeDocuments = scope.Count,
@@ -1207,16 +1200,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         contentBytes,
                         preparedQuery.MandatoryFragmentsForPrecheck,
                         preparedQuery.ResolvedCaseMode,
-                        searchCancellationToken))
-                {
-                    continue;
-                }
-
-                if (!needsUnicodeCaseFoldVerification &&
-                    useOrderedAnchorPrecheck &&
-                    !PassesOrderedAnchorPrecheck(
-                        contentBytes,
-                        preparedQuery.OrderedAnchorGroups,
                         searchCancellationToken))
                 {
                     continue;
@@ -1511,176 +1494,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
 
         return true;
-    }
-
-    private static bool PassesOrderedAnchorPrecheck(ReadOnlySpan<byte> contentBytes, PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, CancellationToken cancellationToken)
-    {
-        if (preparedOrderedAnchorGroups.Length == 0)
-        {
-            return true;
-        }
-
-        // The regex compiler enforces this shared bound independently of the public
-        // pattern-length option, so prechecking always uses fixed-size stack storage.
-        Span<int> nextStartsBuffer = stackalloc int[Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup];
-        Span<int> latestReachableEndsBuffer = stackalloc int[Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup];
-        for (var groupIndex = 0; groupIndex < preparedOrderedAnchorGroups.Length; groupIndex++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var group = preparedOrderedAnchorGroups[groupIndex];
-            Debug.Assert(group.Length <= Utf8RegexAnalysis.MaximumOrderedAnchorsPerGroup);
-            var nextStarts = nextStartsBuffer[..group.Length];
-            var latestReachableEnds = latestReachableEndsBuffer[..group.Length];
-            latestReachableEnds.Fill(-1);
-            // A later reachable prefix end is never worse for an upper-gap or same-line constraint.
-            for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
-            {
-                var anchor = group[anchorIndex];
-                nextStarts[anchorIndex] = FindOrderedAnchor(contentBytes, anchor, searchStart: 0, cancellationToken);
-            }
-
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var nextStart = int.MaxValue;
-                for (var anchorIndex = 0; anchorIndex < group.Length; anchorIndex++)
-                {
-                    if (nextStarts[anchorIndex] >= 0)
-                    {
-                        nextStart = Math.Min(nextStart, nextStarts[anchorIndex]);
-                    }
-                }
-
-                if (nextStart == int.MaxValue)
-                {
-                    break;
-                }
-
-                // Process downstream anchors first so equal-position occurrences
-                // observe the preceding anchor state from before this event.
-                for (var anchorIndex = group.Length - 1; anchorIndex >= 0; anchorIndex--)
-                {
-                    if (nextStarts[anchorIndex] != nextStart)
-                    {
-                        continue;
-                    }
-
-                    var anchor = group[anchorIndex];
-                    var reachable = anchorIndex == 0;
-                    if (anchorIndex > 0)
-                    {
-                        var previousEnd = latestReachableEnds[anchorIndex - 1];
-                        reachable = previousEnd >= 0 && previousEnd <= nextStart;
-                        if (reachable && anchor.MaxGapBytesFromPrevious is { } maxGap)
-                        {
-                            reachable = nextStart - previousEnd <= maxGap;
-                        }
-
-                        if (reachable && anchor.SameLineFromPrevious)
-                        {
-                            reachable = IndexOfLineBreak(contentBytes[previousEnd..nextStart], cancellationToken) < 0;
-                        }
-                    }
-
-                    if (reachable)
-                    {
-                        latestReachableEnds[anchorIndex] = nextStart + anchor.Utf8Bytes.Length;
-                        if (anchorIndex == group.Length - 1)
-                        {
-                            return true;
-                        }
-                    }
-
-                    nextStarts[anchorIndex] = FindOrderedAnchor(
-                        contentBytes,
-                        anchor,
-                        searchStart: nextStart + 1,
-                        cancellationToken);
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static int FindOrderedAnchor(
-        ReadOnlySpan<byte> contentBytes,
-        PreparedOrderedAnchor anchor,
-        int searchStart,
-        CancellationToken cancellationToken)
-    {
-        if (searchStart > contentBytes.Length - anchor.Utf8Bytes.Length)
-        {
-            return -1;
-        }
-
-        var relative = anchor.LoweredAsciiBytes is null
-            ? contentBytes[searchStart..].IndexOf(anchor.Utf8Bytes)
-            : IndexOfAsciiInsensitive(contentBytes[searchStart..], anchor.LoweredAsciiBytes, anchor.AsciiPrefixTable, cancellationToken);
-        return relative < 0 ? -1 : searchStart + relative;
-    }
-
-    private static bool ShouldUseOrderedAnchorPrecheck(PreparedOrderedAnchor[][] preparedOrderedAnchorGroups, int candidateCount)
-    {
-        if (preparedOrderedAnchorGroups.Length == 0)
-        {
-            return false;
-        }
-
-        var candidateLimit = HasOnlyConstrainedOrderedAnchorGroups(preparedOrderedAnchorGroups)
-            ? ConstrainedOrderedAnchorPrecheckCandidateLimit
-            : OrderedAnchorPrecheckCandidateLimit;
-        return candidateCount <= candidateLimit;
-    }
-
-    private static bool HasOnlyConstrainedOrderedAnchorGroups(PreparedOrderedAnchor[][] preparedOrderedAnchorGroups)
-    {
-        for (var groupIndex = 0; groupIndex < preparedOrderedAnchorGroups.Length; groupIndex++)
-        {
-            var group = preparedOrderedAnchorGroups[groupIndex];
-            if (group.Length < 2)
-            {
-                return false;
-            }
-
-            var hasConstraint = false;
-            for (var anchorIndex = 1; anchorIndex < group.Length; anchorIndex++)
-            {
-                var anchor = group[anchorIndex];
-                if (anchor.SameLineFromPrevious || anchor.MaxGapBytesFromPrevious is <= MaxConstrainedGapSearchBytes)
-                {
-                    hasConstraint = true;
-                    continue;
-                }
-
-                return false;
-            }
-
-            if (!hasConstraint)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static int IndexOfLineBreak(ReadOnlySpan<byte> haystack, CancellationToken cancellationToken)
-    {
-        for (var i = 0; i < haystack.Length; i++)
-        {
-            if ((i & 0xFFF) == 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            if (haystack[i] is (byte)'\r' or (byte)'\n')
-            {
-                return i;
-            }
-        }
-
-        return -1;
     }
 
     private static int IndexOfAsciiInsensitive(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle, ReadOnlySpan<int> prefixTable, CancellationToken cancellationToken)

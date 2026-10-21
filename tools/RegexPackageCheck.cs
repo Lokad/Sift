@@ -104,11 +104,42 @@ internal static class RegexPackageCheck
         await VerifyContextAndDecodeDiagnostics(engine);
         await VerifyLiteralSurrogateProjection(engine);
         await VerifyLiteralWholeLineBoundaries(engine);
+        await VerifyRegexCandidateResults(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyRegexCandidateResults(ISiftRegexEngine? engine)
+    {
+        foreach (var (pattern, text, expectedHits) in new[]
+        {
+            ("foo.bar", "fooébar", 1), ("foo..bar", "foo😀bar", 1),
+            ("foo[^x]{1,2}bar", "fooéébar", 1), ("aa.*aa", "aaaaa", 1),
+            ("aba.*aba", "abababa", 1), ("foo.bar", "foo\nbar", 0)
+        })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+            await index.Build(new Documents([("a.txt", "stale")]));
+            using var overlay = index.OpenOverlaySnapshot();
+            await overlay.Update(new Documents([("a.txt", text)]), []);
+            await index.Update(new Documents([("a.txt", text)]), []);
+            using var snapshot = index.OpenSnapshot();
+            foreach (var view in new IIndexSnapshot[] { snapshot, overlay })
+            foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive })
+            {
+                var hits = new Hits();
+                var stats = view.Search(new SearchQuery(pattern, PatternMode.Regex, caseMode), new(), hits);
+                Require(stats.HitsReturned == expectedHits, "Candidate filtering lost a managed regex result.");
+                if (expectedHits == 0) continue;
+                var hit = hits.Values.Single();
+                Require(hit.StartByte == 0 && hit.EndByte == Encoding.UTF8.GetByteCount(text) &&
+                    view.Materialize(hit, 0, 0).MatchText == text,
+                    "Regex result has incorrect UTF-8 bounds or materialized text.");
+            }
+        }
     }
 
     private static async Task VerifyMutationProbeReentrancy(ISiftRegexEngine? engine)
