@@ -47,6 +47,7 @@ public sealed record BuildOptions
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest. The callback must not
     // dispose or synchronously start another mutation on the consuming index.
+    // GetStorageStats and ShouldCompact on that index are also rejected here.
     // Caller exceptions propagate unchanged and do not themselves mark a healthy
     // index as corrupt; the previous committed state remains available.
     public Func<BuildCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
@@ -74,6 +75,7 @@ public sealed record UpdateOptions
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest. The callback must not
     // dispose or synchronously start another mutation on the consuming index.
+    // GetStorageStats and ShouldCompact on that index are also rejected here.
     // Caller exceptions propagate unchanged and do not themselves mark a healthy
     // index as corrupt; the previous committed state remains available.
     public Func<UpdateCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
@@ -687,8 +689,13 @@ public interface ISiftIndex : IDisposable
     WriteActivityStats GetWriteActivityStats();
     IndexValidationStats GetValidationStats();
     MaintenanceStats GetMaintenanceStats();
+    /// <summary>Gets physical storage statistics while holding the writer lock.</summary>
+    /// <remarks>Other callers may wait for an active writer. Callback-safe reads include GetMaintenanceStats and GetIndexState.</remarks>
+    /// <exception cref="InvalidOperationException">Called from one of this index's active mutation callbacks.</exception>
     StorageStats GetStorageStats();
-    // Reports whether the current generation contains work selectable by this policy.
+    /// <summary>Reports whether the current generation contains work selectable by this policy.</summary>
+    /// <remarks>Acquires the writer lock; other callers may wait for an active writer.</remarks>
+    /// <exception cref="InvalidOperationException">Called from one of this index's active mutation callbacks.</exception>
     bool ShouldCompact(CompactOptions options);
     /// <summary>Checks every referenced pack's checksums and persisted structures.</summary>
     Task<IndexValidationStats> Validate(CancellationToken cancellationToken);

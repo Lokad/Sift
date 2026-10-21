@@ -111,7 +111,7 @@ internal sealed class MutationCoordinator : IDisposable
         if (ReentrancyGuard.IsActive(this))
         {
             throw new InvalidOperationException(
-                "The index cannot be mutated or disposed from one of its active mutation callbacks.");
+                "The index cannot be mutated, disposed, or queried by GetStorageStats/ShouldCompact from one of its active mutation callbacks.");
         }
     }
 

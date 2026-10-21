@@ -1,5 +1,11 @@
 using Lokad.Sift;
 
+if (args.Length == 4 && args[0] == "mutation-probes")
+{
+    await MutationProbeChecks.Run(args[1], args[2] == "disk", args[3] == "cancel");
+    return 0;
+}
+
 if (args.Length != 3)
 {
     Console.Error.WriteLine("Usage: Lokad.Sift.TestHost <corpus> <ready-file> <release-file>");

@@ -169,6 +169,8 @@ public interface IDocumentSource
     ///     <see cref="SubmittedDocument.ContentLifetime"/>.
     ///     The callback must not dispose or synchronously start another mutation on
     ///     the consuming index before returning.
+    ///     Its writer-lock probes <see cref="ISiftIndex.GetStorageStats"/> and
+    ///     <see cref="ISiftIndex.ShouldCompact"/> are also rejected from this callback.
     ///     Caller exceptions propagate unchanged. A source failure alone does not
     ///     mark an otherwise healthy index as requiring a rebuild.
     /// </remarks>

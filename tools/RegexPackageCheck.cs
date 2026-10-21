@@ -105,8 +105,49 @@ internal static class RegexPackageCheck
         await VerifyLiteralSurrogateProjection(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
+        await VerifyMutationProbeReentrancy(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyMutationProbeReentrancy(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new Documents([("a.txt", "alpha")]));
+        foreach (var build in new[] { false, true })
+        foreach (var sourceCallback in new[] { false, true })
+        foreach (var storage in new[] { false, true })
+        {
+            var before = index.GetIndexIdentity();
+            Exception? failure = null;
+            void Probe()
+            {
+                _ = index.GetMaintenanceStats();
+                _ = index.GetIndexState();
+                try
+                {
+                    if (storage) _ = index.GetStorageStats();
+                    else _ = index.ShouldCompact(new CompactOptions());
+                }
+                catch (InvalidOperationException exception) { failure = exception; throw; }
+            }
+            var documents = new Documents([("b.txt", "beta")], beforeRead: sourceCallback ? Probe : null);
+            Exception? caught = null;
+            try
+            {
+                if (build)
+                    await index.Build(documents, new BuildOptions { CommitMetadataProvider = _ => { if (!sourceCallback) Probe(); return default; } });
+                else
+                    await index.Update(documents, [], new UpdateOptions { CommitMetadataProvider = _ => { if (!sourceCallback) Probe(); return default; } });
+            }
+            catch (Exception exception) { caught = exception; }
+            Require(failure is not null && ReferenceEquals(failure, caught) && !index.RequiresRebuild,
+                "Reentrant probe failure was lost or poisoned the index.");
+            Require(index.GetIndexIdentity() == before, "Rejected probe changed the committed state.");
+            _ = index.GetStorageStats();
+            _ = index.ShouldCompact(new CompactOptions());
+        }
+        await index.Update(new Documents([("b.txt", "beta")]), []);
     }
 
     private static async Task VerifyUnicodePathFilters(ISiftRegexEngine? engine)
@@ -410,11 +451,12 @@ internal static class RegexPackageCheck
         if (!condition) throw new InvalidOperationException(message);
     }
 
-    private sealed class Documents((string Path, string Text)[] items, Exception? failure = null) : IDocumentSource
+    private sealed class Documents((string Path, string Text)[] items, Exception? failure = null, Action? beforeRead = null) : IDocumentSource
     {
         private int _position;
         public bool TryReadNext(out SubmittedDocument document)
         {
+            if (_position == 0) beforeRead?.Invoke();
             document = default;
             if (_position == items.Length)
             {

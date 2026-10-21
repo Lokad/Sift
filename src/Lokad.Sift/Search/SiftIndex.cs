@@ -431,10 +431,12 @@ public sealed class SiftIndex : ISiftIndex
 
     }
 
+    /// <inheritdoc />
     public StorageStats GetStorageStats()
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
+        _mutations.ThrowIfExecutingMutation();
         try
         {
             return _storage.GetStorageStats();
@@ -446,12 +448,14 @@ public sealed class SiftIndex : ISiftIndex
         }
     }
 
+    /// <inheritdoc />
     public bool ShouldCompact(CompactOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
         IndexCompactor.ValidateOptions(options);
+        _mutations.ThrowIfExecutingMutation();
         try
         {
             return _compactor.ShouldCompact(options, ThrowIfRebuildRequired);
