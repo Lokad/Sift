@@ -119,16 +119,15 @@ internal static class SegmentIndexBuilder
 
     public static BuiltIndex BuildPathTrigramIndex<TDocument>(
         IReadOnlyList<TDocument> documents,
-        bool caseInsensitive,
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
     {
         var builder = RentBuilder(3);
         try
         {
-            CountPathIndexPairs(documents, caseInsensitive, builder, cancellationToken);
+            CountPathIndexPairs(documents, builder, cancellationToken);
             builder.PrepareForFill(cancellationToken);
-            FillPathIndexPairs(documents, caseInsensitive, builder, cancellationToken);
+            FillPathIndexPairs(documents, builder, cancellationToken);
             return builder.BuildIndex(3, cancellationToken);
         }
         finally
@@ -351,40 +350,6 @@ internal static class SegmentIndexBuilder
 
     private static void CountPathIndexPairs<TDocument>(
         IReadOnlyList<TDocument> documents,
-        bool caseInsensitive,
-        DirectIndexedGramBuilder builder,
-        CancellationToken cancellationToken)
-        where TDocument : ISegmentBuildDocument
-    {
-        if (caseInsensitive)
-        {
-            CountPathIndexPairsInsensitive(documents, builder, cancellationToken);
-        }
-        else
-        {
-            CountPathIndexPairsSensitive(documents, builder, cancellationToken);
-        }
-    }
-
-    private static void FillPathIndexPairs<TDocument>(
-        IReadOnlyList<TDocument> documents,
-        bool caseInsensitive,
-        DirectIndexedGramBuilder builder,
-        CancellationToken cancellationToken)
-        where TDocument : ISegmentBuildDocument
-    {
-        if (caseInsensitive)
-        {
-            FillPathIndexPairsInsensitive(documents, builder, cancellationToken);
-        }
-        else
-        {
-            FillPathIndexPairsSensitive(documents, builder, cancellationToken);
-        }
-    }
-
-    private static void CountPathIndexPairsSensitive<TDocument>(
-        IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
@@ -407,7 +372,7 @@ internal static class SegmentIndexBuilder
         }
     }
 
-    private static void FillPathIndexPairsSensitive<TDocument>(
+    private static void FillPathIndexPairs<TDocument>(
         IReadOnlyList<TDocument> documents,
         DirectIndexedGramBuilder builder,
         CancellationToken cancellationToken)
@@ -427,64 +392,6 @@ internal static class SegmentIndexBuilder
             {
                 ThrowIfCancellationRequested(cancellationToken, i);
                 builder.AddOrdinal(EncodeTrigramSensitive(path, i), ordinal);
-            }
-        }
-    }
-
-    private static void CountPathIndexPairsInsensitive<TDocument>(
-        IReadOnlyList<TDocument> documents,
-        DirectIndexedGramBuilder builder,
-        CancellationToken cancellationToken)
-        where TDocument : ISegmentBuildDocument
-    {
-        for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            builder.StartDocument();
-            var path = documents[(int)ordinal].GetPathUtf8();
-            if (path.Length < 3)
-            {
-                continue;
-            }
-
-            for (var i = 0; i < path.Length - 2; i++)
-            {
-                ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeTrigramInsensitiveAscii(path, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.Count(gram);
-            }
-        }
-    }
-
-    private static void FillPathIndexPairsInsensitive<TDocument>(
-        IReadOnlyList<TDocument> documents,
-        DirectIndexedGramBuilder builder,
-        CancellationToken cancellationToken)
-        where TDocument : ISegmentBuildDocument
-    {
-        for (uint ordinal = 0; ordinal < documents.Count; ordinal++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            builder.StartDocument();
-            var path = documents[(int)ordinal].GetPathUtf8();
-            if (path.Length < 3)
-            {
-                continue;
-            }
-
-            for (var i = 0; i < path.Length - 2; i++)
-            {
-                ThrowIfCancellationRequested(cancellationToken, i);
-                if (!TryEncodeTrigramInsensitiveAscii(path, i, out var gram))
-                {
-                    continue;
-                }
-
-                builder.AddOrdinal(gram, ordinal);
             }
         }
     }

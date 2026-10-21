@@ -292,6 +292,12 @@ Required regions:
 The reader requires exactly these 17 regions. Other region IDs are rejected;
 future extensions require an explicit format policy when implemented.
 
+`PathTriIcLex` and `PathTriIcPost` are retained for compatibility, with no query
+consumer. New segments write a 1032-byte all-zero lexicon (zero entries and
+257 zero bucket offsets) and zero-byte postings. Their directory and checksum
+entries remain present. Existing populated version 3/4 regions are still read
+and validated; no rebuild or format-version change is required for this removal.
+
 ### 6.3 Document table
 
 One fixed-size row per document, segment-local ordinal = row index.
@@ -392,10 +398,11 @@ Bigram lexicon is identical except suffix width is one byte.
 
 ### 6.8 Path trigram indexes
 
-Provide:
-
-* path trigrams, case-sensitive
-* path trigrams, ASCII-folded case-insensitive
+Provide case-sensitive path trigrams. Path prefixes and globs match ordinally;
+case-insensitive path regexes use managed verification. Do not generate the
+unused ASCII-folded path index: retain only its empty compatibility regions
+described above. Historical populated regions remain structurally/checksum
+validated, and benchmark inspection may report their stored sizes.
 
 No path bigram index is required.
 

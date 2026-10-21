@@ -68,17 +68,15 @@ internal static unsafe class SegmentWriter
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument
     {
-        // Build indexes sequentially so one segment cannot retain four 64 MiB trigram
-        // workspaces plus their variable postings state at the same time.
-        var indexes = new List<BuiltIndex>(6);
+        // Build indexes sequentially to reuse the gram workspace.
+        var indexes = new List<BuiltIndex>(5);
         try
         {
             indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: false, cancellationToken));
             indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 3, caseInsensitive: true, cancellationToken));
             indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: false, cancellationToken));
             indexes.Add(SegmentIndexBuilder.BuildContentIndex(documents, 2, caseInsensitive: true, cancellationToken));
-            indexes.Add(SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: false, cancellationToken));
-            indexes.Add(SegmentIndexBuilder.BuildPathTrigramIndex(documents, caseInsensitive: true, cancellationToken));
+            indexes.Add(SegmentIndexBuilder.BuildPathTrigramIndex(documents, cancellationToken));
 
             var rows = new DocumentRow[documents.Count];
             var pathBlobLength = 0;
@@ -113,7 +111,8 @@ internal static unsafe class SegmentWriter
                 rows.Length * SegmentFormat.DocumentRowSize +
                 pathBlobLength +
                 contentBlobLength +
-                lineIndexBlobLength);
+                lineIndexBlobLength +
+                SegmentFormat.LexiconHeaderSize); // Empty legacy folded-path lexicon.
             foreach (var index in indexes)
             {
                 totalLength = checked(totalLength + index.Lexicon.Length + index.Postings.Length);
@@ -175,8 +174,8 @@ internal static unsafe class SegmentWriter
         var pathTriCsLexOffset = checked(contentBiIcPostOffset + indexes[3].Postings.Length);
         var pathTriCsPostOffset = checked(pathTriCsLexOffset + indexes[4].Lexicon.Length);
         var pathTriIcLexOffset = checked(pathTriCsPostOffset + indexes[4].Postings.Length);
-        var pathTriIcPostOffset = checked(pathTriIcLexOffset + indexes[5].Lexicon.Length);
-        var statsOffset = checked(pathTriIcPostOffset + indexes[5].Postings.Length);
+        var pathTriIcPostOffset = checked(pathTriIcLexOffset + SegmentFormat.LexiconHeaderSize);
+        var statsOffset = pathTriIcPostOffset;
         var checksumTableOffset = checked(statsOffset + SegmentFormat.StatsLength);
 
         var header = bytes[..SegmentFormat.HeaderSize];
@@ -209,8 +208,8 @@ internal static unsafe class SegmentWriter
                 contentBiIcPostOffset, indexes[3].Postings.Length,
                 pathTriCsLexOffset, indexes[4].Lexicon.Length,
                 pathTriCsPostOffset, indexes[4].Postings.Length,
-                pathTriIcLexOffset, indexes[5].Lexicon.Length,
-                pathTriIcPostOffset, indexes[5].Postings.Length,
+                pathTriIcLexOffset, SegmentFormat.LexiconHeaderSize,
+                pathTriIcPostOffset, 0,
                 statsOffset, SegmentFormat.StatsLength
             ]);
 
@@ -280,8 +279,10 @@ internal static unsafe class SegmentWriter
         indexes[3].Postings.CopyTo(bytes[contentBiIcPostOffset..]);
         indexes[4].Lexicon.CopyTo(bytes[pathTriCsLexOffset..]);
         indexes[4].Postings.CopyTo(bytes[pathTriCsPostOffset..]);
-        indexes[5].Lexicon.CopyTo(bytes[pathTriIcLexOffset..]);
-        indexes[5].Postings.CopyTo(bytes[pathTriIcPostOffset..]);
+        // These required regions remain empty for compatibility with existing v4
+        // readers. Path matching only consumes the case-sensitive index.
+        var emptyPathLexicon = bytes.Slice(pathTriIcLexOffset, SegmentFormat.LexiconHeaderSize);
+        emptyPathLexicon.Clear();
         WriteChecksumTable(
             bytes.Slice(
                 checksumTableOffset,
@@ -300,8 +301,8 @@ internal static unsafe class SegmentWriter
             indexes[3].Postings,
             indexes[4].Lexicon,
             indexes[4].Postings,
-            indexes[5].Lexicon,
-            indexes[5].Postings,
+            emptyPathLexicon,
+            ReadOnlySpan<byte>.Empty,
             stats,
             cancellationToken);
     }

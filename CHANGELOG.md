@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Stopped generating the unused ASCII-folded path trigram index and removed its
+  dedicated counting/filling passes. Existing v3/v4 files remain readable; new
+  v4 files retain empty compatible regions for older readers. Case-sensitive
+  path indexes, case-insensitive content indexes and validation are preserved.
 - Removed the optional ordered-anchor precheck and its separator analysis,
   character-class bitmaps, prepared metadata and filtering thresholds. Proven
   mandatory fragments and exhaustive leading literals still narrow candidates;

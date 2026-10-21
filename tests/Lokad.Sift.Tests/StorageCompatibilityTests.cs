@@ -8,13 +8,16 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageCompatibilityTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ReleasedVersion3PacksSupportSearchUpdatesAndCompaction(bool shortStats)
+    [InlineData(3, false)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
+    public async Task ReleasedPacksSupportSearchUpdatesAndCompaction(int version, bool shortStats)
     {
         using var fixture = CreateFixture();
-        var path = await InstallReleasedPack(fixture, shortStats);
+        var path = await InstallReleasedPack(fixture, shortStats, version);
         var originalBytes = File.ReadAllBytes(path);
+        var (foldedOffset, _) = Region(originalBytes, SegmentRegionId.PathTriIcLex);
+        Assert.True(BinaryPrimitives.ReadInt32LittleEndian(originalBytes.AsSpan(foldedOffset)) > 0);
         using var index = new SiftIndex(fixture.CorpusPath);
         await index.Validate();
         Assert.False(index.RequiresRebuild);
@@ -26,6 +29,12 @@ public sealed class StorageCompatibilityTests
             var stats = oldSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
             Assert.Equal(2, stats.HitsReturned);
             Assert.All(hits.Hits, hit => Assert.Equal("alpha", oldSnapshot.Materialize(hit, 0, 0).MatchText));
+            Assert.Equal(1, oldSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter { IncludeGlobs = ["**/a.txt"] }, new HitBuffer()).HitsReturned);
+            Assert.Equal(0, oldSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter { IncludeGlobs = ["**/A.txt"] }, new HitBuffer()).HitsReturned);
+            Assert.Equal(1, oldSnapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
+                new PathFilter { PathRegex = @"(?i)SRC/A\.TXT\z" }, new HitBuffer()).HitsReturned);
 
             await index.Update(new InMemoryDocumentSource([("src/a.txt", "alpha updated\n")]), [new DocumentKey("src/empty.txt")]);
             Assert.True(oldSnapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var oldText));
@@ -38,7 +47,7 @@ public sealed class StorageCompatibilityTests
             Assert.False(current.TryGetDocumentBytes(new DocumentKey("src/empty.txt"), out _));
             Assert.Equal(1, current.Search(new SearchQuery("CAFÉ", PatternMode.Regex, CaseMode.Insensitive), new(), new HitBuffer()).HitsReturned);
             await index.Validate();
-            Assert.Equal(new[] { 3, 4 }, SegmentPaths(fixture).Select(ReadVersion).Order().ToArray());
+            Assert.Equal(new[] { version, 4 }.Order(), SegmentPaths(fixture).Select(ReadVersion).Order());
         }
 
         var compact = await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
@@ -49,6 +58,70 @@ public sealed class StorageCompatibilityTests
         using var compacted = index.OpenSnapshot();
         Assert.Equal(2, compacted.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new(), new HitBuffer()).HitsReturned);
         Assert.Equal(1, compacted.Search(new SearchQuery("CAFÉ", PatternMode.Regex, CaseMode.Insensitive), new(), new HitBuffer()).HitsReturned);
+    }
+
+    [Fact]
+    public async Task NewSegmentsRetainEmptyCompatiblePathRegionsThroughUpdatesAndCompaction()
+    {
+        using var fixture = CreateFixture();
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+            AssertEmptyFoldedPathRegions(fixture);
+            using var retained = index.OpenSnapshot();
+            await index.Update(new InMemoryDocumentSource([("src/new.txt", "ALPHA\n")]), [new DocumentKey("src/a.txt")]);
+            AssertEmptyFoldedPathRegions(fixture);
+            await index.Validate();
+            Assert.True(retained.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+            await index.Compact(new CompactOptions { MinimumSegmentCountForSmallMerge = 1 });
+            AssertEmptyFoldedPathRegions(fixture);
+            Assert.True(retained.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        }
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await reopened.Validate();
+        using var snapshot = reopened.OpenSnapshot();
+        Assert.False(snapshot.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out _));
+        Assert.Equal(2, snapshot.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Insensitive),
+            new PathFilter { IncludeGlobs = ["src/**"] }, new HitBuffer()).HitsReturned);
+    }
+
+    [Theory]
+    [InlineData(3, false)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
+    [InlineData(4, true)]
+    public async Task PopulatedFoldedPathRegionsRetainChecksumAndStructuralValidation(int version, bool repairChecksum)
+    {
+        using var fixture = CreateFixture();
+        var path = await InstallReleasedPack(fixture, shortStats: false, version);
+        var bytes = File.ReadAllBytes(path);
+        var (offset, length) = Region(bytes, SegmentRegionId.PathTriIcLex);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), -1);
+        if (repairChecksum)
+        {
+            var table = checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(52)));
+            var entry = table + ((int)SegmentRegionId.PathTriIcLex - 1) * SegmentFormat.ChecksumEntrySize;
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(entry + 4), Hashing.Fnv1A64(bytes.AsSpan(offset, length)));
+        }
+        File.WriteAllBytes(path, bytes);
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => index.Validate());
+        Assert.True(index.RequiresRebuild);
+    }
+
+    private static void AssertEmptyFoldedPathRegions(CorpusFixture fixture)
+    {
+        foreach (var path in SegmentPaths(fixture))
+        {
+            var bytes = File.ReadAllBytes(path);
+            var (offset, length) = Region(bytes, SegmentRegionId.PathTriIcLex);
+            Assert.Equal(4, ReadVersion(path));
+            Assert.Equal(1032, length);
+            Assert.Equal(new byte[1032], bytes.AsSpan(offset, length).ToArray());
+            var (postingsOffset, postingsLength) = Region(bytes, SegmentRegionId.PathTriIcPost);
+            Assert.Equal(offset + length, postingsOffset);
+            Assert.Equal(0, postingsLength);
+        }
     }
 
     [Theory]
@@ -128,13 +201,13 @@ public sealed class StorageCompatibilityTests
         ("src/a.txt", "alpha one\n"), ("src/b.txt", "beta two\n"),
         ("src/empty.txt", ""), ("src/unicode.txt", "café alpha\n"));
 
-    private static async Task<string> InstallReleasedPack(CorpusFixture fixture, bool shortStats)
+    private static async Task<string> InstallReleasedPack(CorpusFixture fixture, bool shortStats, int version = 3)
     {
         using (var index = new SiftIndex(fixture.CorpusPath))
             await index.Build(fixture.CreateSource());
         var path = SegmentPaths(fixture).Single();
         var segmentId = BinaryPrimitives.ReadUInt64LittleEndian(File.ReadAllBytes(path).AsSpan(12));
-        var bytes = ReadReleasedPack(shortStats);
+        var bytes = ReadReleasedPack(shortStats, version);
         BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(12), segmentId);
         File.WriteAllBytes(path, bytes);
         return path;
@@ -145,10 +218,10 @@ public sealed class StorageCompatibilityTests
 
     private static int ReadVersion(string path) => BinaryPrimitives.ReadInt32LittleEndian(File.ReadAllBytes(path).AsSpan(8));
 
-    private static byte[] ReadReleasedPack(bool shortStats)
+    private static byte[] ReadReleasedPack(bool shortStats, int version = 3)
     {
         using var input = typeof(StorageCompatibilityTests).Assembly.GetManifestResourceStream(
-            "Lokad.Sift.Tests.Fixtures.segment-v3.pack")!;
+            $"Lokad.Sift.Tests.Fixtures.segment-v{version}.pack")!;
         using var output = new MemoryStream();
         input.CopyTo(output);
         var bytes = output.ToArray();
@@ -168,8 +241,11 @@ public sealed class StorageCompatibilityTests
     }
 
     private static (int Offset, int Length) StatsRegion(byte[] bytes)
+        => Region(bytes, SegmentRegionId.Stats);
+
+    private static (int Offset, int Length) Region(byte[] bytes, SegmentRegionId id)
     {
-        var entry = SegmentFormat.HeaderSize + ((int)SegmentRegionId.Stats - 1) * SegmentFormat.RegionDirectoryEntrySize;
+        var entry = SegmentFormat.HeaderSize + ((int)id - 1) * SegmentFormat.RegionDirectoryEntrySize;
         return (checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(entry + 4))),
             checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(entry + 12))));
     }
