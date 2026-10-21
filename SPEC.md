@@ -1190,6 +1190,8 @@ API rules:
 * a failed build/update retains its previous committed state; genuine storage corruption still requires recovery, and a failed recovery build does not clear that requirement
 * GetStorageStats and ShouldCompact acquire the writer lock and reject calls from that index's active mutation callbacks with InvalidOperationException, including inherited execution contexts; other concurrent callers may wait normally
 * GetMaintenanceStats and GetIndexState remain available during mutation callbacks; the probe reentrancy check does not change storage consistency or compaction eligibility
+* Overlay ApplyDeltaTo and CommitToBase reject calls from that overlay's active source, target metadata or search/document collector callbacks with InvalidOperationException before waiting for the overlay update lock, including inherited Task.Run contexts
+* Safe overlay reads and exports of other overlays remain available; unrelated exports/commits serialize normally, and waiting callers can cancel
 
 ---
 

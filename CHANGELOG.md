@@ -51,6 +51,11 @@
 
 ### Fixed
 
+- Overlay `ApplyDeltaTo(...)` and `CommitToBase(...)` now reject calls from that
+  overlay's active callbacks with `InvalidOperationException`, preventing
+  deadlocks in source/metadata callbacks and lock-order cycles in collectors.
+  Safe reads and unrelated concurrent callers remain usable; export atomicity
+  and revision checks are unchanged.
 - Regex candidate filtering no longer discards matches with Unicode separators
   such as `foo.bar` on `fooébar`, or overlapping literal occurrences such as
   `aa.*aa` on `aaaaa`. Managed/native verifier semantics are unchanged.

@@ -405,6 +405,11 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   from that index's active mutation callbacks, including inherited `Task.Run`
   contexts, to prevent waiting on their own writer lock. `GetMaintenanceStats()`
   and `GetIndexState()` remain available. Unrelated callers can wait for the writer.
+- Overlay `ApplyDeltaTo(...)` and `CommitToBase(...)` reject calls from that
+  overlay's active source, metadata and collector callbacks with
+  `InvalidOperationException`, including inherited `Task.Run` contexts. Safe
+  reads and exports of other overlays remain available; unrelated callers
+  serialize normally and can cancel while waiting.
 - Rejected upserts fail the entire update by default, preventing callers from
   checkpointing an event whose replacement was not indexed. The exception
   identifies the first rejected path, reason, and submitted size. Set
