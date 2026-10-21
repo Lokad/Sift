@@ -631,6 +631,13 @@ matching; analysis must not turn their syntax into literal text or mandatory
 fragments. Scoped ignore-case options are recognized in either letter case and
 cannot establish case-sensitive mandatory fragments or an exact-literal route.
 
+Named-group header scanning is structural, not a .NET capture-name validator.
+Named capture bodies may contribute mandatory fragments, but cannot establish an
+exact-literal route: managed preparation validates their syntax before path/content
+filtering. Unconsumed quantifier/braces tokens also disable fallback deductions;
+.NET distinguishes malformed syntax from valid literal braces. Escaped literals
+and the validated simple syntax subset retain literal acceleration.
+
 Language-specific parsing or language-specific semantic recognition is out of scope for the planner. Pattern analysis must remain query-driven and corpus-language agnostic; it may classify regex structure, literals, alternations, anchors, and repetition, but it must not depend on hard-coded knowledge such as C# declarations, Go receivers, Java annotations, or framework-specific API names.
 
 #### 8.3.2 Encoding rule
@@ -767,6 +774,9 @@ literals without `WholeWord`/`WholeLine`. It advances past the entire accepted
 match. Empty groups, boundary-constrained exact-literal forms and lone-surrogate
 regexes use managed verification, preserving regex enumeration, word filtering,
 UTF-8 boundary projection and anchor semantics (including CRLF behavior).
+Named capture forms also use managed preparation/verification, retaining sound
+mandatory-fragment indexing. Invalid syntax must fail independently of case mode,
+corpus contents, overlay visibility or an empty path scope.
 Truly empty queries use the path-listing shortcut; their plans require neither
 Unicode decoding nor whole-document content verification.
 

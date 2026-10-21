@@ -67,6 +67,10 @@ Regex analysis gives up conservatively on scoped whitespace options (`x`/`X`)
 and character classes starting with a literal `]`. These patterns retain .NET
 matching semantics through managed verification.
 
+Named capture forms use .NET validation and managed matching while retaining
+sound index hints. Unconsumed quantifier or brace tokens also defer to .NET, so
+literal acceleration cannot silently accept malformed capture names or quantifiers.
+
 Literal searches include overlapping occurrences. Regex searches follow .NET's
 non-overlapping enumeration, including zero-length match progression. Nonempty
 exact-literal regexes without whole-word/whole-line constraints can use literal

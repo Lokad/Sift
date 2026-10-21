@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Removed unused internal regex-verifier return values/result bookkeeping and
+  four private extension forwarding helpers. Public overloads and search counters,
+  cancellation, timeout and hit-limit behavior are unchanged.
 - Removed unreachable Unicode precheck decoding, its optional decoded-text
   plumbing and unused fragment fields. Content/path planning now reuse the
   analyzer's canonical fragments without a second containment-pruning pass.
@@ -41,6 +44,10 @@
 
 ### Fixed
 
+- Invalid capture names and malformed bare/stacked quantifiers no longer bypass
+  .NET syntax validation through case-sensitive literal acceleration. Named
+  capture forms use managed matching while retaining sound index hints; ordinary
+  and escaped literals keep their supported fast paths.
 - Include/exclude globs now match complete paths consistently: generated regexes
   reject unwanted trailing newlines and recursive wildcards can consume embedded
   newlines. User-supplied path regex semantics are unchanged.
