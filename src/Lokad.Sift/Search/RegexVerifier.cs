@@ -24,7 +24,7 @@ internal static class RegexVerifier
     public static int CacheCount => Cache.Count;
     public static int CachePatternCharacters => Cache.Weight;
 
-    public static bool TrySearchDocument(
+    public static void SearchDocument(
         MappedSegment segment,
         SegmentDocument document,
         PreparedRegexVerifier prepared,
@@ -48,7 +48,6 @@ internal static class RegexVerifier
         {
             nonBacktrackingRegexInvocations++;
         }
-        var matched = false;
         var isAscii = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
         var offsetCursor = new Utf8OffsetCursor();
 
@@ -64,7 +63,7 @@ internal static class RegexVerifier
                 var match = matches.Current;
                 if (hitsReturned >= hitLimit)
                 {
-                    return matched;
+                    return;
                 }
 
                 if (prepared.WholeWord &&
@@ -73,7 +72,6 @@ internal static class RegexVerifier
                     continue;
                 }
 
-                matched = true;
                 int startByte;
                 int endByte;
                 if (isAscii)
@@ -101,12 +99,12 @@ internal static class RegexVerifier
                 if (!shouldContinue)
                 {
                     stopReason = SearchStopReason.CollectorStopped;
-                    return true;
+                    return;
                 }
 
                 if (hitsReturned >= hitLimit)
                 {
-                    return true;
+                    return;
                 }
             }
         }
@@ -118,10 +116,7 @@ internal static class RegexVerifier
             }
 
             stopReason = SearchStopReason.RegexTimeout;
-            return false;
         }
-
-        return matched;
     }
 
     public static string BuildPattern(SearchQuery query)

@@ -6,7 +6,7 @@ namespace Lokad.Sift.Search;
 
 internal static class Utf8RegexVerifier
 {
-    public static bool TrySearchDocument(MappedSegment segment, SegmentDocument document,
+    public static void SearchDocument(MappedSegment segment, SegmentDocument document,
         PreparedUtf8Regex prepared, int hitLimit, IHitCollector collector,
         CancellationToken cancellationToken, ref Utf8RegexHitSink? sink,
         ref int hitsReturned, ref int invocations, ref int matchedDocuments,
@@ -34,7 +34,6 @@ internal static class Utf8RegexVerifier
             if (sink.MatchCount > 0) matchedDocuments++;
             sink.ReleaseInput();
         }
-        return sink.MatchCount > 0;
     }
 }
 

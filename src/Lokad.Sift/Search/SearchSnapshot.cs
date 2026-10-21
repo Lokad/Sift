@@ -1243,7 +1243,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 }
                 else if (preparedQuery.RegexPlan.PreparedUtf8Regex is { } utf8Regex && CanUseUtf8RegexForDocument(document))
                 {
-                    Utf8RegexVerifier.TrySearchDocument(
+                    Utf8RegexVerifier.SearchDocument(
                         cache.Segment,
                         document,
                         utf8Regex,
@@ -1259,7 +1259,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 }
                 else if ((fallbackRegex ??= preparedQuery.GetFallbackRegex()) is { } preparedFallbackRegex)
                 {
-                    RegexVerifier.TrySearchDocument(
+                    RegexVerifier.SearchDocument(
                         cache.Segment,
                         document,
                         preparedFallbackRegex,
