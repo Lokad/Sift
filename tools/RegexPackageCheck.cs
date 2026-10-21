@@ -100,7 +100,35 @@ internal static class RegexPackageCheck
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
         await VerifyUnicodeAndEmptyQueries(engine);
         await VerifyGlobFilters(engine);
+        VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static void VerifyRegexValidation(IIndexSnapshot snapshot)
+    {
+        foreach (var pattern in new[] { "(?<1a>foo)", "(?<0>foo)", "(?<x!>foo)", "(?'x!'foo)", "*", "{1}" })
+        foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive, CaseMode.Smart })
+        {
+            var query = new SearchQuery(pattern, PatternMode.Regex, caseMode);
+            var filter = new PathFilter { PathPrefix = "missing/" };
+            RequireInvalidRegex(() => snapshot.Search(query, filter, new Hits()));
+            RequireInvalidRegex(() => snapshot.Explain(query, filter));
+        }
+        var valid = new SearchQuery("(?<word>alpha)", PatternMode.Regex, CaseMode.Sensitive);
+        var hits = new Hits();
+        snapshot.Search(valid, new(), hits);
+        var plan = snapshot.Explain(valid, new());
+        Require(hits.Values.Count == 1 && snapshot.Materialize(hits.Values[0], 0, 0).MatchText == "alpha",
+            "Valid capture syntax lost matching semantics.");
+        Require(!plan.CanUseLiteralVerifier && plan.UsesIndex && plan.MandatoryFragments.Contains("alpha"),
+            "Valid captures lost managed validation or sound indexing.");
+    }
+
+    private static void RequireInvalidRegex(Action action)
+    {
+        try { action(); }
+        catch (RegexParseException) { return; }
+        throw new InvalidOperationException("Invalid regex syntax bypassed .NET validation.");
     }
 
     private static async Task VerifyGlobFilters(ISiftRegexEngine? engine)

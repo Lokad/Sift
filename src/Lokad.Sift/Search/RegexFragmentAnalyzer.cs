@@ -347,6 +347,13 @@ internal static class RegexFragmentAnalyzer
             }
 
             var current = _pattern[_index++];
+            if (current is '*' or '+' or '?' or '{' or '}')
+            {
+                // Quantifiers belong to ApplyQuantifier. For any remaining token,
+                // let .NET distinguish literal braces from malformed syntax.
+                _unsupported = true;
+                return NodeResult.None;
+            }
             return current switch
             {
                 '(' => ParseGroup(),
@@ -427,12 +434,12 @@ internal static class RegexFragmentAnalyzer
 
                 if (kind == '<' && TryConsumeNamedGroupHeader('>'))
                 {
-                    return ParseTransparentGroupBody();
+                    return ParseNamedGroupBody();
                 }
 
                 if (kind == '\'' && TryConsumeNamedGroupHeader('\''))
                 {
-                    return ParseTransparentGroupBody();
+                    return ParseNamedGroupBody();
                 }
 
                 _unsupported = true;
@@ -465,7 +472,7 @@ internal static class RegexFragmentAnalyzer
                 : NodeResult.ZeroWidth;
         }
 
-        private NodeResult ParseTransparentGroupBody()
+        private NodeResult ParseNamedGroupBody()
         {
             var inner = ParseExpression();
             if (_index >= _pattern.Length || _pattern[_index] != ')')
@@ -475,7 +482,9 @@ internal static class RegexFragmentAnalyzer
             }
 
             _index++;
-            return inner;
+            // Header scanning does not validate capture names/numbers. Keep sound
+            // fragments, but require managed preparation before using this regex.
+            return inner with { ExactLiteral = null };
         }
 
         private bool TryConsumeNamedGroupHeader(char delimiter)
