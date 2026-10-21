@@ -109,6 +109,7 @@ internal static class RegexPackageCheck
         await VerifyRegexCandidateResults(engine);
         await VerifyLeadingLiteralComposition(engine);
         await VerifyMetadataAdmission(engine);
+        await VerifyContentMemoryFailures(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
@@ -157,6 +158,54 @@ internal static class RegexPackageCheck
         }
         await overlay.ApplyDeltaTo(target);
         await overlay.CommitToBase(index);
+    }
+
+    private static async Task VerifyContentMemoryFailures(ISiftRegexEngine? engine)
+    {
+        foreach (var build in new[] { false, true })
+        foreach (var failAt in new[] { 1, 3 })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+            await index.Build(new Documents([("old.txt", "alpha")]));
+            var before = index.GetIndexIdentity();
+            var failure = new InvalidDataException("Caller content memory failed.");
+            using var memory = new FailingContentMemory(failure, failAt);
+            Exception? caught = null;
+            try
+            {
+                if (build) await index.Build(new MemoryDocuments(memory.View));
+                else await index.Update(new MemoryDocuments(memory.View), []);
+            }
+            catch (Exception exception) { caught = exception; }
+            Require(ReferenceEquals(failure, caught) && !index.RequiresRebuild, "Caller content error was classified as index corruption.");
+            Require(index.GetIndexIdentity() == before, "Caller content error changed committed state.");
+            await index.Validate();
+            await index.Update(new Documents([("next.txt", "next")]), []);
+        }
+    }
+
+    private sealed class MemoryDocuments(ReadOnlyMemory<byte> memory) : IDocumentSource
+    {
+        private bool read;
+        public bool TryReadNext(out SubmittedDocument document)
+        {
+            document = new SubmittedDocument("new.txt", memory, null, DocumentContentLifetime.UntilOperationCompletes);
+            if (read) return false;
+            read = true;
+            return true;
+        }
+    }
+
+    private sealed class FailingContentMemory(Exception failure, int failAt) : MemoryManager<byte>
+    {
+        private int reads;
+        private readonly byte[] bytes = "beta"u8.ToArray();
+        // Expose a view without invoking GetSpan before the operation starts.
+        public override Span<byte> GetSpan() { if (++reads == failAt) throw failure; return bytes; }
+        public override MemoryHandle Pin(int elementIndex = 0) => throw new NotSupportedException();
+        public override void Unpin() { }
+        protected override void Dispose(bool disposing) { }
+        public ReadOnlyMemory<byte> View => CreateMemory(bytes.Length);
     }
 
     private static async Task VerifyMetadataAdmission(ISiftRegexEngine? engine)

@@ -129,6 +129,11 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 await CompactOverlayIfNeeded(cancellationToken).ConfigureAwait(false);
                 return await ApplyUpdateUnderLock().ConfigureAwait(false);
             }
+            catch (MutationCallbackFailureException exception)
+            {
+                exception.DispatchInfo.Throw();
+                throw;
+            }
             finally
             {
                 _updateLock.Release();

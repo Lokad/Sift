@@ -1881,7 +1881,7 @@ internal sealed class StoredDocument : ISegmentBuildDocument
 
     public ReadOnlySpan<byte> GetPathUtf8() => PathUtf8;
 
-    public ReadOnlySpan<byte> GetContentBytes() => Content.Span;
+    public ReadOnlySpan<byte> GetContentBytes() => Indexer.MutationCallbackGuards.GetContentSpan(Content);
 
     public ReadOnlySpan<byte> GetEncodedLineIndex() => EncodedLineIndex;
 

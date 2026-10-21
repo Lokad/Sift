@@ -12,6 +12,17 @@ internal sealed class MutationCallbackFailureException(Exception exception) : Ex
 
 internal static class MutationCallbackGuards
 {
+    public static ReadOnlySpan<byte> GetContentSpan(ReadOnlyMemory<byte> content)
+    {
+        // MemoryManager.GetSpan is caller code, including for content borrowed
+        // through later indexing passes. Guard acquisition, not storage access.
+        try { return content.Span; }
+        catch (Exception exception) when (IndexCorruption.IsIndexCorruption(exception))
+        {
+            throw new MutationCallbackFailureException(exception);
+        }
+    }
+
     public static bool TryReadNext(IDocumentSource source, out SubmittedDocument document)
     {
         try { return source.TryReadNext(out document); }

@@ -508,7 +508,7 @@ internal sealed class IndexBuilder
             return null;
         }
 
-        var span = content.Span;
+        var span = MutationCallbackGuards.GetContentSpan(content);
         var hasBom = span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
         var analysis = AnalyzeDocument(span, hasBom ? 3 : 0);
         if (analysis.LooksBinary)
@@ -520,7 +520,7 @@ internal sealed class IndexBuilder
         if (hasBom)
         {
             content = content[3..];
-            span = content.Span;
+            span = MutationCallbackGuards.GetContentSpan(content);
         }
 
         try
@@ -548,7 +548,7 @@ internal sealed class IndexBuilder
         // buffers remain borrowed only until publication completes.
         var ownedContent = document.ContentLifetime == DocumentContentLifetime.UntilOperationCompletes
             ? content
-            : content.ToArray();
+            : MutationCallbackGuards.GetContentSpan(content).ToArray();
         // Index-only metadata stays empty until unchanged update candidates are removed.
         return new StoredDocument
         {
@@ -604,7 +604,7 @@ internal sealed class IndexBuilder
     private static void Materialize(StoredDocument document)
     {
         var encodedLineIndex = LineMap.EncodeLineIndex(
-            document.Content.Span,
+            document.GetContentBytes(),
             document.LineCount);
         document.SetIndexMetadata(
             StrictUtf8.GetBytes(document.Path),

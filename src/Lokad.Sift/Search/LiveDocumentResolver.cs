@@ -319,7 +319,7 @@ internal sealed class LiveDocumentResolver(
 
         // The persisted hash is only a fast rejection filter; byte equality
         // is required before suppressing a replacement.
-        if (segment.GetContentBytes(indexedDocument).SequenceEqual(incomingDocument.Content.Span))
+        if (segment.GetContentBytes(indexedDocument).SequenceEqual(incomingDocument.GetContentBytes()))
         {
             state = 2;
         }
