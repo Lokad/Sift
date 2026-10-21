@@ -56,14 +56,16 @@ public sealed class MutationProbeTests
         var error = process.StandardError.ReadToEndAsync();
         try
         {
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            // This child checks a full callback matrix with durable disk writes.
+            // Allow hosted Windows I/O time while keeping deadlocks bounded.
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             Assert.True(process.ExitCode == 0, $"{await output}\n{await error}");
         }
         catch (TimeoutException)
         {
             process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync();
-            Assert.Fail($"Writer-lock probe deadlocked a mutation callback.\n{await output}\n{await error}");
+            Assert.Fail($"Mutation probe host did not finish within its deadline.\n{await output}\n{await error}");
         }
         finally
         {

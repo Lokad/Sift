@@ -52,6 +52,7 @@ internal static class MutationProbeChecks
             using var current = index.OpenSnapshot();
             Require(current.TryGetDocumentBytes(new DocumentKey("a.txt"), out var updated) && updated.Span.SequenceEqual("gamma"u8),
                 "Subsequent mutation failed.");
+            Console.WriteLine($"Completed {(build ? "build" : "update")}/{stage}.");
         }
     }
 
