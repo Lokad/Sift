@@ -749,6 +749,10 @@ analysis have no insensitive byte anchors, and non-ASCII documents requiring
 Unicode folding bypass these prechecks. Prechecking never decodes a document;
 the selected verifier handles Unicode semantics.
 
+Prechecks do not impose fragment ordering, multiplicity, separator byte limits
+or same-line constraints. Exact regex verification enforces those semantics;
+UTF-16 character counts cannot serve as UTF-8 byte bounds on Unicode content.
+
 This is critical: the index enforces presence of selected grams, not full fragment ordering or multiplicity.
 
 ---

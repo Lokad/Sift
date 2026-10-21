@@ -4,6 +4,11 @@
 
 ### Changed
 
+- Removed the optional ordered-anchor precheck and its separator analysis,
+  character-class bitmaps, prepared metadata and filtering thresholds. Proven
+  mandatory fragments and exhaustive leading literals still narrow candidates;
+  ordering and separator semantics are enforced by exact regex verification.
+  Some queries may send more candidates to the verifier.
 - Removed the unused internal ingestion retention flag and its forwarding plumbing.
   Public `DocumentContentLifetime` copying/borrowing behavior is unchanged.
 - Removed unused internal regex-verifier return values/result bookkeeping and
@@ -46,6 +51,9 @@
 
 ### Fixed
 
+- Regex candidate filtering no longer discards matches with Unicode separators
+  such as `foo.bar` on `fooébar`, or overlapping literal occurrences such as
+  `aa.*aa` on `aaaaa`. Managed/native verifier semantics are unchanged.
 - Unicode whole-line literals now ignore at most one trailing CR before LF or EOF,
   matching the existing ASCII rule. Additional CRs remain part of the line body;
   regex line anchors and materialized display trimming are unchanged.
