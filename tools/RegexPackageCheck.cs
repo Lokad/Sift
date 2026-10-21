@@ -100,8 +100,45 @@ internal static class RegexPackageCheck
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
         await VerifyUnicodeAndEmptyQueries(engine);
         await VerifyGlobFilters(engine);
+        await VerifyContextAndDecodeDiagnostics(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyContextAndDecodeDiagnostics(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            RegexEngine = engine, MaxMaterializedContextBytes = 7, TargetSegmentDocumentCount = 1
+        });
+        await index.Build(new Documents([("unicode.txt", "before\rXYZ\nneedle\ncafé alpha\n"),
+            ("ascii.txt", "alpha\n")]));
+        using var snapshot = index.OpenSnapshot();
+        var hits = new Hits();
+        snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
+        var hit = hits.Values.Single();
+        Require(snapshot.Materialize(hit, 1, 0).BeforeContext.SequenceEqual(["before\r"]) &&
+            snapshot.MaterializeWithMatchingLine(hit, 1, 0).Hit.BeforeContext.SequenceEqual(["before\r"]),
+            "Context clipping discarded an embedded carriage return.");
+        foreach (var query in new[] { new SearchQuery("café", PatternMode.Literal, CaseMode.Sensitive),
+            new SearchQuery(@"caf\u00E9", PatternMode.Regex, CaseMode.Sensitive),
+            new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true } })
+        {
+            var stats = snapshot.Search(query, new(), new Hits());
+            Require(stats.HitsReturned > 0 && stats.DecodedChars > 0 && snapshot.Explain(query, new()).NeedsUnicodeDecode,
+                "Decode diagnostic disagrees with Unicode literal verification.");
+        }
+        var ascii = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive)
+        {
+            WholeWord = true, Multiline = true, DotAll = true
+        };
+        var asciiFilter = new PathFilter { PathPrefix = "ascii.txt" };
+        Require(!snapshot.Explain(ascii, asciiFilter).NeedsUnicodeDecode &&
+            snapshot.Search(ascii, asciiFilter, new Hits()).DecodedChars == 0,
+            "ASCII literal flags incorrectly require decoding.");
+        var missing = new PathFilter { PathPrefix = "missing/" };
+        Require(!snapshot.Explain(new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive), missing).NeedsUnicodeDecode,
+            "Empty path scope requires decoding.");
     }
 
     private static void VerifyRegexValidation(IIndexSnapshot snapshot)

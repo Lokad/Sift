@@ -396,6 +396,12 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   captured with the snapshot. For an overlay, they identify its immutable base.
 - Use `MaterializeWithMatchingLine(...)` when the complete matching line is
   required; ordinary `Materialize(...)` avoids that additional allocation.
+- Context budgets count source bytes, including line endings. Display trimming
+  uses the complete line so clipping preserves embedded carriage returns.
+- `Explain(...).NeedsUnicodeDecode` describes possible content-verifier decoding
+  in the physical path scope before candidate/overlay visibility filtering and
+  search limits. Empty queries/scopes return false. It excludes display/context
+  materialization; use `SearchStats.DecodedChars` for the decoding actually done.
 - `VisitDocuments(...)` streams the live document keys in a snapshot without
   requiring a search query or materializing document bodies.
 - Use `ShouldCompact(...)` with the same options passed to `Compact(...)`; do not trigger on aggregate segment count alone.

@@ -44,6 +44,12 @@
 
 ### Fixed
 
+- Context clipping preserves embedded carriage returns at byte-budget boundaries.
+  Display terminators are determined from the complete line; shared source-byte
+  budgets, UTF-8 boundaries and full matching-line materialization are unchanged.
+- `SearchPlan.NeedsUnicodeDecode` follows literal verifier routing and the physical
+  path scope, including Unicode literals and whole-word checks. Literal-only
+  `Multiline`/`DotAll` flags do not imply decoding; empty queries/scopes return false.
 - Invalid capture names and malformed bare/stacked quantifiers no longer bypass
   .NET syntax validation through case-sensitive literal acceleration. Named
   capture forms use managed matching while retaining sound index hints; ordinary

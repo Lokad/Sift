@@ -853,6 +853,13 @@ Rules:
 * decoded text must not be materialized unless required by the selected verifier path
 * materialization of display/context text must happen only for accepted hits
 
+`SearchPlan.NeedsUnicodeDecode` describes possible verifier decoding for the
+physical path scope, before content candidate pruning, overlay visibility and
+search limits. It shares the literal verifier's byte/Unicode routing decision
+and scoped non-ASCII statistics. Empty queries/scopes return false. It excludes
+display/context materialization; actual verification work is reported by
+`SearchStats.DecodedChars`.
+
 ### 9.4 Materialization
 
 Search must expose both:
@@ -878,6 +885,12 @@ Materialized hit fields must include at least:
 * before/after context lines
 
 Columns in materialized hits are UTF-16 code-unit columns.
+
+Context byte budgets count source bytes, including line endings, and are shared
+across before/after context. Display terminators are identified from the complete
+line before clipping its display prefix, so an embedded CR at the clipping
+boundary is preserved. UTF-8 scalar boundaries and truncation flags are retained.
+Matching-line materialization still returns the complete display line.
 
 ---
 
