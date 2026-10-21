@@ -1175,6 +1175,8 @@ API rules:
 * no mandatory “load all hits into list” API in the core layer
 * `null` path-filter constructor inputs mean “no filter”; exposed include/exclude collections are never `null`
 * document ingestion is caller-driven; filesystem crawling belongs in an adapter above the core library
+* exceptions from document sources (including async enumeration setup, reads and disposal) and commit metadata providers propagate with their original identity and stack; they do not themselves mark a healthy index as corrupt
+* a failed build/update retains its previous committed state; genuine storage corruption still requires recovery, and a failed recovery build does not clear that requirement
 
 ---
 

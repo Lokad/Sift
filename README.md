@@ -388,6 +388,9 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   it does not convert collector failures into search results.
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
+- Document source and commit metadata callback failures propagate unchanged.
+  A caller failure during build/update does not itself require rebuilding a
+  healthy index; its previous committed state and snapshots remain available.
 - Rejected upserts fail the entire update by default, preventing callers from
   checkpointing an event whose replacement was not indexed. The exception
   identifies the first rejected path, reason, and submitted size. Set

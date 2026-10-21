@@ -46,6 +46,10 @@
 
 ### Fixed
 
+- Document source and commit metadata callback failures during build/update no
+  longer falsely mark healthy indexes as requiring a rebuild. Original exceptions,
+  committed state and snapshots are preserved, including async enumeration failures;
+  genuine corruption detection and failed-recovery handling remain in place.
 - Collector `RegexMatchTimeoutException` failures now propagate unchanged from
   ordinary and parallel searches, including literal queries. Preparation timeout
   handling no longer swallows callback failures; genuine regex timeout policies
