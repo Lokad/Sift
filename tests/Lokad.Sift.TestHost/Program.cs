@@ -1,5 +1,10 @@
 using Lokad.Sift;
 
+if (args.Length == 1 && args[0] == "deadline-probes")
+{
+    return await SearchDeadlineChecks.Run();
+}
+
 if (args.Length == 4 && args[0] == "mutation-probes")
 {
     await MutationProbeChecks.Run(args[1], args[2] == "disk", args[3] == "cancel");

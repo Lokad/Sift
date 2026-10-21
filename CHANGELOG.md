@@ -55,6 +55,9 @@
 
 ### Fixed
 
+- ASCII-insensitive literal scans and mandatory-fragment prechecks now observe
+  elapsed deadlines even when thread-pool saturation delays timer callbacks.
+  No-hit segment scans that overrun their deadline report `MaxElapsedTime`.
 - CLI builds and updates exclude their corpus subtree from filesystem input and
   reject using the same input/corpus directory. Directory updates report rejected
   files and remove previously indexed versions that become non-indexable; the

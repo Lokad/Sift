@@ -1200,7 +1200,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         contentBytes,
                         preparedQuery.MandatoryFragmentsForPrecheck,
                         preparedQuery.ResolvedCaseMode,
-                        searchCancellationToken))
+                        searchCancellationToken,
+                        watch,
+                        query.MaxElapsedMilliseconds))
                 {
                     continue;
                 }
@@ -1224,6 +1226,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         documentHitLimit,
                         collector,
                         searchCancellationToken,
+                        watch,
                         ref metrics.DecodedChars,
                         ref hitsReturned,
                         ref documentStopReason);
@@ -1294,6 +1297,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             segmentStopReason = SearchStopReason.MaxElapsedTime;
         }
 
+        if (segmentStopReason == SearchStopReason.None && HasElapsed(query, watch))
+        {
+            callerCancellationToken.ThrowIfCancellationRequested();
+            segmentStopReason = SearchStopReason.MaxElapsedTime;
+        }
         metrics.RegexInvocations = metrics.Utf8RegexInvocations + metrics.FallbackRegexInvocations;
         return new SegmentSearchResult(
             metrics,
@@ -1311,6 +1319,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         int hitLimit,
         IHitCollector collector,
         CancellationToken cancellationToken,
+        ValueStopwatch watch,
         ref long decodedChars,
         ref int hitsReturned,
         ref SearchStopReason stopReason)
@@ -1324,7 +1333,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
         if (resolvedCaseMode == CaseMode.Sensitive && useByteVerifier)
         {
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, watch, query.MaxElapsedMilliseconds, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1332,7 +1341,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             var loweredNeedle = preparedLiteral.LoweredAsciiNeedle!;
             var prefixTable = preparedLiteral.AsciiPrefixTable!;
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, ref hitsReturned, ref stopReason);
+            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, watch, query.MaxElapsedMilliseconds, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1400,7 +1409,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, bool allowOverlaps, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ref int hitsReturned, ref SearchStopReason stopReason)
+    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, bool allowOverlaps, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds, ref int hitsReturned, ref SearchStopReason stopReason)
     {
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)
@@ -1413,7 +1422,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 
             var relativeIndex = caseSensitive
                 ? contentBytes[offset..].IndexOf(needle)
-                : IndexOfAsciiInsensitive(contentBytes[offset..], needle, prefixTable, cancellationToken);
+                : IndexOfAsciiInsensitive(contentBytes[offset..], needle, prefixTable, cancellationToken, watch, maxElapsedMilliseconds);
             cancellationToken.ThrowIfCancellationRequested();
             if (relativeIndex < 0)
             {
@@ -1460,7 +1469,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken)
+    private static bool PassesMandatoryPrecheck(ReadOnlySpan<byte> contentBytes, PreparedMandatoryFragment[] preparedMandatoryFragments, CaseMode resolvedCaseMode, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds)
     {
         if (preparedMandatoryFragments.Length == 0)
         {
@@ -1487,7 +1496,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     contentBytes,
                     fragment.LoweredAsciiBytes,
                     fragment.AsciiPrefixTable,
-                    cancellationToken) < 0)
+                    cancellationToken,
+                    watch,
+                    maxElapsedMilliseconds) < 0)
             {
                 return false;
             }
@@ -1496,7 +1507,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return true;
     }
 
-    private static int IndexOfAsciiInsensitive(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle, ReadOnlySpan<int> prefixTable, CancellationToken cancellationToken)
+    private static int IndexOfAsciiInsensitive(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle, ReadOnlySpan<int> prefixTable, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds)
     {
         if (loweredNeedle.Length == 0)
         {
@@ -1510,6 +1521,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             if ((i & 0xFFF) == 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // Timer callbacks can be queued behind busy pool workers.
+                // The caller classifies this bounded scan's deadline stop.
+                if (watch.ElapsedMilliseconds >= maxElapsedMilliseconds) return -1;
             }
 
             var current = AsciiCase.Fold(haystack[i]);

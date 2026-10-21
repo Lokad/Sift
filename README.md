@@ -24,9 +24,11 @@ pattern supports it. Classic backtracking has a one-second match timeout;
 `RegexTimeoutPolicy` controls whether a timeout stops the search or throws.
 
 Search observes caller cancellation and `MaxElapsedMilliseconds` between matches
-within a document. A running .NET regex match is bounded by the existing safety
-timeout. `MaxPatternNesting` applies to structural parentheses in content and path
-regexes, respecting comments, escapes, character classes and inline whitespace
+within a document. ASCII-insensitive scans also check elapsed time while scanning,
+including when no match is found and timer callbacks are delayed. A running .NET
+regex match is bounded by the existing safety timeout. `MaxPatternNesting` applies
+to structural parentheses in content and path regexes, respecting comments,
+escapes, character classes and inline whitespace
 option scopes.
 
 Applications can supply byte-oriented verification through

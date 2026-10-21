@@ -852,7 +852,11 @@ regex compilation/matching timeouts retain the query's stop-or-throw policy.
 Literal and managed regex document scans check the effective cancellation token
 between matches, including matches rejected by boundary checks. Caller cancellation
 throws with the caller's token; expiry of the search deadline returns
-`MaxElapsedTime`. An in-progress BCL match uses the existing regex safety timeout;
+`MaxElapsedTime`. ASCII-insensitive literal scans and mandatory-fragment prechecks
+also check elapsed time at their cooperative scan checkpoints, independently of
+timer callback scheduling. A segment that finishes scanning after the deadline
+reports `MaxElapsedTime` unless another stop reason already applies.
+An in-progress BCL match uses the existing regex safety timeout;
 cooperative checkpoints run before and after each match step. Regex nesting limits
 count structural parentheses while respecting comments, inline whitespace-option
 scopes, escapes and character-class boundaries. Syntax validation still belongs
