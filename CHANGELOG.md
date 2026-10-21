@@ -55,6 +55,13 @@
 
 ### Fixed
 
+- Disk manifest publication now retains the configured free-space reserve for
+  builds, pack-producing updates/compaction and non-shrinking metadata commits.
+  It accounts for leases and manifest replacement while retaining temporary-file
+  quota checks and below-reserve cleanup paths.
+- CLI context flags now print bounded, labelled context per hit and mark truncation.
+  CLI output is UTF-8; search/explain reject unknown arguments and invalid numeric
+  options before opening the corpus, with a diagnostic and exit code 1.
 - Parallel search can execute pending segments on its caller when pool workers are
   unavailable. Ordered result-queue waits observe elapsed deadlines independently
   of timer callbacks; collectors, bounded buffering and worker cleanup are preserved.

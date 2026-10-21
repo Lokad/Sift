@@ -537,6 +537,12 @@ Update batch rules:
 * callback metadata length is checked before accessing/copying its bytes; accepted
   values are copied defensively, and retained values still obey the current limit
   when an update has no metadata provider
+* disk manifest admission enforces the operation's free-space reserve after lease
+  creation and manifest replacement, including metadata-only growth; replacement
+  credit for the old manifest does not weaken temporary-file quota checks
+* deletion-only/no-op and shrinking-metadata updates, and compaction with no output
+  packs, remain cleanup paths below reserve; ordinary builds and pack-producing or
+  non-shrinking metadata commits retain their configured reserve
 * an optimistic update expectation compares corpus id and logical content
   revision; content-preserving compaction does not invalidate it
 

@@ -15,6 +15,11 @@ outside that directory or in an excluded subtree such as `.sift`. Input and corp
 must be different directories. CLI updates report non-indexable files and remove
 their previously indexed versions, including text that becomes binary, invalid
 UTF-8 or oversized. The library's default rejection policy remains `FailUpdate`.
+CLI output is UTF-8. Search `--before=N` and `--after=N` print bounded context
+per hit as `path-line- text`; the existing `path:line:column: match` record remains.
+Overlapping context may repeat across hits; truncated context is labelled.
+Search/explain reject unknown arguments and invalid numeric limits before opening
+the corpus, with a diagnostic on stderr and exit code 1.
 
 ## Regex engines
 
@@ -362,6 +367,10 @@ updates similarly retain `SiftOptions.MinimumFreeBytesAfterMutation`, whose
 1.5 GiB default preserves room for one default compaction pass. Set
 `MaximumPhysicalBytes` when filesystem free-space reporting does not reflect a
 container or tenant quota.
+Manifest admission includes metadata and generation-lease publication in this
+reserve, while keeping temporary files within the total quota. Deletion-only,
+no-op and shrinking-metadata updates remain possible below reserve, as do
+compactions that write no replacement packs.
 
 ## What Sift is for
 
