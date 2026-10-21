@@ -639,6 +639,14 @@ Transfer rules:
 
 Analyzer limits are acceptable. Unsound extraction is forbidden.
 
+An optional leading-literal set must cover every matching branch. During sequence
+extraction, adjacent literal atoms can be joined; after a group contributes its
+leading prefixes, extraction stops. A prefix can cover only part of that group's
+consumption, so following text must not be joined to it. For example,
+`(?:foo.*bar|baz)qux` cannot require `fooqux`: `fooXbarqux` is a valid match.
+This conservative boundary can shorten prefixes even for fully literal groups.
+Mandatory fragments and exact regex verification remain available.
+
 Analysis follows .NET's UTF-16 code-unit semantics, including quantifiers.
 Only well-formed Unicode fragments may become UTF-8 byte constraints. Shared
 prefixes/suffixes and quantified atoms can split surrogate pairs; discard unsafe
@@ -1392,6 +1400,8 @@ Acceptance condition:
 
 * analyzer may miss opportunities
 * analyzer must never derive a mandatory fragment that is not actually mandatory
+* leading-literal sets must cover all matching branches, including nested groups
+  containing dots, classes or repetitions followed by more literals
 
 ### 15.3 Storage integrity
 

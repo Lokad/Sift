@@ -55,6 +55,10 @@
 
 ### Fixed
 
+- Regex candidate planning no longer joins following text onto a group's partial
+  leading prefix, which could hide matches such as `fooXbarqux` for
+  `(?:foo.*bar|baz)qux`. Extraction now stops after groups and may retain shorter
+  prefixes; mandatory-fragment planning and exact verification remain available.
 - Recursive path globs now require the slash immediately before their literal
   suffix. Earlier wildcard prefixes use general glob verification. Includes and
   excludes preserve strict whole-path matching and ordinal case sensitivity.
