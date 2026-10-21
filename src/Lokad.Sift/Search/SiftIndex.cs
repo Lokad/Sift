@@ -803,7 +803,11 @@ public sealed class SiftIndex : ISiftIndex
                         commitMetadata,
                         newSegments);
                     ResetValidationStats();
-                    writeSession.PublishManifest(manifest);
+                    // Keep deletion/shrinking-metadata cleanup usable below reserve.
+                    var reserve = !hadManifest || publishedSegments.Count > 0 ||
+                        commitMetadataChanged && commitMetadata.Length >= existingManifest.CommitMetadata.Length
+                            ? _options.MinimumFreeBytesAfterMutation : 0;
+                    writeSession.PublishManifest(manifest, reserve);
                     ResetValidationStats();
                     committedIdentity = CreateIndexIdentity(manifest);
                 }

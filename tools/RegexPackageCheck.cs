@@ -109,6 +109,7 @@ internal static class RegexPackageCheck
         await VerifyRegexCandidateResults(engine);
         await VerifyLeadingLiteralComposition(engine);
         await VerifyMetadataAdmission(engine);
+        await VerifyPublicationReserve(engine);
         await VerifyContentMemoryFailures(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
@@ -158,6 +159,39 @@ internal static class RegexPackageCheck
         }
         await overlay.ApplyDeltaTo(target);
         await overlay.CommitToBase(index);
+    }
+
+    private static async Task VerifyPublicationReserve(ISiftRegexEngine? engine)
+    {
+        var temporary = Directory.CreateTempSubdirectory("sift-reserve-check-");
+        try
+        {
+            using var index = new SiftIndex(temporary.FullName, new SiftOptions
+            {
+                RegexEngine = engine, MaximumPhysicalBytes = 16384, MinimumFreeBytesAfterMutation = 8192
+            });
+            try
+            {
+                await index.Build(new Documents([]), new BuildOptions { CommitMetadataProvider = _ => new byte[12288] });
+                throw new InvalidOperationException("Empty build consumed the mutation reserve.");
+            }
+            catch (IOException) { }
+            Require(!index.RequiresRebuild && !File.Exists(Path.Combine(temporary.FullName, "manifest.bin")), "Rejected reserve publication changed index state.");
+            await index.Build(new Documents([]));
+            var before = index.GetIndexIdentity();
+            using var retained = index.OpenSnapshot();
+            try
+            {
+                await index.Update(new Documents([]), [], new UpdateOptions { CommitMetadataProvider = _ => new byte[12288] });
+                throw new InvalidOperationException("Metadata-only update consumed the mutation reserve.");
+            }
+            catch (IOException) { }
+            Require(!index.RequiresRebuild && index.GetIndexIdentity() == before && retained.CommitMetadata.IsEmpty,
+                "Reserve rejection lost the committed generation.");
+            Require(index.GetStorageStats().AvailableBytes >= 8192, "Reserve rejection leaked storage headroom.");
+            await index.Validate();
+        }
+        finally { temporary.Delete(recursive: true); }
     }
 
     private static async Task VerifyContentMemoryFailures(ISiftRegexEngine? engine)

@@ -88,9 +88,9 @@ internal sealed partial class CorpusStorage
                 cancellationToken);
         }
 
-        public void PublishManifest(CorpusManifest manifest)
+        public void PublishManifest(CorpusManifest manifest, long minimumFreeBytesAfterPublication)
         {
-            storage.PublishManifest(manifest);
+            storage.PublishManifest(manifest, minimumFreeBytesAfterPublication);
             _currentManifest = storage.ReadManifest();
             _currentManifestLoaded = true;
         }

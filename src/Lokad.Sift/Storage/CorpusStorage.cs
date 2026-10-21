@@ -205,10 +205,10 @@ internal sealed partial class CorpusStorage : ISiftStorage
         return new SegmentManifestEntry(segmentId, documents.Count, contentBytes, DeadOrdinalSet.Empty, DeadContentBytes: 0);
     }
 
-    private void PublishManifest(CorpusManifest manifest)
+    private void PublishManifest(CorpusManifest manifest, long minimumFreeBytesAfterPublication)
     {
         EnsureLayout();
-        WriteManifest(manifest);
+        WriteManifest(manifest, minimumFreeBytesAfterPublication);
     }
 
     public CorpusManifest ReadManifest()
@@ -834,7 +834,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
         RefreshCapacityBudget();
     }
 
-    private void WriteManifest(CorpusManifest manifest)
+    private void WriteManifest(CorpusManifest manifest, long minimumFreeBytesAfterPublication)
     {
         manifest = ResolveLegacyDeadContentBytes(manifest).CopyForPublication();
         // Set the retry marker and publish the reader lease before making the generation discoverable.
@@ -847,7 +847,9 @@ internal sealed partial class CorpusStorage : ISiftStorage
         var previousManifestBytes = File.Exists(ManifestPath)
             ? new FileInfo(ManifestPath).Length
             : 0;
-        EnsureCapacity(size, minimumFreeBytesAfterPublication: 0);
+        // Temporary files must fit the absolute quota. The previous manifest is
+        // released by the swap, so its bytes can satisfy the final reserve.
+        EnsureCapacity(size, Math.Max(0, minimumFreeBytesAfterPublication - previousManifestBytes));
         using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             stream.SetLength(size);

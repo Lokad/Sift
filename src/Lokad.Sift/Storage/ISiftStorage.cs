@@ -56,7 +56,7 @@ internal interface IStorageWriteSession : IDisposable
         long minimumFreeBytesAfterPublication,
         CancellationToken cancellationToken)
         where TDocument : ISegmentBuildDocument;
-    void PublishManifest(CorpusManifest manifest);
+    void PublishManifest(CorpusManifest manifest, long minimumFreeBytesAfterPublication);
     bool CanReplaceSegments();
     void EnsureReplacementAllowed();
     void PrepareFullBuild(bool discardCorruptState);

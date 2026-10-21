@@ -431,7 +431,7 @@ internal sealed class InMemorySiftStorage : ISiftStorage, ISnapshotIndependentCo
                 cancellationToken);
         }
 
-        public void PublishManifest(CorpusManifest manifest) => storage.PublishManifest(manifest);
+        public void PublishManifest(CorpusManifest manifest, long minimumFreeBytesAfterPublication) => storage.PublishManifest(manifest);
 
         public bool CanReplaceSegments() => storage.CanReplaceSegmentsUnderWriterLock();
 

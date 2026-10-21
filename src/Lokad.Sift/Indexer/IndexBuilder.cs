@@ -121,7 +121,7 @@ internal sealed class IndexBuilder
                 ContentRevision: new ContentRevision(1),
                 Generation: generation,
                 CommitMetadata: commitMetadata,
-                Segments: entries));
+                Segments: entries), _options.MinimumFreeBytesAfterMutation);
         }
         catch
         {

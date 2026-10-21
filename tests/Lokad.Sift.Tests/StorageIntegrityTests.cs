@@ -115,7 +115,7 @@ public sealed class StorageIntegrityTests
                     ContentRevision: new ContentRevision(1),
                     Generation: new StorageGeneration(1),
                     CommitMetadata: commitMetadata,
-                    Segments: segments));
+                    Segments: segments), 0);
             }
 
             commitMetadata[0] = 9;
@@ -572,7 +572,7 @@ public sealed class StorageIntegrityTests
         var manifest = new CorpusManifest(new CorpusId(Guid.NewGuid()), new StorageGeneration(7), []);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
-            writeSession.PublishManifest(manifest);
+            writeSession.PublishManifest(manifest, 0);
         }
         File.Move(storage.ManifestPath, storage.ManifestPath + ".tmp", overwrite: true);
 
@@ -767,7 +767,7 @@ public sealed class StorageIntegrityTests
 
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
-            writeSession.PublishManifest(manifest);
+            writeSession.PublishManifest(manifest, 0);
         }
         var roundTripped = storage.ReadManifest();
 
@@ -1414,7 +1414,7 @@ public sealed class StorageIntegrityTests
         var next = new CorpusManifest(original.CorpusId, original.Generation.Next(), original.Segments);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
-            Assert.Throws<IOException>(() => writeSession.PublishManifest(next));
+            Assert.Throws<IOException>(() => writeSession.PublishManifest(next, 0));
         }
 
         Assert.Equal(original.Generation, storage.ReadManifest().Generation);
@@ -1438,7 +1438,7 @@ public sealed class StorageIntegrityTests
         var next = new CorpusManifest(original.CorpusId, original.Generation.Next(), original.Segments);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
-            Assert.Throws<IOException>(() => writeSession.PublishManifest(next));
+            Assert.Throws<IOException>(() => writeSession.PublishManifest(next, 0));
         }
 
         Assert.True(File.Exists(storage.ManifestPath + ".tmp"));
@@ -1464,7 +1464,7 @@ public sealed class StorageIntegrityTests
         var manifest = new CorpusManifest(new CorpusId(Guid.NewGuid()), new StorageGeneration(1), []);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
-            Assert.Throws<IOException>(() => writeSession.PublishManifest(manifest));
+            Assert.Throws<IOException>(() => writeSession.PublishManifest(manifest, 0));
         }
 
         Assert.False(File.Exists(storage.ManifestPath));
@@ -1506,7 +1506,7 @@ public sealed class StorageIntegrityTests
         var failedManifest = new CorpusManifest(original.CorpusId, original.Generation.Next(), [compactedEntry]);
         using (var writeSession = storage.AcquireWriteSession(CancellationToken.None))
         {
-            Assert.Throws<IOException>(() => writeSession.PublishManifest(failedManifest));
+            Assert.Throws<IOException>(() => writeSession.PublishManifest(failedManifest, 0));
         }
 
         storage.EnsureLayout();
@@ -1812,7 +1812,8 @@ public sealed class StorageIntegrityTests
                 return entry;
             }
 
-            public void PublishManifest(CorpusManifest manifest) => innerSession.PublishManifest(manifest);
+            public void PublishManifest(CorpusManifest manifest, long minimumFreeBytesAfterPublication) =>
+                innerSession.PublishManifest(manifest, minimumFreeBytesAfterPublication);
             public bool CanReplaceSegments() => innerSession.CanReplaceSegments();
             public void EnsureReplacementAllowed() => innerSession.EnsureReplacementAllowed();
             public void PrepareFullBuild(bool discardCorruptState) =>
