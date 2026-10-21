@@ -51,9 +51,8 @@ internal static class HitMaterializer
             materialized.StartLine,
             contentBytes.Length);
         var matchingLine = DecodeText(
-            contentBytes[matchingLineStart..matchingLineEnd],
-            asciiDocument,
-            trimLineEnd: true);
+            TrimLineEnd(contentBytes[matchingLineStart..matchingLineEnd]),
+            asciiDocument);
         return new MaterializedHitWithLine(materialized, matchingLine);
     }
 
@@ -107,8 +106,7 @@ internal static class HitMaterializer
         var matchText = materializedMatchEnd > hit.StartByte
             ? DecodeText(
                 contentBytes[hit.StartByte..materializedMatchEnd],
-                asciiDocument,
-                trimLineEnd: false)
+                asciiDocument)
             : string.Empty;
         var contextLineBudget = options.MaxMaterializedContextLines;
         var contextByteBudget = options.MaxMaterializedContextBytes;
@@ -205,10 +203,12 @@ internal static class HitMaterializer
                 }
             }
 
+            // Locate display terminators in the complete line. A CR at the
+            // clipped boundary can be embedded content, not a line ending.
+            var displayBytes = TrimLineEnd(contentBytes[start..end]);
             lines.Add(DecodeText(
-                contentBytes[start..materializedEnd],
-                asciiDocument,
-                trimLineEnd: true));
+                displayBytes[..Math.Min(materializedEnd - start, displayBytes.Length)],
+                asciiDocument));
             remainingLines--;
             remainingBytes -= materializedEnd - start;
             if (materializedEnd < end)
@@ -221,19 +221,18 @@ internal static class HitMaterializer
         return [.. lines];
     }
 
-    private static string DecodeText(
-        ReadOnlySpan<byte> bytes,
-        bool asciiDocument,
-        bool trimLineEnd)
+    private static ReadOnlySpan<byte> TrimLineEnd(ReadOnlySpan<byte> bytes)
     {
-        if (trimLineEnd)
+        while (bytes.Length > 0 && bytes[^1] is (byte)'\r' or (byte)'\n')
         {
-            while (bytes.Length > 0 && bytes[^1] is (byte)'\r' or (byte)'\n')
-            {
-                bytes = bytes[..^1];
-            }
+            bytes = bytes[..^1];
         }
 
+        return bytes;
+    }
+
+    private static string DecodeText(ReadOnlySpan<byte> bytes, bool asciiDocument)
+    {
         return asciiDocument
             ? Encoding.ASCII.GetString(bytes)
             : Encoding.UTF8.GetString(bytes);

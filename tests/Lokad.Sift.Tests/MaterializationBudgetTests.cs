@@ -5,6 +5,43 @@ namespace Lokad.Sift.Tests;
 public sealed class MaterializationBudgetTests
 {
     [Theory]
+    [InlineData("before\rXYZ\n", 7, "before\r", true)]
+    [InlineData("before\r\rXYZ\n", 8, "before\r\r", true)]
+    [InlineData("é\rXYZ\n", 3, "é\r", true)]
+    [InlineData("é\réXYZ\n", 4, "é\r", true)]
+    [InlineData("before\rXYZ\n", 11, "before\rXYZ", false)]
+    [InlineData("before\r\n", 6, "before", true)]
+    [InlineData("before\r\n", 7, "before", true)]
+    [InlineData("before\r\n", 8, "before", false)]
+    [InlineData("before\r\r\n", 9, "before", false)]
+    public async Task ContextTrimmingUsesTheCompleteLine(
+        string context, int budget, string expected, bool truncated)
+    {
+        foreach (var before in new[] { false, true })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions { MaxMaterializedContextBytes = budget });
+            var content = before ? context + "needle\n" : "needle\n" + context;
+            await index.Build(new InMemoryDocumentSource([("a.txt", content)]));
+            using var snapshot = index.OpenSnapshot();
+            var hits = new HitBuffer();
+            snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
+            var raw = Assert.Single(hits.Hits);
+
+            var hit = snapshot.Materialize(raw, before ? 1 : 0, before ? 0 : 1);
+            var withLine = snapshot.MaterializeWithMatchingLine(raw, before ? 1 : 0, before ? 0 : 1);
+
+            Assert.Equal(new[] { expected }, before ? hit.BeforeContext : hit.AfterContext);
+            Assert.Empty(before ? hit.AfterContext : hit.BeforeContext);
+            Assert.Equal(hit.BeforeContext, withLine.Hit.BeforeContext);
+            Assert.Equal(hit.AfterContext, withLine.Hit.AfterContext);
+            Assert.Equal(truncated, hit.IsContextTruncated);
+            Assert.Equal(truncated, withLine.Hit.IsContextTruncated);
+            Assert.Equal("needle", withLine.MatchingLine);
+            Assert.Equal("needle", hit.MatchText);
+        }
+    }
+
+    [Theory]
     [InlineData(int.MaxValue)]
     [InlineData(int.MaxValue - 1)]
     public async Task LargeContextBudgetsMaterializeBothDirections(int budget)
