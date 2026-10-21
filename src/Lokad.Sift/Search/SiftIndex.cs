@@ -736,14 +736,8 @@ public sealed class SiftIndex : ISiftIndex
                     skippedBytes: upsertLoad.SkippedBytes,
                     rejectedBytes: upsertLoad.RejectedBytes,
                     rejectedDocumentDetails: rejectedDocuments);
-                var commitMetadata = options.CommitMetadataProvider is null
-                    ? existingManifest.CommitMetadata
-                    : MutationCallbackGuards.GetCommitMetadata(options.CommitMetadataProvider, pendingStats);
-                if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
-                {
-                    throw new InvalidOperationException(
-                        $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
-                }
+                var commitMetadata = MutationCallbackGuards.GetCommitMetadata(
+                    options.CommitMetadataProvider, pendingStats, _options.MaxCommitMetadataBytes, existingManifest.CommitMetadata);
 
                 var contentChanged = !hadManifest ||
                     publishedSegments.Count > 0 ||

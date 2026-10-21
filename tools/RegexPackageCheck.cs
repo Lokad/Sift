@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -107,6 +108,7 @@ internal static class RegexPackageCheck
         await VerifyLiteralWholeLineBoundaries(engine);
         await VerifyRegexCandidateResults(engine);
         await VerifyLeadingLiteralComposition(engine);
+        await VerifyMetadataAdmission(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
@@ -155,6 +157,46 @@ internal static class RegexPackageCheck
         }
         await overlay.ApplyDeltaTo(target);
         await overlay.CommitToBase(index);
+    }
+
+    private static async Task VerifyMetadataAdmission(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, MaxCommitMetadataBytes = 64 });
+        await index.Build(new Documents([("old.txt", "alpha")]));
+        foreach (var build in new[] { false, true })
+        {
+            var before = index.GetIndexState();
+            using var retained = index.OpenSnapshot();
+            using var memory = new OversizedMetadataMemory();
+            Exception? caught = null;
+            try
+            {
+                if (build) await index.Build(new Documents([("new.txt", "beta")]),
+                    new BuildOptions { CommitMetadataProvider = _ => memory.View });
+                else await index.Update(new Documents([("new.txt", "beta")]), [],
+                    new UpdateOptions { CommitMetadataProvider = _ => memory.View });
+            }
+            catch (Exception exception) { caught = exception; }
+            Require(caught is InvalidOperationException && caught.Message.Contains("commit metadata exceeds", StringComparison.Ordinal)
+                && !memory.Accessed, "Oversized metadata was accessed before admission.");
+            Require(index.GetIndexIdentity() == before.Identity && !index.RequiresRebuild &&
+                retained.TryGetDocumentBytes(new DocumentKey("old.txt"), out _), "Rejected metadata changed index state.");
+        }
+        var metadata = Enumerable.Repeat((byte)7, 64).ToArray();
+        await index.Update(new Documents([]), [], new UpdateOptions { CommitMetadataProvider = _ => metadata });
+        Array.Fill(metadata, (byte)9);
+        Require(index.GetIndexState().CommitMetadata.Span.IndexOfAnyExcept((byte)7) < 0 &&
+            index.GetIndexState().CommitMetadata.Length == 64, "Valid metadata was not copied defensively.");
+    }
+
+    private sealed class OversizedMetadataMemory : MemoryManager<byte>
+    {
+        public ReadOnlyMemory<byte> View => CreateMemory(65);
+        public bool Accessed { get; private set; }
+        public override Span<byte> GetSpan() { Accessed = true; throw new InvalidDataException("Rejected memory was accessed."); }
+        public override MemoryHandle Pin(int elementIndex = 0) => throw new NotSupportedException();
+        public override void Unpin() { }
+        protected override void Dispose(bool disposing) { }
     }
 
     private static async Task VerifyLeadingLiteralComposition(ISiftRegexEngine? engine)

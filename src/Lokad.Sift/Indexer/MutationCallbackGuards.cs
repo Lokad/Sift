@@ -21,9 +21,20 @@ internal static class MutationCallbackGuards
         }
     }
 
-    public static byte[] GetCommitMetadata<TStats>(Func<TStats, ReadOnlyMemory<byte>> provider, TStats stats)
+    public static byte[] GetCommitMetadata<TStats>(
+        Func<TStats, ReadOnlyMemory<byte>>? provider, TStats stats, int maximumBytes, byte[] retainedMetadata)
     {
-        try { return provider(stats).ToArray(); }
+        try
+        {
+            ReadOnlyMemory<byte> metadata = provider is null ? retainedMetadata : provider(stats);
+            if (metadata.Length > maximumBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Sift commit metadata exceeds the configured {maximumBytes} byte limit.");
+            }
+
+            return provider is null ? retainedMetadata : metadata.ToArray();
+        }
         catch (Exception exception) when (IndexCorruption.IsIndexCorruption(exception))
         {
             throw new MutationCallbackFailureException(exception);

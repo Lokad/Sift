@@ -113,14 +113,8 @@ internal sealed class IndexBuilder
                 contentBytes: load.AcceptedBytes,
                 rejectedBytes: load.RejectedBytes,
                 rejectedDocumentDetails: rejectedDocuments);
-            var commitMetadata = options.CommitMetadataProvider is null
-                ? []
-                : MutationCallbackGuards.GetCommitMetadata(options.CommitMetadataProvider, pendingStats);
-            if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
-            {
-                throw new InvalidOperationException(
-                    $"Sift commit metadata exceeds the configured {_options.MaxCommitMetadataBytes} byte limit.");
-            }
+            var commitMetadata = MutationCallbackGuards.GetCommitMetadata(
+                options.CommitMetadataProvider, pendingStats, _options.MaxCommitMetadataBytes, []);
 
             writeSession.PublishManifest(new CorpusManifest(
                 CorpusId: corpusId,
