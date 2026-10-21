@@ -46,6 +46,10 @@
 
 ### Fixed
 
+- Path prefixes and include/exclude globs containing lone UTF-16 surrogates no
+  longer lose matches or match replacement-character filenames through UTF-8
+  conversion. Combined filters retain the same meaning across verification routes;
+  unsafe index fragments are omitted while valid-Unicode acceleration is preserved.
 - Document source and commit metadata callback failures during build/update no
   longer falsely mark healthy indexes as requiring a rebuild. Original exceptions,
   committed state and snapshots are preserved, including async enumeration failures;

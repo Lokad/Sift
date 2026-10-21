@@ -126,6 +126,8 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 * two submitted documents with the same canonical path identify the same logical document
 * Document rows are sorted by stored path
 * Prefix filters operate on canonical logical paths
+* Prefixes and globs retain accepted UTF-16 string semantics, including lone surrogate code units; document paths themselves must contain well-formed Unicode
+* Unencodable filter components use string verification and cannot supply replacement-encoded byte constraints; valid-Unicode byte verification and safe index hints remain available
 * Path regex operates on canonical logical paths
 * Globs are path-separator aware
 * Include/exclude globs match the complete path, including a literal trailing LF

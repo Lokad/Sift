@@ -379,6 +379,9 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
 ## Notes for consumers
 
 - Paths must be relative and canonicalizable to `/`-separated logical paths.
+- Path prefixes and globs retain UTF-16 string semantics, including lone surrogate
+  code units. Unencodable filters use string verification without replacement-
+  encoded index constraints; stored document paths must be well-formed Unicode.
 - Input content is `ReadOnlyMemory<byte>` and must be UTF-8.
 - Async document sources are pulled under Sift's writer transaction, providing
   natural backpressure without a consumer-owned producer queue.
