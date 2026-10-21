@@ -55,6 +55,10 @@ public sealed class RegexEnumerationTests
     [InlineData(@"a\na", "xa\na\na", false, true)]
     [InlineData("aa", "aa\r\naa\n", false, true)]
     [InlineData(@"aa\r", "aa\r\n", false, true)]
+    [InlineData("alpha", "alpha\r\r\n", false, true)]
+    [InlineData("café", "café\r\r\n", false, true)]
+    [InlineData(@"café\r", "café\r\r\n", false, true)]
+    [InlineData(@"café\r\r", "café\r\r\n", false, true)]
     [InlineData("aa", "aa\naa\n", true, true)]
     [InlineData("(?:)", "abc\n\n", false, true)]
     public async Task BoundaryOptionsPreserveRegexEnumeration(

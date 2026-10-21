@@ -95,6 +95,11 @@ public sealed record SearchQuery
     public PatternMode PatternMode { get; init; }
     public CaseMode CaseMode { get; init; }
     public bool WholeWord { get; init; }
+    /// <summary>
+    /// Requires literal matches to cover complete LF-delimited lines, ignoring
+    /// at most one trailing CR before LF or end of content. Regex mode uses
+    /// managed regex line anchors. Empty queries still list documents.
+    /// </summary>
     public bool WholeLine { get; init; }
     public bool Multiline { get; init; }
     public bool DotAll { get; init; }

@@ -1752,9 +1752,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             lineEnd++;
         }
 
-        var match = text[start..end];
-        var line = text[lineStart..lineEnd].TrimEnd('\r');
-        return string.Equals(line, match, StringComparison.Ordinal);
+        var trimmedEnd = lineEnd > lineStart && text[lineEnd - 1] == '\r'
+            ? lineEnd - 1
+            : lineEnd;
+        return start == lineStart && end == trimmedEnd;
     }
 
     private static bool IsWholeLine(ReadOnlySpan<byte> contentBytes, int start, int end)

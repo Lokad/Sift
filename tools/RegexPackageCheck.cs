@@ -103,6 +103,7 @@ internal static class RegexPackageCheck
         await VerifyUnicodePathFilters(engine);
         await VerifyContextAndDecodeDiagnostics(engine);
         await VerifyLiteralSurrogateProjection(engine);
+        await VerifyLiteralWholeLineBoundaries(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
@@ -277,6 +278,32 @@ internal static class RegexPackageCheck
                 Require(snapshot.Search(query, new(), new Hits()).HitsReturned == (mode == "overlay" ? 3 : 2),
                     "Collector failure poisoned subsequent searches.");
             }
+        }
+    }
+
+    private static async Task VerifyLiteralWholeLineBoundaries(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new Documents([("a.txt", "stale"), ("b.txt", "stale")]));
+        using var overlay = index.OpenOverlaySnapshot();
+        var documents = new[] { ("a.txt", "π\nalpha\r\r\n"), ("b.txt", "π\ncafé\r\r") };
+        await overlay.Update(new Documents(documents), []);
+        await index.Update(new Documents(documents), []);
+        using var snapshot = index.OpenSnapshot();
+        foreach (var view in new IIndexSnapshot[] { snapshot, overlay })
+        foreach (var stem in new[] { "alpha", "café" })
+        foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive })
+        {
+            var pattern = caseMode == CaseMode.Sensitive ? stem : stem.ToUpperInvariant();
+            var query = new SearchQuery(pattern, PatternMode.Literal, caseMode) { WholeLine = true };
+            Require(view.Search(query, new(), new Hits()).HitsReturned == 0,
+                "Whole-line literal discarded extra carriage returns.");
+            var hits = new Hits();
+            view.Search(new SearchQuery(pattern + "\r", PatternMode.Literal, caseMode) { WholeLine = true }, new(), hits);
+            var hit = hits.Values.Single();
+            Require(hit.StartByte == 3 && hit.EndByte == 4 + Encoding.UTF8.GetByteCount(stem) &&
+                view.Materialize(hit, 0, 0).MatchText == stem + "\r",
+                "Whole-line literal lost its CR body byte or changed UTF-8 projection.");
         }
     }
 

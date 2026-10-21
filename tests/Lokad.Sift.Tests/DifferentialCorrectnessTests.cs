@@ -13,6 +13,11 @@ public sealed class DifferentialCorrectnessTests
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Smart), new PathFilter() },
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true }, new PathFilter() },
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true }, new PathFilter() },
+        { new SearchQuery("beta\r", PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true }, new PathFilter() },
+        { new SearchQuery("café", PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true }, new PathFilter() },
+        { new SearchQuery("CAFÉ", PatternMode.Literal, CaseMode.Insensitive) { WholeLine = true }, new PathFilter() },
+        { new SearchQuery("café\r", PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true }, new PathFilter() },
+        { new SearchQuery("CAFÉ\r", PatternMode.Literal, CaseMode.Insensitive) { WholeLine = true }, new PathFilter() },
         { new SearchQuery("b[a-z]+a", PatternMode.Regex, CaseMode.Sensitive), new PathFilter() },
         { new SearchQuery("alpha\\nbeta", PatternMode.Regex, CaseMode.Sensitive) { Multiline = true }, new PathFilter() },
         { new SearchQuery("beta", PatternMode.Literal, CaseMode.Sensitive), new PathFilter { PathRegex = @"src/.+\.txt$" } },
@@ -32,7 +37,9 @@ public sealed class DifferentialCorrectnessTests
             ("src/nested/c.txt", "alpha\nbeta\n"),
             ("tests/d.txt", "gamma Beta delta\n"),
             ("docs/e.md", "beta\n"),
-            ("src/whole.txt", "beta\nalphabetabeta\n"));
+            ("src/whole.txt", "beta\nalphabetabeta\n"),
+            ("src/ascii-endings.txt", "beta\r\nbeta\r\r\nbeta\r\r\r\nbeta\r\r"),
+            ("src/unicode-endings.txt", "café\r\ncafé\r\r\ncafé\r\r\r\ncafé\r\r"));
 
         using var index = new SiftIndex(fixture.CorpusPath,
             new SiftOptions { RegexEngine = useProducerAdapter ? new Utf8RegexAdapter() : null });
@@ -151,19 +158,13 @@ public sealed class DifferentialCorrectnessTests
 
     private static bool IsWholeLine(string text, int start, int end)
     {
-        var lineStart = start;
-        while (lineStart > 0 && text[lineStart - 1] != '\n')
-        {
-            lineStart--;
-        }
-
-        var lineEnd = end;
-        while (lineEnd < text.Length && text[lineEnd] != '\n')
-        {
-            lineEnd++;
-        }
-
-        return string.Equals(text[lineStart..lineEnd].TrimEnd('\r'), text[start..end], StringComparison.Ordinal);
+        // Check adjacent delimiters independently of the production line scans.
+        if (start > 0 && text[start - 1] != '\n')
+            return false;
+        if (end < text.Length && text[end] == '\r')
+            return end + 1 == text.Length || text[end + 1] == '\n';
+        return (end == text.Length || text[end] == '\n') &&
+            (end == start || text[end - 1] != '\r');
     }
 
     private static int GetLine(string text, int index)
