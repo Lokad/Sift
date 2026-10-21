@@ -113,7 +113,9 @@ internal sealed class IndexBuilder
                 contentBytes: load.AcceptedBytes,
                 rejectedBytes: load.RejectedBytes,
                 rejectedDocumentDetails: rejectedDocuments);
-            var commitMetadata = options.CommitMetadataProvider?.Invoke(pendingStats).ToArray() ?? [];
+            var commitMetadata = options.CommitMetadataProvider is null
+                ? []
+                : MutationCallbackGuards.GetCommitMetadata(options.CommitMetadataProvider, pendingStats);
             if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
             {
                 throw new InvalidOperationException(
@@ -183,7 +185,7 @@ internal sealed class IndexBuilder
             preparePartition,
             publishPartition);
 
-        while (source.TryReadNext(out var submittedDocument))
+        while (MutationCallbackGuards.TryReadNext(source, out var submittedDocument))
         {
             cancellationToken.ThrowIfCancellationRequested();
             accumulator.Add(submittedDocument);
@@ -212,7 +214,7 @@ internal sealed class IndexBuilder
             preparePartition,
             publishPartition);
 
-        await foreach (var submittedDocument in source.WithCancellation(cancellationToken).ConfigureAwait(false))
+        await foreach (var submittedDocument in MutationCallbackGuards.ReadAsync(source, cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
             accumulator.Add(submittedDocument);

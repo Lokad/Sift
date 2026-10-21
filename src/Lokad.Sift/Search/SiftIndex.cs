@@ -188,7 +188,15 @@ public sealed class SiftIndex : ISiftIndex
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        return await _mutations.Run(activity, mutation, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await _mutations.Run(activity, mutation, cancellationToken).ConfigureAwait(false);
+        }
+        catch (MutationCallbackFailureException exception)
+        {
+            exception.DispatchInfo.Throw();
+            throw;
+        }
     }
 
     private async ValueTask<BuildStats> BuildCore(
@@ -726,7 +734,7 @@ public sealed class SiftIndex : ISiftIndex
                     rejectedDocumentDetails: rejectedDocuments);
                 var commitMetadata = options.CommitMetadataProvider is null
                     ? existingManifest.CommitMetadata
-                    : options.CommitMetadataProvider(pendingStats).ToArray();
+                    : MutationCallbackGuards.GetCommitMetadata(options.CommitMetadataProvider, pendingStats);
                 if (commitMetadata.Length > _options.MaxCommitMetadataBytes)
                 {
                     throw new InvalidOperationException(

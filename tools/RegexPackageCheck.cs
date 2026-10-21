@@ -103,8 +103,72 @@ internal static class RegexPackageCheck
         await VerifyContextAndDecodeDiagnostics(engine);
         await VerifyLiteralSurrogateProjection(engine);
         await VerifyCollectorFailurePropagation(engine);
+        await VerifyMutationCallbackFailures(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyMutationCallbackFailures(ISiftRegexEngine? engine)
+    {
+        foreach (var build in new[] { false, true })
+        foreach (var callback in new[] { "sync", "async", "dispose", "metadata" })
+        foreach (var failure in new Exception[] { new InvalidDataException("Caller data failure."),
+            new FileNotFoundException("Caller file failure."), new DirectoryNotFoundException("Caller directory failure."),
+            new EndOfStreamException("Caller stream failure.") })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
+            await index.Build(new Documents([("old.txt", "alpha")]));
+            var before = index.GetIndexIdentity();
+            using var retained = index.OpenSnapshot();
+            Exception? caught = null;
+            try
+            {
+                if (callback == "metadata")
+                {
+                    if (build)
+                        await index.Build(new Documents([("new.txt", "beta")]),
+                            new BuildOptions { CommitMetadataProvider = _ => throw failure });
+                    else
+                        await index.Update(new Documents([("new.txt", "beta")]), [],
+                            new UpdateOptions { CommitMetadataProvider = _ => throw failure });
+                }
+                else if (callback == "sync")
+                {
+                    if (build) await index.Build(new Documents([("new.txt", "beta"), ("second.txt", "gamma")], failure));
+                    else await index.Update(new Documents([("new.txt", "beta"), ("second.txt", "gamma")], failure), []);
+                }
+                else
+                {
+                    if (build) await index.Build(FailingDocuments(failure, callback == "dispose"));
+                    else await index.Update(FailingDocuments(failure, callback == "dispose"), []);
+                }
+            }
+            catch (Exception exception) { caught = exception; }
+            Require(ReferenceEquals(failure, caught) && !index.RequiresRebuild,
+                "Caller mutation failure was replaced or classified as index corruption.");
+            Require(index.GetIndexIdentity() == before && index.GetStorageStats().PhysicalSegmentCount == 1,
+                "Failed mutation changed the committed manifest or leaked a partition.");
+            using var fresh = index.OpenSnapshot();
+            Require(fresh.Search(new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive), new(), new Hits()).HitsReturned == 1 &&
+                retained.TryGetDocumentBytes(new DocumentKey("old.txt"), out _) &&
+                !fresh.TryGetDocumentBytes(new DocumentKey("new.txt"), out _), "Failed mutation invalidated snapshot contents.");
+            await index.Update(new Documents([("new.txt", "beta")]), []);
+        }
+    }
+
+    private static async IAsyncEnumerable<SubmittedDocument> FailingDocuments(Exception failure, bool failOnDispose)
+    {
+        try
+        {
+            await Task.Yield();
+            yield return new SubmittedDocument("new.txt", "beta"u8.ToArray());
+            yield return new SubmittedDocument("second.txt", "gamma"u8.ToArray());
+            if (!failOnDispose) throw failure;
+        }
+        finally
+        {
+            if (failOnDispose) throw failure;
+        }
     }
 
     private static async Task VerifyCollectorFailurePropagation(ISiftRegexEngine? engine)
@@ -305,13 +369,17 @@ internal static class RegexPackageCheck
         if (!condition) throw new InvalidOperationException(message);
     }
 
-    private sealed class Documents((string Path, string Text)[] items) : IDocumentSource
+    private sealed class Documents((string Path, string Text)[] items, Exception? failure = null) : IDocumentSource
     {
         private int _position;
         public bool TryReadNext(out SubmittedDocument document)
         {
             document = default;
-            if (_position == items.Length) return false;
+            if (_position == items.Length)
+            {
+                if (failure is not null) throw failure;
+                return false;
+            }
             var item = items[_position++];
             document = new SubmittedDocument(item.Path, Encoding.UTF8.GetBytes(item.Text));
             return true;

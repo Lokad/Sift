@@ -169,6 +169,8 @@ public interface IDocumentSource
     ///     <see cref="SubmittedDocument.ContentLifetime"/>.
     ///     The callback must not dispose or synchronously start another mutation on
     ///     the consuming index before returning.
+    ///     Caller exceptions propagate unchanged. A source failure alone does not
+    ///     mark an otherwise healthy index as requiring a rebuild.
     /// </remarks>
     bool TryReadNext(out SubmittedDocument document);
 }

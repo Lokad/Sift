@@ -47,6 +47,8 @@ public sealed record BuildOptions
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest. The callback must not
     // dispose or synchronously start another mutation on the consuming index.
+    // Caller exceptions propagate unchanged and do not themselves mark a healthy
+    // index as corrupt; the previous committed state remains available.
     public Func<BuildCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
@@ -72,6 +74,8 @@ public sealed record UpdateOptions
     // Invoked after ingestion succeeds and before the manifest is published.
     // The returned bytes are copied into the new manifest. The callback must not
     // dispose or synchronously start another mutation on the consuming index.
+    // Caller exceptions propagate unchanged and do not themselves mark a healthy
+    // index as corrupt; the previous committed state remains available.
     public Func<UpdateCommitStats, ReadOnlyMemory<byte>>? CommitMetadataProvider { get; init; }
 }
 
