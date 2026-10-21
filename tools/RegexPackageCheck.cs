@@ -100,12 +100,53 @@ internal static class RegexPackageCheck
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
         await VerifyUnicodeAndEmptyQueries(engine);
         await VerifyGlobFilters(engine);
+        await VerifyUnicodePathFilters(engine);
         await VerifyContextAndDecodeDiagnostics(engine);
         await VerifyLiteralSurrogateProjection(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyUnicodePathFilters(ISiftRegexEngine? engine)
+    {
+        var paths = new[] { "😀.txt", "�.txt", "prefix/😀.txt", "prefix/�.txt" };
+        foreach (var route in new[] { "snapshot", "parallel", "overlay-base", "overlay-own" })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
+            await index.Build(new Documents(paths.Select(path => (path, "needle")).ToArray()));
+            using IIndexSnapshot snapshot = route.StartsWith("overlay", StringComparison.Ordinal)
+                ? index.OpenOverlaySnapshot(new SearchOptions(2))
+                : index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+            if (route == "overlay-own")
+                await ((IOverlaySnapshot)snapshot).Update(new Documents(paths.Select(path => (path, "updated needle")).ToArray()), []);
+
+            foreach (var (original, expected, indexed) in new (PathFilter, string[], bool)[]
+            {
+                (new() { PathPrefix = "\ud83d", IncludeGlobs = ["*"] }, ["😀.txt"], false),
+                (new() { IncludeGlobs = ["\ud83d*"] }, ["😀.txt"], false),
+                (new() { IncludeGlobs = ["*\ude00.txt"] }, ["😀.txt"], false),
+                (new() { IncludeGlobs = ["prefix/\ud83d*"] }, ["prefix/😀.txt"], false),
+                (new() { IncludeGlobs = ["\ud83d.txt"] }, [], false),
+                (new() { ExcludeGlobs = ["\ud83d*"] }, ["�.txt", "prefix/😀.txt", "prefix/�.txt"], false),
+                (new() { PathRegex = "^prefix/", IncludeGlobs = ["prefix/\ud83d*"] }, ["prefix/😀.txt"], true),
+                (new() { IncludeGlobs = ["prefix/😀*"] }, ["prefix/😀.txt"], true),
+                (new() { IncludeGlobs = ["prefix/�*"] }, ["prefix/�.txt"], true)
+            })
+            foreach (var pattern in new[] { "", "needle" })
+            foreach (var pathRegex in new[] { original.PathRegex, original.PathRegex ?? ".*" }.Distinct())
+            {
+                var filter = new PathFilter(original.PathPrefix, original.IncludeGlobs, original.ExcludeGlobs, pathRegex);
+                var query = new SearchQuery(pattern, PatternMode.Literal, CaseMode.Sensitive);
+                var hits = new Hits();
+                snapshot.Search(query, filter, hits);
+                Require(hits.Values.Select(hit => snapshot.Materialize(hit, 0, 0).Path).Order(StringComparer.Ordinal)
+                    .SequenceEqual(expected.Order(StringComparer.Ordinal)), "UTF-16 path filter changed meaning across byte/string routes.");
+                Require(snapshot.Explain(query, filter).UsesPathIndex == indexed,
+                    "Malformed path fragment entered the index or a safe hint was lost.");
+            }
+        }
     }
 
     private static async Task VerifyMutationCallbackFailures(ISiftRegexEngine? engine)

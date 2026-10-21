@@ -128,6 +128,11 @@ public readonly record struct SearchOptions
     public int SegmentParallelism { get; init; }
 }
 
+/// <summary>Restricts a search to matching logical paths.</summary>
+/// <remarks>
+///     Prefixes and globs retain UTF-16 string semantics, including lone surrogate
+///     code units. Stored document paths must contain well-formed Unicode.
+/// </remarks>
 public sealed class PathFilter
 {
     private IReadOnlyList<string> _includeGlobs = Array.Empty<string>();

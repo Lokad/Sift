@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Lokad.Sift;
+using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Search;
 
@@ -14,7 +15,7 @@ internal sealed class PathFilterMatcher
         static key => key.CharacterCount);
     private static readonly PathFilterMatcher Empty = new(new PathFilterCacheKey(new PathFilter()));
     private readonly string? _pathPrefix;
-    private readonly byte[] _pathPrefixUtf8;
+    private readonly byte[]? _pathPrefixUtf8;
     private readonly GlobMatcher[] _includes;
     private readonly GlobMatcher[] _excludes;
     private readonly Regex? _pathRegex;
@@ -47,7 +48,9 @@ internal sealed class PathFilterMatcher
         _pathPrefix = filter.PathPrefix is { } pathPrefix && !string.IsNullOrWhiteSpace(pathPrefix)
             ? pathPrefix.Replace('\\', '/')
             : null;
-        _pathPrefixUtf8 = _pathPrefix is null ? [] : System.Text.Encoding.UTF8.GetBytes(_pathPrefix);
+        // Null retains an accepted UTF-16 prefix that cannot be checked as UTF-8.
+        _pathPrefixUtf8 = _pathPrefix is null ? [] : UnicodeText.IsWellFormedUtf16(_pathPrefix)
+            ? Encoding.UTF8.GetBytes(_pathPrefix) : null;
         _includes = CompileGlobs(filter.IncludeGlobs);
         _excludes = CompileGlobs(filter.ExcludeGlobs);
         _pathRegex = string.IsNullOrWhiteSpace(filter.PathRegex)
@@ -86,7 +89,8 @@ internal sealed class PathFilterMatcher
     public string? PathPrefix => _pathPrefix;
     public bool UsesPathIndex => _accelerationFragments.Length > 0;
     public bool RequiresPathVerification => _includes.Length > 0 || _excludes.Length > 0 || _pathRegex is not null;
-    public bool RequiresStringPathVerification => _pathRegex is not null || HasRegexGlob(_includes) || HasRegexGlob(_excludes);
+    public bool RequiresStringPathVerification => _pathPrefixUtf8 is null || _pathRegex is not null ||
+        HasRegexGlob(_includes) || HasRegexGlob(_excludes);
 
     public bool IsMatch(string path)
     {
@@ -126,7 +130,8 @@ internal sealed class PathFilterMatcher
 
     public bool IsMatch(ReadOnlySpan<byte> pathUtf8)
     {
-        if (_pathPrefixUtf8.Length > 0 && !pathUtf8.StartsWith(_pathPrefixUtf8))
+        if (_pathPrefixUtf8 is not { } prefixUtf8 ||
+            prefixUtf8.Length > 0 && !pathUtf8.StartsWith(prefixUtf8))
         {
             return false;
         }
@@ -278,7 +283,9 @@ internal sealed class PathFilterMatcher
             }
         }
 
-        return [.. fragments.Distinct(StringComparer.Ordinal)];
+        // A UTF-16 literal can split a surrogate pair. Replacement encoding is
+        // not a necessary condition for the accepted string-based filter.
+        return [.. fragments.Where(UnicodeText.IsWellFormedUtf16).Distinct(StringComparer.Ordinal)];
     }
 
     private static string ExtractGlobLiteral(string glob)
@@ -358,7 +365,7 @@ internal sealed class GlobMatcher
     public static GlobMatcher Create(string glob)
     {
         glob = glob.Replace('\\', '/');
-        if (glob.IndexOf('?') >= 0)
+        if (glob.IndexOf('?') >= 0 || !UnicodeText.IsWellFormedUtf16(glob))
         {
             return CreateRegex(glob);
         }
