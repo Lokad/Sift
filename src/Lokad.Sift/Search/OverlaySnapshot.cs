@@ -942,6 +942,12 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         UpdateOptions options,
         CancellationToken cancellationToken)
     {
+        if (ReentrancyGuard.IsActive(this))
+        {
+            throw new InvalidOperationException(
+                "An overlay cannot be exported or committed from one of its active callbacks.");
+        }
+
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

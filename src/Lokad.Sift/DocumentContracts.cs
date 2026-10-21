@@ -152,7 +152,7 @@ public interface IDocumentKeyCollector
 {
     /// <remarks>
     ///     The callback runs within the visit operation. It must not dispose the
-    ///     producing snapshot or update the producing overlay before returning.
+    ///     producing snapshot, or update, export or commit the producing overlay before returning.
     /// </remarks>
     bool OnDocument(DocumentKey key);
 }
@@ -171,6 +171,7 @@ public interface IDocumentSource
     ///     the consuming index before returning.
     ///     Its writer-lock probes <see cref="ISiftIndex.GetStorageStats"/> and
     ///     <see cref="ISiftIndex.ShouldCompact"/> are also rejected from this callback.
+    ///     When consumed by an overlay, it must not export or commit that overlay.
     ///     Caller exceptions propagate unchanged. A source failure alone does not
     ///     mark an otherwise healthy index as requiring a rebuild.
     /// </remarks>

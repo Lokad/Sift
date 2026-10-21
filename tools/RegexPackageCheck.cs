@@ -108,8 +108,51 @@ internal static class RegexPackageCheck
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
+        await VerifyOverlayExportReentrancy(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyOverlayExportReentrancy(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        using var target = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new Documents([("a.txt", "base")]));
+        await target.Build(new Documents([]));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(new Documents([("a.txt", "alpha")]), []);
+        foreach (var commit in new[] { false, true })
+        foreach (var source in new[] { false, true })
+        {
+            var before = target.GetIndexIdentity();
+            var baseBefore = index.GetIndexIdentity();
+            Exception? failure = null;
+            void Probe()
+            {
+                Require(overlay.TryGetDocumentBytes(new DocumentKey("a.txt"), out _), "Safe overlay read failed.");
+                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try
+                {
+                    Task.Run(() => commit ? overlay.CommitToBase(index, new UpdateOptions(), cancellation.Token)
+                        : overlay.ApplyDeltaTo(target, new UpdateOptions(), cancellation.Token)).GetAwaiter().GetResult();
+                }
+                catch (InvalidOperationException exception) { failure = exception; throw; }
+            }
+            Exception? caught = null;
+            try
+            {
+                if (source) await overlay.Update(new Documents([("b.txt", "beta")], beforeRead: Probe), []);
+                else await overlay.ApplyDeltaTo(target,
+                    new UpdateOptions { CommitMetadataProvider = _ => { Probe(); return default; } }, CancellationToken.None);
+            }
+            catch (Exception exception) { caught = exception; }
+            Require(failure is not null && ReferenceEquals(failure, caught), "Overlay reentrancy failure was lost.");
+            Require(target.GetIndexIdentity() == before && index.GetIndexIdentity() == baseBefore &&
+                !overlay.TryGetDocumentBytes(new DocumentKey("b.txt"), out _) &&
+                !index.RequiresRebuild && !target.RequiresRebuild, "Rejected export changed or poisoned committed state.");
+        }
+        await overlay.ApplyDeltaTo(target);
+        await overlay.CommitToBase(index);
     }
 
     private static async Task VerifyRegexCandidateResults(ISiftRegexEngine? engine)

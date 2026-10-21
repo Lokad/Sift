@@ -669,11 +669,19 @@ public interface IOverlaySnapshot : IIndexSnapshot
         OverlayUpdateOptions options,
         CancellationToken cancellationToken);
     /// <summary>Applies this overlay to its captured base if that logical revision is still current.</summary>
-    /// <remarks>Any supplied expected revision must identify the same captured base revision.</remarks>
+    /// <remarks>
+    /// Any supplied expected revision must identify the same captured base revision.
+    /// Calls from this overlay's active source, metadata or collector callbacks are
+    /// rejected with <see cref="InvalidOperationException"/>, including inherited Task.Run contexts.
+    /// </remarks>
     Task<UpdateStats> CommitToBase(ISiftIndex baseIndex, UpdateOptions options, CancellationToken cancellationToken);
 
     /// <summary>Applies this overlay's upserts and deletions to an arbitrary target.</summary>
-    /// <remarks>The supplied update options, including any expected revision, are forwarded unchanged.</remarks>
+    /// <remarks>
+    /// The supplied update options, including any expected revision, are forwarded unchanged.
+    /// Calls from this overlay's active source, metadata or collector callbacks are
+    /// rejected with <see cref="InvalidOperationException"/>, including inherited Task.Run contexts.
+    /// </remarks>
     Task<UpdateStats> ApplyDeltaTo(ISiftIndex target, UpdateOptions options, CancellationToken cancellationToken);
 }
 
