@@ -46,6 +46,10 @@
 
 ### Fixed
 
+- `GetStorageStats()` and `ShouldCompact(...)` now reject calls from the same
+  index's active mutation callbacks with `InvalidOperationException`, preventing
+  writer-lock deadlocks. Safe reads and unrelated concurrent callers remain usable;
+  storage consistency and compaction policy are unchanged.
 - Path prefixes and include/exclude globs containing lone UTF-16 surrogates no
   longer lose matches or match replacement-character filenames through UTF-8
   conversion. Combined filters retain the same meaning across verification routes;

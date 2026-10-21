@@ -1179,6 +1179,8 @@ API rules:
 * document ingestion is caller-driven; filesystem crawling belongs in an adapter above the core library
 * exceptions from document sources (including async enumeration setup, reads and disposal) and commit metadata providers propagate with their original identity and stack; they do not themselves mark a healthy index as corrupt
 * a failed build/update retains its previous committed state; genuine storage corruption still requires recovery, and a failed recovery build does not clear that requirement
+* GetStorageStats and ShouldCompact acquire the writer lock and reject calls from that index's active mutation callbacks with InvalidOperationException, including inherited execution contexts; other concurrent callers may wait normally
+* GetMaintenanceStats and GetIndexState remain available during mutation callbacks; the probe reentrancy check does not change storage consistency or compaction eligibility
 
 ---
 

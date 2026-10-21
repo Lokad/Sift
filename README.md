@@ -394,6 +394,10 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
 - Document source and commit metadata callback failures propagate unchanged.
   A caller failure during build/update does not itself require rebuilding a
   healthy index; its previous committed state and snapshots remain available.
+- `GetStorageStats()` and `ShouldCompact(...)` throw `InvalidOperationException`
+  from that index's active mutation callbacks, including inherited `Task.Run`
+  contexts, to prevent waiting on their own writer lock. `GetMaintenanceStats()`
+  and `GetIndexState()` remain available. Unrelated callers can wait for the writer.
 - Rejected upserts fail the entire update by default, preventing callers from
   checkpointing an event whose replacement was not indexed. The exception
   identifies the first rejected path, reason, and submitted size. Set
