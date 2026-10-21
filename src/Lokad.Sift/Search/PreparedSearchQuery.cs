@@ -1,4 +1,5 @@
 using System.Text;
+using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Search;
 
@@ -73,13 +74,14 @@ internal sealed class PreparedSearchQuery
 
 internal sealed class PreparedLiteralQuery(
     string text,
-    byte[] needle,
+    byte[]? needle,
     byte[]? loweredAsciiNeedle,
     int[]? asciiPrefixTable,
     bool isAscii)
 {
     public string Text { get; } = text;
-    public byte[] Needle { get; } = needle;
+    // No byte representation is available for literals containing lone surrogates.
+    public byte[]? Needle { get; } = needle;
     public byte[]? LoweredAsciiNeedle { get; } = loweredAsciiNeedle;
     public int[]? AsciiPrefixTable { get; } = asciiPrefixTable;
     public bool IsAscii { get; } = isAscii;
@@ -98,8 +100,8 @@ internal sealed class PreparedLiteralQuery(
             return null;
         }
 
-        var needle = Encoding.UTF8.GetBytes(pattern);
-        var isAscii = needle.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
+        var needle = UnicodeText.IsWellFormedUtf16(pattern) ? Encoding.UTF8.GetBytes(pattern) : null;
+        var isAscii = needle is not null && needle.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
         var loweredAsciiNeedle = resolvedCaseMode == CaseMode.Insensitive && isAscii
             ? SearchQueryPreparer.LowerAscii(needle)
             : null;

@@ -1,5 +1,5 @@
-using System.Buffers;
 using System.Text;
+using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Search;
 
@@ -82,7 +82,7 @@ internal static class RegexFragmentAnalyzer
             }
         }
 
-        var exactLiteral = result.ExactLiteral is { } literal && IsWellFormedUtf16(literal)
+        var exactLiteral = result.ExactLiteral is { } literal && UnicodeText.IsWellFormedUtf16(literal)
             ? literal
             : null;
         return new PatternAnalysis(
@@ -177,19 +177,7 @@ internal static class RegexFragmentAnalyzer
         // Regex analysis uses UTF-16 code units. Prefixes, suffixes and quantified
         // atoms may split a surrogate pair; replacement encoding is not a sound
         // byte constraint. Keep those deductions out of content and path pruning.
-        return SelectBestFragments(fragments, limit).Where(IsWellFormedUtf16).ToArray();
-    }
-
-    private static bool IsWellFormedUtf16(string text)
-    {
-        var remaining = text.AsSpan();
-        while (!remaining.IsEmpty)
-        {
-            if (Rune.DecodeFromUtf16(remaining, out _, out var consumed) != OperationStatus.Done)
-                return false;
-            remaining = remaining[consumed..];
-        }
-        return true;
+        return SelectBestFragments(fragments, limit).Where(UnicodeText.IsWellFormedUtf16).ToArray();
     }
 
     private static string[] SelectBestFragments(string[] fragments, int limit)

@@ -43,14 +43,14 @@ internal ref struct SearchPlanCandidateBuilder
         {
             var direct = LiteralPlan.Direct(scope.Count, scope.Bytes);
             candidates.Add(CreateLiteralContentPlan(direct));
-            if (features.Literal is not null)
+            if (features.Literal is { } literal && literal.Needle is { } needle)
             {
                 var indexed = LiteralQueryPlanner.TryCreateIndexedCandidate(
                     segment,
                     scope.Count,
                     scope.Bytes,
-                    features.Literal.Text,
-                    features.Literal.Needle,
+                    literal.Text,
+                    needle,
                     features.ResolvedCaseMode,
                     selectAllGrams: false,
                     options);

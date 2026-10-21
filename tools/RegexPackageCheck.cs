@@ -101,8 +101,46 @@ internal static class RegexPackageCheck
         await VerifyUnicodeAndEmptyQueries(engine);
         await VerifyGlobFilters(engine);
         await VerifyContextAndDecodeDiagnostics(engine);
+        await VerifyLiteralSurrogateProjection(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyLiteralSurrogateProjection(ISiftRegexEngine? engine)
+    {
+        foreach (var favorIndex in new[] { false, true })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions
+            {
+                RegexEngine = engine,
+                DirectScanScopeDocumentsThreshold = favorIndex ? 0 : 256,
+                DirectScanScopeBytesThreshold = favorIndex ? 0 : 1024 * 1024,
+                DirectScanCandidateDensityThreshold = 1.1
+            });
+            await index.Build(new Documents(new[] { ("a.txt", "😀x😀"), ("b.txt", "😀😀😀"),
+                ("replacement.txt", "�") }.Concat(Enumerable.Range(0, 64)
+                .Select(i => ($"noise/{i:D2}.txt", ""))).ToArray()));
+            using var snapshot = index.OpenSnapshot();
+            foreach (var (pattern, expected) in new (string, (int, int)[])[]
+            {
+                ("\uD83D", [(0, 0), (5, 5), (0, 0), (4, 4), (8, 8)]),
+                ("\uDE00", [(0, 4), (5, 9), (0, 4), (4, 8), (8, 12)]),
+                ("\uDE00\uD83D", [(0, 4), (4, 8)])
+            })
+            foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive, CaseMode.Smart })
+            {
+                var query = new SearchQuery(pattern, PatternMode.Literal, caseMode);
+                var hits = new Hits();
+                var stats = snapshot.Search(query, new(), hits);
+                var plan = snapshot.Explain(query, new());
+                Require(hits.Values.Select(hit => (hit.StartByte, hit.EndByte)).SequenceEqual(expected),
+                    "Literal surrogate matching lost overlaps or split a UTF-8 scalar.");
+                Require(!plan.UsesIndex && plan.MandatoryFragments.Count == 0 && plan.NeedsUnicodeDecode &&
+                    stats.RegexInvocations == 0, "Unsafe literal supplied byte constraints or changed verifier kind.");
+                foreach (var hit in hits.Values)
+                    Require(!snapshot.Materialize(hit, 0, 0).MatchText.Contains('�'), "Literal hit split a UTF-8 scalar.");
+            }
+        }
     }
 
     private static async Task VerifyContextAndDecodeDiagnostics(ISiftRegexEngine? engine)

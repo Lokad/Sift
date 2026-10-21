@@ -1352,7 +1352,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         decodedChars += text.Length;
         var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var searchIndex = 0;
-        var offsetCursor = new Utf8OffsetCursor();
+        // Literal matches can overlap. Each boundary advances monotonically on
+        // its own, including positions inside a UTF-16 surrogate pair.
+        var startOffsetCursor = new Utf8OffsetCursor();
+        var endOffsetCursor = new Utf8OffsetCursor();
 
         while (searchIndex <= text.Length)
         {
@@ -1381,8 +1384,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 continue;
             }
 
-            var startByte = offsetCursor.Map(text, found);
-            var endByte = startByte + Encoding.UTF8.GetByteCount(text.AsSpan(found, pattern.Length));
+            var startByte = startOffsetCursor.Map(text, found);
+            var endByte = endOffsetCursor.Map(text, end);
             var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
             var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
             var shouldContinue = collector.OnHit(

@@ -1,4 +1,5 @@
 using Lokad.Sift;
+using Lokad.Sift.LowLevel;
 
 namespace Lokad.Sift.Search;
 
@@ -79,7 +80,7 @@ internal readonly record struct SearchQueryAnchors(
                     : analysis.MandatoryFragments;
             }
 
-            return query.Pattern.Length == 0 ? [] : [query.Pattern];
+            return UnicodeText.IsWellFormedUtf16(query.Pattern) ? [query.Pattern] : [];
         }
 
         static string[] GetAdvisorySeeds(
