@@ -44,6 +44,10 @@
 
 ### Fixed
 
+- Literal queries containing lone UTF-16 surrogates no longer produce partial
+  UTF-8 hit ranges or lose matches to replacement-encoded index constraints.
+  They retain UTF-16 matching with the existing scalar-boundary projection;
+  overlapping literal matches and valid-Unicode index acceleration are preserved.
 - Context clipping preserves embedded carriage returns at byte-budget boundaries.
   Display terminators are determined from the complete line; shared source-byte
   budgets, UTF-8 boundaries and full matching-line materialization are unchanged.

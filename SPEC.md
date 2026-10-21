@@ -152,6 +152,12 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 * `Multiline` applies to verification against the entire document content
 * The index is document-granular; the verifier is line/match granular
 
+Literal matching accepts lone UTF-16 surrogates with ordinal or ordinal-insensitive
+substring semantics. Such literals supply no UTF-8 byte/index constraints.
+Both match boundaries project independently to UTF-8 scalar boundaries; a UTF-16
+position inside a surrogate pair projects to that scalar's start, as in managed
+regex verification. A projected hit may be empty. Literal overlaps are retained.
+
 ### 4.5 Correctness contract
 
 * The index stage may only use conditions that are **mandatory for all true matches**

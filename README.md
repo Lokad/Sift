@@ -81,6 +81,13 @@ split surrogate pairs cannot discard content or path matches.
 A truly empty query skips content regex preparation and remains a path-listing
 shortcut: one hit per document with no content scan.
 
+Literal queries retain ordinal or ordinal-insensitive UTF-16 matching, including
+lone surrogates. Literals that cannot be encoded faithfully as UTF-8 supply no
+byte/index constraints.
+Positions inside a surrogate pair project to the start of that UTF-8 scalar,
+consistently with managed regex matching; a projected hit can have an empty byte
+range. Mapping both boundaries independently preserves overlapping occurrences.
+
 Include/exclude globs match the complete canonical path. `*` and `?` stay within
 a path segment; `**` can cross separators and newline characters. A trailing
 newline is part of the path. User-supplied path regexes retain .NET anchor semantics.
