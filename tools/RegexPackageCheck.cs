@@ -100,6 +100,7 @@ internal static class RegexPackageCheck
         Require(overlay.Search(query, new(), new Hits()).HitsReturned == 1, "Overlay engine inheritance failed.");
         await VerifyUnicodeAndEmptyQueries(engine);
         await VerifyGlobFilters(engine);
+        await VerifyRecursiveGlobFilters(engine);
         await VerifyUnicodePathFilters(engine);
         await VerifyContextAndDecodeDiagnostics(engine);
         await VerifyLiteralSurrogateProjection(engine);
@@ -479,6 +480,35 @@ internal static class RegexPackageCheck
         try { action(); }
         catch (RegexParseException) { return; }
         throw new InvalidOperationException("Invalid regex syntax bypassed .NET validation.");
+    }
+
+    private static async Task VerifyRecursiveGlobFilters(ISiftRegexEngine? engine)
+    {
+        string[] paths = ["dir/File.cs", "dir/NotFile.cs", "dir/deep/File.cs", "dir/File.cs/OtherFile.cs", "é/File.cs"];
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new Documents(paths.Select(path => (path, "needle")).ToArray()));
+        using var snapshot = index.OpenSnapshot();
+        foreach (var pattern in new[] { "", "needle" })
+        foreach (var stringVerification in new[] { false, true })
+        foreach (var (glob, accepted) in new[]
+        {
+            ("**/File.cs", new[] { "dir/File.cs", "dir/deep/File.cs", "é/File.cs" }),
+            ("dir*/**/File.cs", new[] { "dir/deep/File.cs" })
+        })
+        foreach (var mode in new[] { "single", "alternative", "exclude" })
+        {
+            var filter = new PathFilter
+            {
+                IncludeGlobs = mode == "single" ? [glob] : mode == "alternative" ? [glob, "never-match"] : [],
+                ExcludeGlobs = mode == "exclude" ? [glob] : [],
+                PathRegex = stringVerification ? ".*" : null
+            };
+            var expected = mode == "exclude" ? paths.Except(accepted) : accepted;
+            var hits = new Hits();
+            snapshot.Search(new SearchQuery(pattern, PatternMode.Literal, CaseMode.Sensitive), filter, hits);
+            Require(hits.Values.Select(hit => snapshot.Materialize(hit, 0, 0).Path).Order(StringComparer.Ordinal)
+                .SequenceEqual(expected.Order(StringComparer.Ordinal)), "Recursive glob lost slash adjacency or wildcard prefixes.");
+        }
     }
 
     private static async Task VerifyGlobFilters(ISiftRegexEngine? engine)

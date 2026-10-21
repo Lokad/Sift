@@ -381,9 +381,9 @@ internal sealed class GlobMatcher
         }
 
         var recursiveIndex = glob.IndexOf("**/", StringComparison.Ordinal);
-        if (recursiveIndex >= 0 && glob.LastIndexOf('*') == recursiveIndex + 1)
+        if (recursiveIndex >= 0 && glob.IndexOf('*') == recursiveIndex && glob.LastIndexOf('*') == recursiveIndex + 1)
         {
-            return new GlobMatcher(glob[..recursiveIndex], glob[(recursiveIndex + 3)..], null, GlobMatcherKind.RecursiveSuffix);
+            return new GlobMatcher(glob[..recursiveIndex], glob[(recursiveIndex + 2)..], null, GlobMatcherKind.RecursiveSuffix);
         }
 
         var starIndex = glob.IndexOf('*');
@@ -450,8 +450,7 @@ internal sealed class GlobMatcher
             return false;
         }
 
-        var middleLength = path.Length - _value.Length - _suffix.Length;
-        return middleLength > 0 && path.AsSpan(_value.Length, middleLength).IndexOf('/') >= 0;
+        return path.Length >= _value.Length + _suffix.Length;
     }
 
     private bool MatchRecursiveSuffix(ReadOnlySpan<byte> pathUtf8)
@@ -461,8 +460,7 @@ internal sealed class GlobMatcher
             return false;
         }
 
-        var middleLength = pathUtf8.Length - _valueUtf8.Length - _suffixUtf8.Length;
-        return middleLength > 0 && pathUtf8.Slice(_valueUtf8.Length, middleLength).IndexOf((byte)'/') >= 0;
+        return pathUtf8.Length >= _valueUtf8.Length + _suffixUtf8.Length;
     }
 
     private static GlobMatcher CreateRegex(string glob)

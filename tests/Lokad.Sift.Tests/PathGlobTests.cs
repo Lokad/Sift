@@ -3,6 +3,57 @@ namespace Lokad.Sift.Tests;
 public sealed class PathGlobTests
 {
     [Theory]
+    [InlineData("snapshot", false)]
+    [InlineData("snapshot", true)]
+    [InlineData("parallel", false)]
+    [InlineData("parallel", true)]
+    [InlineData("overlay", false)]
+    [InlineData("overlay", true)]
+    public async Task RecursiveGlobsRespectLiteralBoundariesAndWildcardPrefixes(string route, bool stringVerification)
+    {
+        string[] paths = ["dir/File.cs", "dir/NotFile.cs", "dir/deep/File.cs", "dir/deep/NotFile.cs",
+            "dir/File.cs/OtherFile.cs", "src/a/Widget.cs", "src/a/MyWidget.cs", "src/a/Widget.cs/MyWidget.cs",
+            "src/Widget.cs", "Src/File.cs", "Src/deep/MyFile.cs", "Src/a/File.cs", "ab/cd", "ab/xxcd",
+            "ab/cd/xxcd", "é/NotFile.cs", "é/File.cs", "😀/File.cs", "src/a\nb/Widget.cs", "a/a", "a/b/a"];
+        (string Glob, string[] Accepted)[] cases =
+        [
+            ("**/File.cs", ["dir/File.cs", "dir/deep/File.cs", "Src/File.cs", "Src/a/File.cs", "é/File.cs", "😀/File.cs"]),
+            ("src/**/Widget.cs", ["src/a/Widget.cs", "src/a\nb/Widget.cs"]),
+            ("ab**/cd", ["ab/cd"]),
+            ("dir*/**/File.cs", ["dir/deep/File.cs"]),
+            ("src*/**/Widget.cs", ["src/a/Widget.cs", "src/a\nb/Widget.cs"]),
+            ("a/**/a", ["a/b/a"]),
+            ("é**/File.cs", ["é/File.cs"]),
+            ("dir/*.cs", ["dir/File.cs", "dir/NotFile.cs"]),
+            ("src/**", ["src/a/Widget.cs", "src/a/MyWidget.cs", "src/a/Widget.cs/MyWidget.cs", "src/Widget.cs", "src/a\nb/Widget.cs"])
+        ];
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
+        await index.Build(new InMemoryDocumentSource(paths.Select(path => (path, route == "overlay" ? "stale" : "needle")).ToArray()));
+        using IIndexSnapshot snapshot = route == "overlay" ? index.OpenOverlaySnapshot(new SearchOptions(2)) :
+            index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+        if (snapshot is IOverlaySnapshot overlay)
+            await overlay.Update(new InMemoryDocumentSource(paths.Select(path => (path, "needle")).ToArray()), []);
+
+        foreach (var (glob, accepted) in cases)
+        foreach (var mode in new[] { "single", "alternative", "exclude" })
+        foreach (var pattern in new[] { "", "needle" })
+        {
+            var filter = new PathFilter
+            {
+                IncludeGlobs = mode == "single" ? [glob] : mode == "alternative" ? [glob, "never-match"] : [],
+                ExcludeGlobs = mode == "exclude" ? [glob] : [],
+                PathRegex = stringVerification ? ".*" : null
+            };
+            var expected = mode == "exclude" ? paths.Except(accepted) : accepted;
+            var hits = new HitBuffer();
+            snapshot.Search(new SearchQuery(pattern, PatternMode.Literal, CaseMode.Sensitive), filter, hits);
+            var actual = hits.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).Path);
+            Assert.True(expected.Order(StringComparer.Ordinal).SequenceEqual(actual.Order(StringComparer.Ordinal)),
+                $"{route}: {glob}, {mode}, string={stringVerification}, empty={pattern.Length == 0}");
+        }
+    }
+
+    [Theory]
     [InlineData("src/file?.txt", "src/file1.txt\n", false)]
     [InlineData("src/file?.txt", "src/file1.txt", true)]
     [InlineData("src/file?.txt", "\nsrc/file1.txt", false)]

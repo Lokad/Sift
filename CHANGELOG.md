@@ -51,6 +51,9 @@
 
 ### Fixed
 
+- Recursive path globs now require the slash immediately before their literal
+  suffix. Earlier wildcard prefixes use general glob verification. Includes and
+  excludes preserve strict whole-path matching and ordinal case sensitivity.
 - Overlay `ApplyDeltaTo(...)` and `CommitToBase(...)` now reject calls from that
   overlay's active callbacks with `InvalidOperationException`, preventing
   deadlocks in source/metadata callbacks and lock-order cycles in collectors.
