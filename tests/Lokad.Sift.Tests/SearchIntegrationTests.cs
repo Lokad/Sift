@@ -976,34 +976,27 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task SharedPrefixAlternationRegexBuildsLeadingLiteralSet()
+    public async Task SharedPrefixAlternationRegexPreservesIndexedResults()
     {
+        const string content = "[Fact [Theory [InlineData [Factored [Else";
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            DirectScanScopeDocumentsThreshold = 0, DirectScanScopeBytesThreshold = 0
+        });
+        await index.Build(new InMemoryDocumentSource([("a.txt", new string('z', 512) + " " + content)]));
+        using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("\\[(?:Fact|Theory|InlineData)\\b", PatternMode.Regex, CaseMode.Sensitive);
-        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
+        var hits = new HitBuffer();
+        snapshot.Search(query, new(), hits);
 
-        Assert.NotNull(program.LeadingLiteralSet);
-        var literals = program.LeadingLiteralSet
-            .Select(static bytes => System.Text.Encoding.UTF8.GetString(bytes))
-            .OrderBy(static literal => literal, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(["[Fact", "[InlineData", "[Theory"], literals);
+        Assert.Equal(new[] { "[Fact", "[Theory", "[InlineData" }, hits.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).MatchText));
+        Assert.Contains(snapshot.Explain(query, new()).PlannerAlternatives, static alternative => alternative.UsesIndex);
     }
 
     [Fact]
-    public async Task SharedAffixAlternationRegexBuildsLeadingLiteralSet()
+    public async Task SharedAffixAlternationRegexPreservesIndexedResults()
     {
-        var query = new SearchQuery("services\\.(?:Add|TryAdd|AddKeyed)(?:Singleton|Scoped|Transient)\\b", PatternMode.Regex, CaseMode.Sensitive);
-        var program = CompileUtf8Regex(query, CaseMode.Sensitive);
-
-        Assert.NotNull(program.LeadingLiteralSet);
-        var literals = program.LeadingLiteralSet
-            .Select(static bytes => System.Text.Encoding.UTF8.GetString(bytes))
-            .OrderBy(static literal => literal, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(
-        [
+        string[] calls = [
             "services.AddKeyedScoped",
             "services.AddKeyedSingleton",
             "services.AddKeyedTransient",
@@ -1013,7 +1006,21 @@ public sealed class SearchIntegrationTests
             "services.TryAddScoped",
             "services.TryAddSingleton",
             "services.TryAddTransient"
-        ], literals);
+        ];
+        var content = new string('z', 512) + " " + string.Join(' ', calls) +
+            " services.AddUnknown services.AddSingletonElse Other.AddSingleton";
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            DirectScanScopeDocumentsThreshold = 0, DirectScanScopeBytesThreshold = 0
+        });
+        await index.Build(new InMemoryDocumentSource([("a.txt", content)]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery("services\\.(?:Add|TryAdd|AddKeyed)(?:Singleton|Scoped|Transient)\\b", PatternMode.Regex, CaseMode.Sensitive);
+        var hits = new HitBuffer();
+        snapshot.Search(query, new(), hits);
+
+        Assert.Equal(calls, hits.Hits.Select(hit => snapshot.Materialize(hit, 0, 0).MatchText));
+        Assert.Contains(snapshot.Explain(query, new()).PlannerAlternatives, static alternative => alternative.UsesIndex);
     }
 
     [Fact]

@@ -106,6 +106,7 @@ internal static class RegexPackageCheck
         await VerifyLiteralSurrogateProjection(engine);
         await VerifyLiteralWholeLineBoundaries(engine);
         await VerifyRegexCandidateResults(engine);
+        await VerifyLeadingLiteralComposition(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
@@ -154,6 +155,43 @@ internal static class RegexPackageCheck
         }
         await overlay.ApplyDeltaTo(target);
         await overlay.CommitToBase(index);
+    }
+
+    private static async Task VerifyLeadingLiteralComposition(ISiftRegexEngine? engine)
+    {
+        var documents = new[] { ("a.txt", "fooXbarqux"), ("b.txt", "bazqux"), ("c.txt", "bazzy"),
+            ("d.txt", "fooabarqux"), ("decoy.txt", "fooqux"), ("unicode.txt", "π\nfooébarqux"),
+            ("upper.txt", "FOOxBARQUX BAZQUX") }.Concat(Enumerable.Range(0, 32)
+                .Select(i => ($"noise/{i}.txt", new string('z', 512)))).ToArray();
+        using var index = SiftIndex.CreateInMemory(new SiftOptions
+        {
+            RegexEngine = engine,
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0,
+            DirectScanCandidateDensityThreshold = 1.1
+        });
+        await index.Build(new Documents(documents.Select(doc => (doc.Item1, "stale")).ToArray()));
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(new Documents(documents), []);
+        await index.Update(new Documents(documents), []);
+        using var snapshot = index.OpenSnapshot();
+        foreach (var view in new IIndexSnapshot[] { snapshot, overlay })
+        foreach (var pattern in new[] { "(?:foo.*bar|baz)qux", "(?:(?:foo.*bar)qux|bazzy)",
+            "(?:(?:foo[ab]bar)qux|bazzy)", "(?:(?:foo.{1,3}bar)qux|bazzy)", "(?:foo|baz)qux" })
+        foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive })
+        {
+            var options = RegexOptions.CultureInvariant | (caseMode == CaseMode.Insensitive ? RegexOptions.IgnoreCase : RegexOptions.None);
+            var expected = documents.SelectMany(doc => Regex.Matches(doc.Item2, pattern, options, TimeSpan.FromSeconds(1))
+                .Select(match => (Path: doc.Item1, Start: Encoding.UTF8.GetByteCount(doc.Item2.AsSpan(0, match.Index)),
+                    End: Encoding.UTF8.GetByteCount(doc.Item2.AsSpan(0, match.Index + match.Length)), Text: match.Value)))
+                .OrderBy(hit => hit.Path, StringComparer.Ordinal).ThenBy(hit => hit.Start);
+            var hits = new Hits();
+            view.Search(new SearchQuery(pattern, PatternMode.Regex, caseMode), new(), hits);
+            var actual = hits.Values.Select(raw => (view.Materialize(raw, 0, 0).Path, raw.StartByte, raw.EndByte,
+                    view.Materialize(raw, 0, 0).MatchText))
+                .OrderBy(hit => hit.Path, StringComparer.Ordinal).ThenBy(hit => hit.StartByte);
+            Require(expected.SequenceEqual(actual), "Leading-literal composition lost a nested-group match.");
+        }
     }
 
     private static async Task VerifyRegexCandidateResults(ISiftRegexEngine? engine)

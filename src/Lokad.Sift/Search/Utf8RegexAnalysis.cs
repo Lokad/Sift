@@ -645,7 +645,9 @@ internal static class Utf8RegexAnalysis
                 }
 
                 appendedAnyLiteral = HasNonEmptyLiteral(set);
-                if (!CanContinueLeadingLiteralSet(sequence.Children[i]))
+                // A group's extracted literals can describe only its prefix.
+                // Keep those prefixes, but do not join text after the group to them.
+                if (sequence.Children[i] is not Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal })
                 {
                     break;
                 }
@@ -744,18 +746,6 @@ internal static class Utf8RegexAnalysis
             }
 
             return false;
-        }
-
-        private static bool CanContinueLeadingLiteralSet(Utf8RegexNode node)
-        {
-            return node switch
-            {
-                Utf8RegexSequence => true,
-                Utf8RegexAlternation => true,
-                Utf8RegexAtom { Kind: Utf8RegexAtomKind.Literal } => true,
-                Utf8RegexAtom atom when IsZeroWidth(atom) => true,
-                _ => false
-            };
         }
 
         private static bool ContainsLiteral(List<byte[]> set, byte[] candidate)
