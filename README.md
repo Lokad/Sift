@@ -10,6 +10,12 @@ dotnet add package Lokad.Sift
 
 The package targets .NET 10 (`net10.0`).
 
+The repository CLI can build or update an input directory, with the corpus stored
+outside that directory or in an excluded subtree such as `.sift`. Input and corpus
+must be different directories. CLI updates report non-indexable files and remove
+their previously indexed versions, including text that becomes binary, invalid
+UTF-8 or oversized. The library's default rejection policy remains `FailUpdate`.
+
 ## Regex engines
 
 The core package has no runtime NuGet dependencies. Regex search uses invariant
@@ -419,7 +425,10 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   report the same details through `BuildStats.RejectedDocumentDetails`.
 - `BuildOptions.CommitMetadataProvider` and
   `UpdateOptions.CommitMetadataProvider` copy bounded opaque consumer metadata
-  into the same manifest commit as the indexed documents. `GetIndexState()`
+  into the same manifest commit as the indexed documents. Length admission occurs
+  before callback memory is accessed/copied; accepted values are copied defensively.
+  Retained metadata also obeys the current limit when no provider is supplied.
+  `GetIndexState()`
   returns that metadata with a corpus id, logical content revision, and physical
   storage generation. `ExpectedRevision` rejects an update based on stale logical
   content while allowing content-preserving compaction; `ExpectedIdentity` also

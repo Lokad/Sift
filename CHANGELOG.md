@@ -55,6 +55,13 @@
 
 ### Fixed
 
+- CLI builds and updates exclude their corpus subtree from filesystem input and
+  reject using the same input/corpus directory. Directory updates report rejected
+  files and remove previously indexed versions that become non-indexable; the
+  library's default `FailUpdate` policy is unchanged.
+- Commit metadata length is validated before accessing or copying callback memory.
+  Accepted metadata remains defensively copied, and retained metadata still obeys
+  the configured limit when an update has no metadata provider.
 - Regex candidate planning no longer joins following text onto a group's partial
   leading prefix, which could hide matches such as `fooXbarqux` for
   `(?:foo.*bar|baz)qux`. Extraction now stops after groups and may retain shorter

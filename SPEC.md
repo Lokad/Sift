@@ -534,6 +534,9 @@ Update batch rules:
 * violating these rules is an error
 * update application is atomic at the batch level
 * optional consumer metadata is copied into the same manifest publication
+* callback metadata length is checked before accessing/copying its bytes; accepted
+  values are copied defensively, and retained values still obey the current limit
+  when an update has no metadata provider
 * an optimistic update expectation compares corpus id and logical content
   revision; content-preserving compaction does not invalidate it
 
@@ -1233,6 +1236,15 @@ A solution `Lokad.Sift.slnx` with these projects:
   * `explain`
 
 The CLI is an adapter over the core library; it may source documents from the filesystem, but the core API does not require a filesystem-backed corpus.
+
+CLI `build`/`update` exclude the normalized corpus directory from traversal when
+it is inside the input tree, preserving similarly named sibling directories.
+Using the same directory for input and corpus is rejected. Directory updates
+explicitly use `DeleteExisting`: rejected files are reported and any previously
+indexed version is removed, preventing stale text after a file becomes binary,
+invalid UTF-8 or oversized. The core default remains `FailUpdate`; explicit CLI
+deletion paths are still supported. Traversal enumerators are disposed with the
+command's source, including on failure.
 
 * `Lokad.Sift.Benchmarks`
 
