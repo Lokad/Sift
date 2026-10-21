@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Removed the unused internal ingestion retention flag and its forwarding plumbing.
+  Public `DocumentContentLifetime` copying/borrowing behavior is unchanged.
 - Removed unused internal regex-verifier return values/result bookkeeping and
   four private extension forwarding helpers. Public overloads and search counters,
   cancellation, timeout and hit-limit behavior are unchanged.
@@ -44,6 +46,10 @@
 
 ### Fixed
 
+- Collector `RegexMatchTimeoutException` failures now propagate unchanged from
+  ordinary and parallel searches, including literal queries. Preparation timeout
+  handling no longer swallows callback failures; genuine regex timeout policies
+  and overlay behavior are preserved.
 - Literal queries containing lone UTF-16 surrogates no longer produce partial
   UTF-8 hit ranges or lose matches to replacement-encoded index constraints.
   They retain UTF-16 matching with the existing scalar-boundary projection;

@@ -383,6 +383,9 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
 - Async document sources are pulled under Sift's writer transaction, providing
   natural backpressure without a consumer-owned producer queue.
 - Searches operate on snapshots. Open a new snapshot after updates if you want to observe the new generation.
+- Exceptions from `IHitCollector.OnHit` propagate unchanged to the search caller.
+  `RegexTimeoutPolicy` controls Sift's regex preparation/verification timeouts;
+  it does not convert collector failures into search results.
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
 - Rejected upserts fail the entire update by default, preventing callers from

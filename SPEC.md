@@ -814,6 +814,12 @@ outside Sift's delivery scope. Timeouts, cancellation,
 invalid provider ranges, and unexpected failures do not request fallback after
 partial hit publication. Preparation observes the query deadline and timeout policy.
 
+Collector exceptions propagate unchanged, preserving identity and throw-site
+stack information. Preparation failure handling covers preparation only; it must
+not reclassify a collector's `RegexMatchTimeoutException` as a verifier timeout.
+This applies to literal/regex, sequential/parallel and overlay searches. Genuine
+regex compilation/matching timeouts retain the query's stop-or-throw policy.
+
 Literal and managed regex document scans check the effective cancellation token
 between matches, including matches rejected by boundary checks. Caller cancellation
 throws with the caller's token; expiry of the search deadline returns
