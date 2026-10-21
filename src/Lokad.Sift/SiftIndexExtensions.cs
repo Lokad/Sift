@@ -18,52 +18,34 @@ public static class SiftIndexExtensions
     }
 
     public static Task<BuildStats> Build(this ISiftIndex index, IDocumentSource documents)
-        => Build(index, documents, new BuildOptions(), CancellationToken.None);
+        => index.Build(documents, new BuildOptions(), CancellationToken.None);
 
     public static Task<BuildStats> Build(
         this ISiftIndex index,
         IDocumentSource documents,
         CancellationToken cancellationToken)
-        => Build(index, documents, new BuildOptions(), cancellationToken);
+        => index.Build(documents, new BuildOptions(), cancellationToken);
 
     public static Task<BuildStats> Build(
         this ISiftIndex index,
         IDocumentSource documents,
         BuildOptions options)
-        => Build(index, documents, options, CancellationToken.None);
-
-    private static Task<BuildStats> Build(
-        ISiftIndex index,
-        IDocumentSource documents,
-        BuildOptions options,
-        CancellationToken cancellationToken)
-    {
-        return index.Build(documents, options, cancellationToken);
-    }
+        => index.Build(documents, options, CancellationToken.None);
 
     public static Task<BuildStats> Build(this ISiftIndex index, IAsyncEnumerable<SubmittedDocument> documents)
-        => Build(index, documents, new BuildOptions(), CancellationToken.None);
+        => index.Build(documents, new BuildOptions(), CancellationToken.None);
 
     public static Task<BuildStats> Build(
         this ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> documents,
         CancellationToken cancellationToken)
-        => Build(index, documents, new BuildOptions(), cancellationToken);
+        => index.Build(documents, new BuildOptions(), cancellationToken);
 
     public static Task<BuildStats> Build(
         this ISiftIndex index,
         IAsyncEnumerable<SubmittedDocument> documents,
         BuildOptions options)
-        => Build(index, documents, options, CancellationToken.None);
-
-    private static Task<BuildStats> Build(
-        ISiftIndex index,
-        IAsyncEnumerable<SubmittedDocument> documents,
-        BuildOptions options,
-        CancellationToken cancellationToken)
-    {
-        return index.Build(documents, options, cancellationToken);
-    }
+        => index.Build(documents, options, CancellationToken.None);
 
     public static Task<UpdateStats> Update(
         this ISiftIndex index,
@@ -138,50 +120,32 @@ public static class SiftIndexExtensions
     }
 
     public static Task<UpdateStats> CommitToBase(this IOverlaySnapshot snapshot, ISiftIndex baseIndex)
-        => CommitToBase(snapshot, baseIndex, new UpdateOptions(), CancellationToken.None);
+        => snapshot.CommitToBase(baseIndex, new UpdateOptions(), CancellationToken.None);
 
     public static Task<UpdateStats> CommitToBase(
         this IOverlaySnapshot snapshot,
         ISiftIndex baseIndex,
         CancellationToken cancellationToken)
-        => CommitToBase(snapshot, baseIndex, new UpdateOptions(), cancellationToken);
+        => snapshot.CommitToBase(baseIndex, new UpdateOptions(), cancellationToken);
 
     public static Task<UpdateStats> CommitToBase(
         this IOverlaySnapshot snapshot,
         ISiftIndex baseIndex,
         UpdateOptions options)
-        => CommitToBase(snapshot, baseIndex, options, CancellationToken.None);
-
-    private static Task<UpdateStats> CommitToBase(
-        IOverlaySnapshot snapshot,
-        ISiftIndex baseIndex,
-        UpdateOptions options,
-        CancellationToken cancellationToken)
-    {
-        return snapshot.CommitToBase(baseIndex, options, cancellationToken);
-    }
+        => snapshot.CommitToBase(baseIndex, options, CancellationToken.None);
 
     public static Task<UpdateStats> ApplyDeltaTo(this IOverlaySnapshot snapshot, ISiftIndex target)
-        => ApplyDeltaTo(snapshot, target, new UpdateOptions(), CancellationToken.None);
+        => snapshot.ApplyDeltaTo(target, new UpdateOptions(), CancellationToken.None);
 
     public static Task<UpdateStats> ApplyDeltaTo(
         this IOverlaySnapshot snapshot,
         ISiftIndex target,
         CancellationToken cancellationToken)
-        => ApplyDeltaTo(snapshot, target, new UpdateOptions(), cancellationToken);
+        => snapshot.ApplyDeltaTo(target, new UpdateOptions(), cancellationToken);
 
     public static Task<UpdateStats> ApplyDeltaTo(
         this IOverlaySnapshot snapshot,
         ISiftIndex target,
         UpdateOptions options)
-        => ApplyDeltaTo(snapshot, target, options, CancellationToken.None);
-
-    private static Task<UpdateStats> ApplyDeltaTo(
-        IOverlaySnapshot snapshot,
-        ISiftIndex target,
-        UpdateOptions options,
-        CancellationToken cancellationToken)
-    {
-        return snapshot.ApplyDeltaTo(target, options, cancellationToken);
-    }
+        => snapshot.ApplyDeltaTo(target, options, CancellationToken.None);
 }
