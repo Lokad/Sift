@@ -196,13 +196,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var watch = ValueStopwatch.StartNew();
         using var deadlineCancellation = CreateDeadlineCancellation(query.MaxElapsedMilliseconds, cancellationToken);
         var effectiveToken = deadlineCancellation?.Token ?? cancellationToken;
+        using var callbackScope = ReentrancyGuard.Enter(this);
+        using var operation = BeginOperation();
+        PreparedSearch prepared;
         try
         {
-            using var callbackScope = ReentrancyGuard.Enter(this);
-            using var operation = BeginOperation();
-            using var prepared = PrepareValidatedSearch(query, pathFilter, effectiveToken);
-            return SearchPreparedCore(query, prepared, collector, pathVisibility: null,
-                SearchLimits.FromQuery(query), effectiveToken, cancellationToken, watch);
+            prepared = PrepareValidatedSearch(query, pathFilter, effectiveToken);
         }
         catch (RegexEngineFailureException exception)
         {
@@ -222,6 +221,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             return PreparationStopped(watch, SearchStopReason.RegexTimeout);
         }
+
+        // Execution classifies its own failures. In particular, an unwrapped
+        // collector exception must not be mistaken for a preparation timeout.
+        using var preparedLease = prepared;
+        return SearchPreparedCore(query, prepared, collector, pathVisibility: null,
+            SearchLimits.FromQuery(query), effectiveToken, cancellationToken, watch);
     }
 
     internal static SearchStats PreparationStopped(ValueStopwatch watch, SearchStopReason reason) =>

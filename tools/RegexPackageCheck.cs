@@ -102,8 +102,36 @@ internal static class RegexPackageCheck
         await VerifyGlobFilters(engine);
         await VerifyContextAndDecodeDiagnostics(engine);
         await VerifyLiteralSurrogateProjection(engine);
+        await VerifyCollectorFailurePropagation(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyCollectorFailurePropagation(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
+        await index.Build(new Documents([("a.txt", "alpha"), ("b.txt", "alpha")]));
+        foreach (var mode in new[] { "snapshot", "parallel", "overlay", "overlay-base" })
+        {
+            using IIndexSnapshot snapshot = mode.StartsWith("overlay", StringComparison.Ordinal) ? index.OpenOverlaySnapshot() :
+                index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+            if (snapshot is IOverlaySnapshot overlay && mode == "overlay")
+                await overlay.Update(new Documents([("c.txt", "alpha")]), []);
+            foreach (var (pattern, patternMode) in new[] { ("alpha", PatternMode.Literal), ("alp.a", PatternMode.Regex) })
+            foreach (var policy in new[] { RegexTimeoutPolicy.StopSearch, RegexTimeoutPolicy.Throw })
+            {
+                var query = new SearchQuery(pattern, patternMode, CaseMode.Sensitive) { RegexTimeoutPolicy = policy };
+                var failure = new RegexMatchTimeoutException("Collector failure, unrelated to Sift verification.");
+                var collector = new ThrowingCollector(failure);
+                Exception? caught = null;
+                try { snapshot.Search(query, new(), collector); }
+                catch (Exception exception) { caught = exception; }
+                Require(ReferenceEquals(failure, caught) && collector.Calls == 1,
+                    "Search swallowed or replaced a collector exception.");
+                Require(snapshot.Search(query, new(), new Hits()).HitsReturned == (mode == "overlay" ? 3 : 2),
+                    "Collector failure poisoned subsequent searches.");
+            }
+        }
     }
 
     private static async Task VerifyLiteralSurrogateProjection(ISiftRegexEngine? engine)
@@ -294,6 +322,12 @@ internal static class RegexPackageCheck
     {
         public List<RawHit> Values { get; } = [];
         public bool OnHit(in RawHit hit) { Values.Add(hit); return true; }
+    }
+
+    private sealed class ThrowingCollector(Exception failure) : IHitCollector
+    {
+        public int Calls { get; private set; }
+        public bool OnHit(in RawHit hit) { Calls++; throw failure; }
     }
 }
 

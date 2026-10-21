@@ -696,6 +696,8 @@ public interface IHitCollector
     /// <remarks>
     ///     The callback runs within the search operation. It must not dispose the
     ///     producing snapshot or update the producing overlay before returning.
+    ///     Collector exceptions propagate to the search caller unchanged; the
+    ///     query's regex timeout policy does not classify collector failures.
     /// </remarks>
     bool OnHit(in RawHit hit);
 }
