@@ -143,8 +143,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 cancellationToken,
                 _options,
                 operationName: "overlay update",
-                options.RejectedUpsertPolicy,
-                retainContentBeyondOperation: false);
+                options.RejectedUpsertPolicy);
             var deletionSet = new HashSet<string>(StringComparer.Ordinal);
             foreach (var deletion in deletions)
             {

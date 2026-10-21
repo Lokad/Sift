@@ -286,8 +286,7 @@ internal sealed class IndexBuilder
             options,
             operationName,
             forbiddenPaths,
-            rejectedUpsertPolicy,
-            retainContentBeyondOperation: false);
+            rejectedUpsertPolicy);
         private readonly StoredDocumentPartitioner _partitioner = new(
             options,
             collectAcceptedPaths,
@@ -325,8 +324,7 @@ internal sealed class IndexBuilder
         SiftOptions options,
         string operationName,
         IReadOnlySet<string>? forbiddenPaths,
-        RejectedUpsertPolicy rejectedUpsertPolicy,
-        bool retainContentBeyondOperation)
+        RejectedUpsertPolicy rejectedUpsertPolicy)
     {
         private readonly HashSet<string> _submittedPaths = new(StringComparer.Ordinal);
         private readonly List<RejectedDocument> _rejectedDocuments = [];
@@ -344,7 +342,6 @@ internal sealed class IndexBuilder
             var document = Normalize(
                 submittedDocument,
                 options,
-                retainContentBeyondOperation,
                 out var normalizedPath,
                 out var rejectionReason);
             if (!_submittedPaths.Add(normalizedPath))
@@ -471,15 +468,13 @@ internal sealed class IndexBuilder
         CancellationToken cancellationToken,
         SiftOptions options,
         string operationName,
-        RejectedUpsertPolicy rejectedUpsertPolicy,
-        bool retainContentBeyondOperation)
+        RejectedUpsertPolicy rejectedUpsertPolicy)
     {
         var ingestion = new DocumentIngestionAccumulator(
             options,
             operationName,
             forbiddenPaths: null,
-            rejectedUpsertPolicy,
-            retainContentBeyondOperation);
+            rejectedUpsertPolicy);
         var documents = new List<StoredDocument>();
 
         while (source.TryReadNext(out var submittedDocument))
@@ -505,7 +500,6 @@ internal sealed class IndexBuilder
     private static StoredDocument? Normalize(
         SubmittedDocument document,
         SiftOptions options,
-        bool retainContentBeyondOperation,
         out string normalizedPath,
         out DocumentRejectionReason rejectionReason)
     {
@@ -554,10 +548,9 @@ internal sealed class IndexBuilder
             flags |= SegmentDocumentFlags.HadUtf8Bom;
         }
 
-        // Buffers borrowed until the next read always require a copy. Whole-operation
-        // buffers can flow through unless the caller will retain them afterward.
-        var ownedContent = document.ContentLifetime == DocumentContentLifetime.UntilOperationCompletes &&
-            !retainContentBeyondOperation
+        // Buffers borrowed until the next read require a copy. Whole-operation
+        // buffers remain borrowed only until publication completes.
+        var ownedContent = document.ContentLifetime == DocumentContentLifetime.UntilOperationCompletes
             ? content
             : content.ToArray();
         // Index-only metadata stays empty until unchanged update candidates are removed.
