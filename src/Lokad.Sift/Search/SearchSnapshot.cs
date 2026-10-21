@@ -428,6 +428,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var matchedDocuments = 0;
         (SegmentId SegmentId, DocumentOrdinal DocumentOrdinal)? lastMatchedDocument = null;
         var stopReason = SearchStopReason.None;
+        var orderedCollector = new OrderedHitCollector(ConsumeHit);
 
         if (HasElapsed(query, watch))
         {
@@ -455,13 +456,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     var batchFailures = new Exception?[batchLength];
                     var hitBuffers = new BlockingCollection<RawHit>[batchLength];
                     var workers = new Task[batchLength];
+                    var claimed = new int[batchLength];
                     var initializedBuffers = 0;
                     var startedWorkers = 0;
                     try
                     {
                         for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
                         {
-                            var segmentIndex = batchStart + batchIndex;
                             var resultIndex = batchIndex;
                             var hitBuffer = new BlockingCollection<RawHit>(ParallelHitBufferCapacity);
                             hitBuffers[resultIndex] = hitBuffer;
@@ -471,84 +472,48 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 #endif
                             workers[resultIndex] = Task.Run(() =>
                             {
-                                try
-                                {
-                                    var cache = OpenSegment(
-                                        _segments[segmentIndex],
-                                        batchCancellation.Token);
-                                    var bufferedCollector = new BoundedHitCollector(
-                                        hitBuffer,
-                                        batchCancellation.Token);
-                                    batchResults[resultIndex] = ExecuteSegmentSearch(
-                                        cache,
-                                        query,
-                                        matcher,
-                                        preparedQuery,
-                                        pathVisibility,
-                                        watch,
-                                        bufferedCollector,
-                                        limits,
-                                        batchCancellation.Token,
-                                        cancellationToken,
-                                        callerCancellationToken);
-                                }
-                                catch (OperationCanceledException) when (
-                                    batchCancellation.IsCancellationRequested &&
-                                    !cancellationToken.IsCancellationRequested)
-                                {
-                                    // The ordering thread cancels the private batch token when
-                                    // the caller collector asks the search to stop.
-                                }
-                                catch (Exception exception)
-                                {
-                                    // Transport worker failures to the ordering thread without
-                                    // leaving another bounded producer permanently blocked.
-                                    batchFailures[resultIndex] = exception;
-                                }
-                                finally
-                                {
-                                    hitBuffer.CompleteAdding();
-                                }
-                            });
+                                if (Interlocked.CompareExchange(ref claimed[resultIndex], 1, 0) == 0)
+                                    RunSegment(resultIndex, new BoundedHitCollector(hitBuffer, batchCancellation.Token));
+                            }, batchCancellation.Token);
                             startedWorkers++;
                         }
 
                         for (var batchIndex = 0; batchIndex < batchLength; batchIndex++)
                         {
-                            foreach (var hit in hitBuffers[batchIndex].GetConsumingEnumerable(cancellationToken))
+                            cancellationToken.ThrowIfCancellationRequested();
+                            // A pool caller can own the last available worker. Claim pending
+                            // work directly rather than waiting for another worker to start it.
+                            var runOnCaller = Interlocked.CompareExchange(ref claimed[batchIndex], 1, 0) == 0;
+                            if (runOnCaller)
                             {
-                                var hitDocument = (hit.SegmentId, hit.DocumentOrdinal);
-                                if (lastMatchedDocument != hitDocument)
+                                RunSegment(batchIndex, orderedCollector);
+                            }
+                            else
+                            {
+                                var buffer = hitBuffers[batchIndex];
+                                while (!buffer.IsCompleted)
                                 {
-                                    if (matchedDocuments >= limits.MaximumMatchedDocuments)
+                                    cancellationToken.ThrowIfCancellationRequested();
+                                    var remaining = query.MaxElapsedMilliseconds - watch.ElapsedMilliseconds;
+                                    if (remaining <= 0)
                                     {
-                                        stopReason = SearchStopReason.MaxMatchedDocuments;
-                                        batchCancellation.Cancel();
+                                        callerCancellationToken.ThrowIfCancellationRequested();
+                                        stopReason = SearchStopReason.MaxElapsedTime;
                                         break;
                                     }
-
-                                    matchedDocuments++;
-                                    lastMatchedDocument = hitDocument;
+                                    // Timed waits observe the absolute clock even when the
+                                    // thread-pool timer callback cannot run.
+                                    if (buffer.TryTake(out var hit, (int)Math.Min(remaining, int.MaxValue), cancellationToken) &&
+                                        !ConsumeHit(hit)) break;
                                 }
-
-                                var shouldContinue = collector.OnHit(hit);
-                                hitsReturned++;
-                                if (!shouldContinue)
-                                {
-                                    stopReason = SearchStopReason.CollectorStopped;
-                                    batchCancellation.Cancel();
-                                    break;
-                                }
-
-                                if (hitsReturned >= limits.MaximumHits)
-                                {
-                                    stopReason = SearchStopReason.MaxHits;
-                                    batchCancellation.Cancel();
-                                    break;
-                                }
+                                if (stopReason != SearchStopReason.None) batchCancellation.Cancel();
+                                // This worker already started: join before inspecting its
+                                // failure, including failures racing a global result limit.
+                                workers[batchIndex].GetAwaiter().GetResult();
                             }
 
-                            workers[batchIndex].GetAwaiter().GetResult();
+                            // Caller-claimed lanes have no running producer; their queued
+                            // no-op tasks are cancelled and joined in the batch cleanup.
                             if (batchFailures[batchIndex] is { } failure)
                             {
                                 ExceptionDispatchInfo.Capture(failure).Throw();
@@ -587,7 +552,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         batchCancellation.Cancel();
                         for (var workerIndex = 0; workerIndex < startedWorkers; workerIndex++)
                         {
-                            workers[workerIndex].GetAwaiter().GetResult();
+                            try { workers[workerIndex].GetAwaiter().GetResult(); }
+                            catch (OperationCanceledException) when (workers[workerIndex].IsCanceled && batchCancellation.IsCancellationRequested) { }
                         }
 
                         for (var batchIndex = 0; batchIndex < startedWorkers; batchIndex++)
@@ -599,6 +565,20 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         {
                             hitBuffers[batchIndex].Dispose();
                         }
+                    }
+
+                    void RunSegment(int resultIndex, IHitCollector segmentCollector)
+                    {
+                        try
+                        {
+                            batchResults[resultIndex] = ExecuteSegmentSearch(
+                                OpenSegment(_segments[batchStart + resultIndex], batchCancellation.Token),
+                                query, matcher, preparedQuery, pathVisibility, watch, segmentCollector, limits,
+                                batchCancellation.Token, cancellationToken, callerCancellationToken);
+                        }
+                        catch (OperationCanceledException) when (batchCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { }
+                        catch (Exception exception) { batchFailures[resultIndex] = exception; }
+                        finally { hitBuffers[resultIndex].CompleteAdding(); }
                     }
                 }
             }
@@ -615,7 +595,28 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
 
     Done:
+        callerCancellationToken.ThrowIfCancellationRequested();
         return metrics.ToSearchStats(watch.ElapsedMilliseconds, hitsReturned, stopReason);
+
+        bool ConsumeHit(RawHit hit)
+        {
+            var hitDocument = (hit.SegmentId, hit.DocumentOrdinal);
+            if (lastMatchedDocument != hitDocument)
+            {
+                if (matchedDocuments >= limits.MaximumMatchedDocuments)
+                {
+                    stopReason = SearchStopReason.MaxMatchedDocuments;
+                    return false;
+                }
+                matchedDocuments++;
+                lastMatchedDocument = hitDocument;
+            }
+            var shouldContinue = collector.OnHit(hit);
+            hitsReturned++;
+            if (!shouldContinue) stopReason = SearchStopReason.CollectorStopped;
+            else if (hitsReturned >= limits.MaximumHits) stopReason = SearchStopReason.MaxHits;
+            return stopReason == SearchStopReason.None;
+        }
     }
 
     public MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter)
@@ -1200,7 +1201,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         contentBytes,
                         preparedQuery.MandatoryFragmentsForPrecheck,
                         preparedQuery.ResolvedCaseMode,
-                        searchCancellationToken,
+                        workerCancellationToken,
                         watch,
                         query.MaxElapsedMilliseconds))
                 {
@@ -1225,7 +1226,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         preparedQuery.Literal!,
                         documentHitLimit,
                         collector,
-                        searchCancellationToken,
+                        workerCancellationToken,
                         watch,
                         ref metrics.DecodedChars,
                         ref hitsReturned,
@@ -1239,7 +1240,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         utf8Regex,
                         documentHitLimit,
                         collector,
-                        searchCancellationToken,
+                        workerCancellationToken,
                         ref nativeSink,
                         ref hitsReturned,
                         ref metrics.Utf8RegexInvocations,
@@ -1255,7 +1256,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                         preparedFallbackRegex,
                         documentHitLimit,
                         collector,
-                        searchCancellationToken,
+                        workerCancellationToken,
                         ref metrics.DecodedChars,
                         ref hitsReturned,
                         ref metrics.FallbackRegexInvocations,
@@ -1295,6 +1296,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             searchCancellationToken.IsCancellationRequested)
         {
             segmentStopReason = SearchStopReason.MaxElapsedTime;
+        }
+        catch (OperationCanceledException) when (
+            !callerCancellationToken.IsCancellationRequested &&
+            workerCancellationToken.IsCancellationRequested)
+        {
+            // Preserve work counters when the ordering caller stops a private batch.
+            segmentStopReason = SearchStopReason.CollectorStopped;
         }
 
         if (segmentStopReason == SearchStopReason.None && HasElapsed(query, watch))

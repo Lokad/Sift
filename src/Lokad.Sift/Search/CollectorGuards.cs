@@ -3,6 +3,11 @@ using System.Runtime.ExceptionServices;
 
 namespace Lokad.Sift.Search;
 
+internal sealed class OrderedHitCollector(Func<RawHit, bool> consume) : IHitCollector
+{
+    public bool OnHit(in RawHit hit) => consume(hit);
+}
+
 internal sealed class BoundedHitCollector(
     BlockingCollection<RawHit> hits,
     CancellationToken cancellationToken) : IHitCollector

@@ -4,8 +4,11 @@ namespace Lokad.Sift.Tests;
 
 public sealed class SearchDeadlineTests
 {
-    [Fact]
-    public async Task ScansObserveDeadlinesWhenTimerCallbacksCannotRun()
+    [Theory]
+    [InlineData("deadline-probes")]
+    [InlineData("parallel-progress")]
+    [InlineData("parallel-queue-deadline")]
+    public async Task SearchesProgressWhenTimerCallbacksCannotRun(string mode)
     {
         // Thread-pool saturation belongs in a separate process, so it cannot
         // affect other xUnit tests or their cancellation/timeout infrastructure.
@@ -15,7 +18,7 @@ public sealed class SearchDeadlineTests
         var host = Path.Combine(root, "tests", "Lokad.Sift.TestHost", "bin", configuration, "net10.0", "Lokad.Sift.TestHost.dll");
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         start.ArgumentList.Add(host);
-        start.ArgumentList.Add("deadline-probes");
+        start.ArgumentList.Add(mode);
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();

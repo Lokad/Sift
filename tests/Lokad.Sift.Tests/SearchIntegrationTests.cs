@@ -9,6 +9,32 @@ namespace Lokad.Sift.Tests;
 public sealed class SearchIntegrationTests
 {
     [Fact]
+    public async Task ParallelSegmentsStillExecuteConcurrentlyWithCallerThreadCollectors()
+    {
+        using var entered = new CountdownEvent(2);
+        using var engine = new RegexContractTestEngine();
+        engine.BeforeMatch = () =>
+        {
+            entered.Signal();
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "Segments did not execute concurrently.");
+        };
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
+        await index.Build(new InMemoryDocumentSource([("a.txt", "needle"), ("b.txt", "needle")]));
+        using var snapshot = index.OpenSnapshot(new SearchOptions(2));
+        var callerThread = Environment.CurrentManagedThreadId;
+        var collector = new ThreadCheckingCollector(callerThread);
+        var stats = snapshot.Search(new SearchQuery("n.edle", PatternMode.Regex, CaseMode.Sensitive), new(), collector);
+        Assert.Equal(SearchStopReason.None, stats.StopReason);
+        Assert.Equal(2, stats.HitsReturned);
+        Assert.Equal(2, stats.Utf8RegexInvocations);
+    }
+
+    private sealed class ThreadCheckingCollector(int callerThread) : IHitCollector
+    {
+        public bool OnHit(in RawHit hit) { Assert.Equal(callerThread, Environment.CurrentManagedThreadId); return true; }
+    }
+
+    [Fact]
     public async Task ParallelSearchCleansUpStartedWorkersWhenBatchSetupFails()
     {
         var repeatedHits = string.Concat(Enumerable.Repeat("alpha ", 1000));
