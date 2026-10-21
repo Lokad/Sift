@@ -46,6 +46,9 @@
 
 ### Fixed
 
+- Unicode whole-line literals now ignore at most one trailing CR before LF or EOF,
+  matching the existing ASCII rule. Additional CRs remain part of the line body;
+  regex line anchors and materialized display trimming are unchanged.
 - `GetStorageStats()` and `ShouldCompact(...)` now reject calls from the same
   index's active mutation callbacks with `InvalidOperationException`, preventing
   writer-lock deadlocks. Safe reads and unrelated concurrent callers remain usable;

@@ -151,6 +151,11 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
   preparing a content regex, regardless of case or boundary flags;
   nonempty empty-group regex syntax still enumerates .NET's zero-length matches
 * `WholeWord` and `WholeLine` are verifier semantics, not index semantics
+* Literal `WholeLine` requires the match to cover complete LF-delimited lines,
+  excluding at most one trailing CR before LF or EOF.
+  Additional CRs belong to the line body and must be included in the literal;
+  a literal may span complete lines. This applies equally to ASCII and Unicode.
+  Regex `WholeLine` retains .NET line-anchor semantics; display trimming is separate.
 * `Multiline` applies to verification against the entire document content
 * The index is document-granular; the verifier is line/match granular
 

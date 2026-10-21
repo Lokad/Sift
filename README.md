@@ -383,6 +383,9 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   code units. Unencodable filters use string verification without replacement-
   encoded index constraints; stored document paths must be well-formed Unicode.
 - Input content is `ReadOnlyMemory<byte>` and must be UTF-8.
+- Literal `WholeLine` matches complete LF-delimited lines, ignoring at most one
+  trailing CR before LF or EOF. Additional CRs must be part of the literal, for
+  both ASCII and Unicode. Regex `WholeLine` uses .NET line-anchor semantics.
 - Async document sources are pulled under Sift's writer transaction, providing
   natural backpressure without a consumer-owned producer queue.
 - Searches operate on snapshots. Open a new snapshot after updates if you want to observe the new generation.
