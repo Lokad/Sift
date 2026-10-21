@@ -7,6 +7,75 @@ namespace Lokad.Sift.Tests;
 [Collection("BenchmarkSmoke")]
 public sealed class CliSmokeTests
 {
+    [Fact]
+    public async Task ContextIsPrintedPerHitAndRespectsTruncation()
+    {
+        var before = new string('é', 150000);
+        using var fixture = new CliCorpusFixture(("a.txt", before + "\nneedle needle\nAFTER\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var result = RunCli(["search", fixture.CorpusPath, "needle", "--literal", "--before=1", "--after=1"]);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(2, result.StandardOutput.Split("a.txt-1- ").Length - 1);
+        Assert.Contains("a.txt:2:1: needle", result.StandardOutput);
+        Assert.Contains("a.txt:2:8: needle", result.StandardOutput);
+        Assert.Equal(2, result.StandardOutput.Split("[context truncated]").Length - 1);
+        Assert.DoesNotContain("AFTER", result.StandardOutput);
+        Assert.DoesNotContain('�', result.StandardOutput);
+        Assert.True(result.StandardOutput.Length < before.Length * 2);
+    }
+
+    [Theory]
+    [InlineData("search", "literal")]
+    [InlineData("search", "--LITERAL")]
+    [InlineData("explain", "regex")]
+    public async Task ValidAliasesAndNumericLimitsRemainAccepted(string command, string mode)
+    {
+        using var fixture = new CliCorpusFixture(("a.txt", "needle needle"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var result = RunCli([command, fixture.CorpusPath, "needle", mode, "--before=0", "--after=2147483647", "--max-hits=1", "--max-docs=1", "--max-bytes=9223372036854775807"]);
+        Assert.Equal(0, result.ExitCode);
+        if (command == "search") Assert.Contains("hits=1", result.StandardOutput);
+    }
+
+    [Theory]
+    [InlineData("BEFORE\nneedle\nAFTER\n", "needle", "a.txt-1- BEFORE", "a.txt:2:1: needle", "a.txt-3- AFTER")]
+    [InlineData("avant é\r\nneedle\r\naprès é\r\n", "needle", "a.txt-1- avant é", "a.txt:2:1: needle", "a.txt-3- après é")]
+    [InlineData("needle\nAFTER", "needle", null, "a.txt:1:1: needle", "a.txt-2- AFTER")]
+    [InlineData("BEFORE\nneedle", "needle", "a.txt-1- BEFORE", "a.txt:2:1: needle", null)]
+    [InlineData("BEFORE\nalpha\nbeta\nAFTER", "alpha\nbeta", "a.txt-1- BEFORE", "a.txt:2:1: alpha", "a.txt-4- AFTER")]
+    public async Task ContextOptionsPrintMaterializedRows(string content, string pattern, string? before, string match, string? after)
+    {
+        using var fixture = new CliCorpusFixture(("a.txt", content));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var result = RunCli(["search", fixture.CorpusPath, pattern, "--literal", "--before=1", "--after=1"]);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(match, result.StandardOutput);
+        if (before is not null) Assert.Contains(before, result.StandardOutput);
+        if (after is not null) Assert.Contains(after, result.StandardOutput);
+    }
+
+    public static IEnumerable<object[]> InvalidSearchOptions()
+    {
+        foreach (var command in new[] { "search", "explain" })
+        foreach (var option in new[] { "--max-hitz=1", "extra", "--before=-1", "--after=-1", "--before=no", "--after=2147483648", "--max-hits=0", "--max-docs=-1", "--max-bytes=0", "--max-bytes=9223372036854775808" })
+            yield return [command, option];
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidSearchOptions))]
+    public void InvalidOptionsFailBeforeOpeningStorage(string command, string option)
+    {
+        using var fixture = new CliCorpusFixture();
+        var result = RunCli([command, fixture.CorpusPath, "no-hit", option]);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(option.Split('=')[0], result.StandardError);
+        Assert.DoesNotContain("Unhandled exception", result.StandardError);
+        Assert.False(Directory.Exists(fixture.CorpusPath));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -1,4 +1,7 @@
 using Lokad.Sift;
+using System.Globalization;
+
+Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 if (args.Length < 2)
 {
@@ -7,6 +10,21 @@ if (args.Length < 2)
 }
 
 var command = args[0];
+SearchCliOptions parsedOptions = default;
+if (command is "search" or "explain")
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine($"Usage: sift {command} <corpus> <pattern> [options]");
+        return 1;
+    }
+    try { parsedOptions = ParseSearchOptions(args.AsSpan(2)); }
+    catch (ArgumentException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 1;
+    }
+}
 var corpusPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
 var inputRoot = command is "build" or "update"
     ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(args.Length >= 3 ? args[2] : Environment.CurrentDirectory))
@@ -37,13 +55,7 @@ switch (command)
         }
     case "search":
         {
-            if (args.Length < 3)
-            {
-                Console.Error.WriteLine("Usage: sift search <corpus> <pattern> [options]");
-                return 1;
-            }
-
-            var options = ParseSearchOptions(args.AsSpan(2));
+            var options = parsedOptions;
             using var snapshot = index.OpenSnapshot();
             var collector = new ConsoleCollector(snapshot, options.ContextBefore, options.ContextAfter);
             var stats = snapshot.Search(options.Query, options.Filter, collector);
@@ -75,13 +87,7 @@ switch (command)
         }
     case "explain":
         {
-            if (args.Length < 3)
-            {
-                Console.Error.WriteLine("Usage: sift explain <corpus> <pattern> [options]");
-                return 1;
-            }
-
-            var options = ParseSearchOptions(args.AsSpan(2));
+            var options = parsedOptions;
             using var snapshot = index.OpenSnapshot();
             var plan = snapshot.Explain(options.Query, options.Filter);
             Console.WriteLine($"pattern={plan.PatternKind} case={plan.ResolvedCaseMode} scopeDocs={plan.ScopeDocumentCount} scopeBytes={plan.ScopeByteCount} usesIndex={plan.UsesIndex} candidate={plan.CandidateKind} combination={plan.CandidateCombination} verifier={plan.VerifierKind} regexRoute={plan.RegexRouteReason} regexTimeout={plan.RegexTimeoutPolicy} pathPrefix={plan.UsesPathPrefixFilter} pathRegex={plan.UsesPathRegexFilter} includeGlobs={plan.UsesIncludeGlobs} excludeGlobs={plan.UsesExcludeGlobs} literalVerifier={plan.CanUseLiteralVerifier} nonBacktracking={plan.CanUseNonBacktracking} decode={plan.NeedsUnicodeDecode} wholeDocument={plan.MayRequireWholeDocumentVerification}");
@@ -209,33 +215,34 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
 
         if (arg.StartsWith("--before=", StringComparison.OrdinalIgnoreCase))
         {
-            contextBefore = int.Parse(arg["--before=".Length..]);
+            contextBefore = (int)ParseNumber(arg, "--before=", 0, int.MaxValue);
             continue;
         }
 
         if (arg.StartsWith("--after=", StringComparison.OrdinalIgnoreCase))
         {
-            contextAfter = int.Parse(arg["--after=".Length..]);
+            contextAfter = (int)ParseNumber(arg, "--after=", 0, int.MaxValue);
             continue;
         }
 
         if (arg.StartsWith("--max-hits=", StringComparison.OrdinalIgnoreCase))
         {
-            maxHits = int.Parse(arg["--max-hits=".Length..]);
+            maxHits = (int)ParseNumber(arg, "--max-hits=", 1, int.MaxValue);
             continue;
         }
 
         if (arg.StartsWith("--max-docs=", StringComparison.OrdinalIgnoreCase))
         {
-            maxDocuments = int.Parse(arg["--max-docs=".Length..]);
+            maxDocuments = (int)ParseNumber(arg, "--max-docs=", 1, int.MaxValue);
             continue;
         }
 
         if (arg.StartsWith("--max-bytes=", StringComparison.OrdinalIgnoreCase))
         {
-            maxBytesScanned = long.Parse(arg["--max-bytes=".Length..]);
+            maxBytesScanned = ParseNumber(arg, "--max-bytes=", 1, long.MaxValue);
             continue;
         }
+        throw new ArgumentException($"Unknown option or argument: '{arg}'.");
     }
 
     return new SearchCliOptions(
@@ -259,6 +266,14 @@ static SearchCliOptions ParseSearchOptions(ReadOnlySpan<string> arguments)
         },
         contextBefore,
         contextAfter);
+
+    static long ParseNumber(string argument, string prefix, long minimum, long maximum)
+    {
+        if (!long.TryParse(argument.AsSpan(prefix.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ||
+            value < minimum || value > maximum)
+            throw new ArgumentException($"Invalid value for {prefix.TrimEnd('=')}: expected an integer from {minimum} to {maximum}.");
+        return value;
+    }
 }
 
 internal readonly record struct SearchCliOptions(
@@ -329,7 +344,13 @@ internal sealed class ConsoleCollector : IHitCollector
     public bool OnHit(in RawHit hit)
     {
         var materialized = _snapshot.Materialize(hit, _contextBefore, _contextAfter);
+        var beforeStart = Math.Max(1L, (long)materialized.StartLine - _contextBefore);
+        for (var i = 0; i < materialized.BeforeContext.Count; i++)
+            Console.WriteLine($"{materialized.Path}-{beforeStart + i}- {materialized.BeforeContext[i]}");
         Console.WriteLine($"{materialized.Path}:{materialized.StartLine}:{materialized.StartColumn}: {materialized.MatchText}");
+        for (var i = 0; i < materialized.AfterContext.Count; i++)
+            Console.WriteLine($"{materialized.Path}-{(long)materialized.EndLine + 1 + i}- {materialized.AfterContext[i]}");
+        if (materialized.IsContextTruncated) Console.WriteLine($"{materialized.Path}: [context truncated]");
         return true;
     }
 }
