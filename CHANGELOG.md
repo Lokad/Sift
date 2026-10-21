@@ -55,6 +55,12 @@
 
 ### Fixed
 
+- Parallel search can execute pending segments on its caller when pool workers are
+  unavailable. Ordered result-queue waits observe elapsed deadlines independently
+  of timer callbacks; collectors, bounded buffering and worker cleanup are preserved.
+- Failures accessing caller-owned document memory no longer mark healthy indexes
+  as corrupt. Build, update and overlay paths preserve the original exception and
+  committed state, including later reads of borrowed content.
 - ASCII-insensitive literal scans and mandatory-fragment prechecks now observe
   elapsed deadlines even when thread-pool saturation delays timer callbacks.
   No-hit segment scans that overrun their deadline report `MaxElapsedTime`.

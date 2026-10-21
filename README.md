@@ -23,6 +23,10 @@ The core package has no runtime NuGet dependencies. Regex search uses invariant
 pattern supports it. Classic backtracking has a one-second match timeout;
 `RegexTimeoutPolicy` controls whether a timeout stops the search or throws.
 
+Parallel searches preserve manifest hit order and invoke collectors on the search
+caller. The caller executes pending segments when pool workers are unavailable;
+bounded result-queue waits check the absolute deadline independently of timer callbacks.
+
 Search observes caller cancellation and `MaxElapsedMilliseconds` between matches
 within a document. ASCII-insensitive scans also check elapsed time while scanning,
 including when no match is found and timer callbacks are delayed. A running .NET
@@ -406,7 +410,7 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   it does not convert collector failures into search results.
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
-- Document source and commit metadata callback failures propagate unchanged.
+- Document source, content-memory access and commit metadata callback failures propagate unchanged.
   A caller failure during build/update does not itself require rebuilding a
   healthy index; its previous committed state and snapshots remain available.
 - `GetStorageStats()` and `ShouldCompact(...)` throw `InvalidOperationException`

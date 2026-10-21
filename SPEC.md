@@ -1208,7 +1208,8 @@ API rules:
 * no mandatory “load all hits into list” API in the core layer
 * `null` path-filter constructor inputs mean “no filter”; exposed include/exclude collections are never `null`
 * document ingestion is caller-driven; filesystem crawling belongs in an adapter above the core library
-* exceptions from document sources (including async enumeration setup, reads and disposal) and commit metadata providers propagate with their original identity and stack; they do not themselves mark a healthy index as corrupt
+* exceptions from document sources (including async enumeration setup, reads and disposal), caller-owned content-memory access and commit metadata providers propagate with their original identity and stack; they do not themselves mark a healthy index as corrupt
+* content-memory guards cover normalization/copying, unchanged-content comparison and subsequent borrowed-content indexing/publication; persisted-pack access and corruption detection remain separate
 * a failed build/update retains its previous committed state; genuine storage corruption still requires recovery, and a failed recovery build does not clear that requirement
 * GetStorageStats and ShouldCompact acquire the writer lock and reject calls from that index's active mutation callbacks with InvalidOperationException, including inherited execution contexts; other concurrent callers may wait normally
 * GetMaintenanceStats and GetIndexState remain available during mutation callbacks; the probe reentrancy check does not change storage consistency or compaction eligibility
@@ -1290,6 +1291,12 @@ command's source, including on failure.
   snapshot release, and corpus startup
 
 ### 12.3 Query parallelism
+
+Segment search preserves manifest hit order and invokes collectors on the calling
+thread. The caller can claim segments whose workers have not started, so progress
+does not require a spare thread-pool worker. Bounded queue waits observe the absolute
+deadline directly; cancellation stops pending tasks, and started tasks are joined
+before their buffers and query/snapshot leases are released.
 
 Parallelize in this order:
 
