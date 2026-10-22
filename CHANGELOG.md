@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Snapshot document lookups traverse segment metadata without allocating an
+  enumerator. Segment ordering, deletion visibility and snapshot lifetimes are
+  unchanged.
 - Literal searches that require Unicode decoding reuse the managed regex path's
   pooled character buffer instead of allocating a decoded string per document.
   Case folding, overlapping matches and boundary semantics are unchanged.

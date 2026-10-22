@@ -754,9 +754,9 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         out SegmentCache cache,
         out uint ordinal)
     {
-        foreach (var entry in _segments)
+        for (var i = 0; i < _segments.Count; i++)
         {
-            cache = OpenSegment(entry);
+            cache = OpenSegment(_segments[i]);
             if (cache.Segment.TryFindDocumentOrdinal(normalizedPath, out ordinal) &&
                 !IsDeadOrdinal(cache.DeadOrdinals, ordinal))
             {
