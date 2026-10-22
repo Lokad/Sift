@@ -652,16 +652,7 @@ public sealed class SiftIndex : ISiftIndex
                 Segments: []);
             using var liveDocuments = new LiveDocumentResolver(_storage, existingManifest);
 
-            var deletionSet = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var deletion in deletions)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var normalized = deletion.Path;
-                if (!deletionSet.Add(normalized))
-                {
-                    throw new InvalidOperationException($"Duplicate deletion path in update batch: '{normalized}'.");
-                }
-            }
+            var deletionSet = MutationCallbackGuards.ReadDeletionPaths(deletions, cancellationToken, "update");
 
             var publishedSegments = new List<SegmentManifestEntry>();
             var attemptedSegmentIds = new List<SegmentId>();

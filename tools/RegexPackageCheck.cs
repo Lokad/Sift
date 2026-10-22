@@ -113,6 +113,7 @@ internal static class RegexPackageCheck
         await VerifyContentMemoryFailures(engine);
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
+        await VerifyDeletionCollectionFailures(engine);
         await VerifyMutationProbeReentrancy(engine);
         await VerifyOverlayExportReentrancy(engine);
         VerifyRegexValidation(snapshot);
@@ -490,6 +491,44 @@ internal static class RegexPackageCheck
         {
             if (failOnDispose) throw failure;
         }
+    }
+
+    private static async Task VerifyDeletionCollectionFailures(ISiftRegexEngine? engine)
+    {
+        foreach (var dispose in new[] { false, true })
+        {
+            using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+            await index.Build(new Documents([("old.txt", "alpha")]));
+            var identity = index.GetIndexIdentity();
+            using var retained = index.OpenSnapshot();
+            var failure = new InvalidDataException("External deletion collection failure.");
+            Exception? caught = null;
+            try { await index.Update(new Documents([]), new FailingDeletions(failure, dispose)); }
+            catch (Exception exception) { caught = exception; }
+            Require(ReferenceEquals(caught, failure) && !index.RequiresRebuild && index.GetIndexIdentity() == identity,
+                "Deletion collection failure poisoned the committed index.");
+            using var fresh = index.OpenSnapshot();
+            Require(retained.TryGetDocumentBytes(new DocumentKey("old.txt"), out _) &&
+                fresh.TryGetDocumentBytes(new DocumentKey("old.txt"), out _), "Deletion failure lost snapshot visibility.");
+            await index.Validate();
+            await index.Update(new Documents([]), [new DocumentKey("old.txt")]);
+        }
+    }
+
+    private sealed class FailingDeletions(Exception failure, bool dispose) : IReadOnlyList<DocumentKey>
+    {
+        public int Count => 1;
+        public DocumentKey this[int index] => new("missing.txt");
+        public IEnumerator<DocumentKey> GetEnumerator()
+        {
+            try
+            {
+                if (!dispose) throw failure;
+                yield return new DocumentKey("missing.txt");
+            }
+            finally { if (dispose) throw failure; }
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private static async Task VerifyCollectorFailurePropagation(ISiftRegexEngine? engine)

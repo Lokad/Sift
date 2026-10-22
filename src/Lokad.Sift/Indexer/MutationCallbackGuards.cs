@@ -12,6 +12,28 @@ internal sealed class MutationCallbackFailureException(Exception exception) : Ex
 
 internal static class MutationCallbackGuards
 {
+    public static HashSet<string> ReadDeletionPaths(
+        IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken, string operationName)
+    {
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        // Collection enumeration is caller code, including acquisition and disposal.
+        // No persisted data is read within this boundary.
+        try
+        {
+            foreach (var deletion in deletions)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!paths.Add(deletion.Path))
+                    throw new InvalidOperationException($"Duplicate deletion path in {operationName} batch: '{deletion.Path}'.");
+            }
+        }
+        catch (Exception exception) when (IndexCorruption.IsIndexCorruption(exception))
+        {
+            throw new MutationCallbackFailureException(exception);
+        }
+        return paths;
+    }
+
     public static ReadOnlySpan<byte> GetContentSpan(ReadOnlyMemory<byte> content)
     {
         // MemoryManager.GetSpan is caller code, including for content borrowed

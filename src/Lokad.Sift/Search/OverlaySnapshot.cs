@@ -149,15 +149,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
                 _options,
                 operationName: "overlay update",
                 options.RejectedUpsertPolicy);
-            var deletionSet = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var deletion in deletions)
-            {
-                var normalized = deletion.Path;
-                if (!deletionSet.Add(normalized))
-                {
-                    throw new InvalidOperationException($"Duplicate deletion path in overlay batch: '{normalized}'.");
-                }
-            }
+            var deletionSet = MutationCallbackGuards.ReadDeletionPaths(deletions, cancellationToken, "overlay");
 
             if (options.RejectedUpsertPolicy == RejectedUpsertPolicy.DeleteExisting)
             {
