@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Literal searches that require Unicode decoding reuse the managed regex path's
+  pooled character buffer instead of allocating a decoded string per document.
+  Case folding, overlapping matches and boundary semantics are unchanged.
 - UTF-16 match offsets use the runtime's UTF-8 byte counter on consecutive spans,
   retaining monotonic projection and split-surrogate boundary behavior.
 - Well-formed case-sensitive Unicode literals use the existing UTF-8 byte verifier

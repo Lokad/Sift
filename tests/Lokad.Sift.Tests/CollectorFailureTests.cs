@@ -22,21 +22,22 @@ public sealed class CollectorFailureTests
             TargetSegmentDocumentCount = 1,
             RegexEngine = mode.StartsWith("native", StringComparison.Ordinal) ? new RegexContractTestEngine() : null
         });
-        await index.Build(new InMemoryDocumentSource([("a.txt", "alpha"), ("b.txt", "alpha")]));
+        await index.Build(new InMemoryDocumentSource([("a.txt", "alpha"), ("b.txt", "alpha"), ("unicode.txt", "CAFÉ")]));
         using IIndexSnapshot snapshot = mode.Contains("overlay", StringComparison.Ordinal)
             ? index.OpenOverlaySnapshot()
             : index.OpenSnapshot(new SearchOptions(mode.Contains("parallel", StringComparison.Ordinal) ? 2 : 1));
         var ownOverlayRows = snapshot is IOverlaySnapshot && mode != "overlay-base";
         if (snapshot is IOverlaySnapshot overlay && ownOverlayRows)
-            await overlay.Update(new InMemoryDocumentSource([("c.txt", "alpha")]), []);
+            await overlay.Update(new InMemoryDocumentSource([("c.txt", "alpha"), ("overlay-unicode.txt", "CAFÉ")]), []);
 
-        foreach (var (pattern, patternMode) in new[] { ("alpha", PatternMode.Literal),
-            ("alpha", PatternMode.Regex), ("alp.a", PatternMode.Regex), ("(?=alpha)alpha", PatternMode.Regex) })
+        foreach (var (pattern, patternMode, caseMode) in new[] { ("alpha", PatternMode.Literal, CaseMode.Sensitive),
+            ("alpha", PatternMode.Regex, CaseMode.Sensitive), ("alp.a", PatternMode.Regex, CaseMode.Sensitive),
+            ("(?=alpha)alpha", PatternMode.Regex, CaseMode.Sensitive), ("café", PatternMode.Literal, CaseMode.Insensitive) })
         foreach (var failure in new Exception[] { new RegexMatchTimeoutException("Collector timeout."),
             new InvalidDataException("Collector data failure."), new IOException("Collector I/O failure."),
             new InvalidOperationException("Collector operation failure.") })
         {
-            var query = new SearchQuery(pattern, patternMode, CaseMode.Sensitive) { RegexTimeoutPolicy = policy };
+            var query = new SearchQuery(pattern, patternMode, caseMode) { RegexTimeoutPolicy = policy };
             var collector = new ThrowingCollector(failure);
 
             var caught = Record.Exception(() => snapshot.Search(query, new(), collector));
@@ -44,7 +45,8 @@ public sealed class CollectorFailureTests
             Assert.Same(failure, caught);
             Assert.Contains(nameof(ThrowingCollector.OnHit), failure.StackTrace ?? "");
             Assert.Equal(1, collector.Calls);
-            Assert.Equal(ownOverlayRows ? 3 : 2, snapshot.Search(query, new(), new HitBuffer()).HitsReturned);
+            var expectedHits = (pattern == "café" ? 1 : 2) + (ownOverlayRows ? 1 : 0);
+            Assert.Equal(expectedHits, snapshot.Search(query, new(), new HitBuffer()).HitsReturned);
         }
     }
 

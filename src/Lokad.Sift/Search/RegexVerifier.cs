@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.Text;
 using System.Text.RegularExpressions;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
@@ -202,45 +200,6 @@ internal static class RegexVerifier
 
     private readonly record struct RegexCacheKey(string Pattern, RegexOptions Options);
     private readonly record struct RegexEntry(Regex Regex, bool UsesNonBacktracking);
-
-    private struct RentedCharBuffer : IDisposable
-    {
-        private char[]? _buffer;
-        private int _length;
-
-        public static RentedCharBuffer Decode(ReadOnlySpan<byte> utf8, ref long decodedChars)
-        {
-            var charCount = Encoding.UTF8.GetCharCount(utf8);
-            decodedChars += charCount;
-            if (charCount == 0)
-            {
-                return default;
-            }
-
-            var buffer = ArrayPool<char>.Shared.Rent(charCount);
-            var charsWritten = Encoding.UTF8.GetChars(utf8, buffer);
-            return new RentedCharBuffer
-            {
-                _buffer = buffer,
-                _length = charsWritten
-            };
-        }
-
-        public ReadOnlySpan<char> AsSpan()
-        {
-            return _buffer is null ? [] : _buffer.AsSpan(0, _length);
-        }
-
-        public void Dispose()
-        {
-            if (_buffer is not null)
-            {
-                ArrayPool<char>.Shared.Return(_buffer);
-                _buffer = null;
-                _length = 0;
-            }
-        }
-    }
 }
 
 internal sealed record PreparedRegexVerifier(

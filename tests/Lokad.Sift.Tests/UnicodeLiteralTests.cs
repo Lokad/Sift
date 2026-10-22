@@ -205,6 +205,43 @@ public sealed class UnicodeLiteralTests
         Assert.All(oldHits.Hits, hit => Assert.Empty(old.Materialize(hit, 0, 0).MatchText));
     }
 
+    [Fact]
+    public async Task UnicodeLiteralCollectorCanRunAnotherDecodedSearch()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        var outerText = new string('x', 4096) + " ÉÉÉ";
+        var innerText = new string('y', 4096) + " ΩΩΩ";
+        await index.Build(new InMemoryDocumentSource([("outer.txt", outerText), ("inner.txt", innerText)]));
+        using var snapshot = index.OpenSnapshot();
+        var outerQuery = new SearchQuery("éé", PatternMode.Literal, CaseMode.Insensitive);
+        var innerQuery = new SearchQuery("ω", PatternMode.Literal, CaseMode.Insensitive);
+        var collector = new CallbackCollector(() =>
+        {
+            var innerHits = new HitBuffer();
+            Assert.Equal(3, snapshot.Search(innerQuery, new() { PathPrefix = "inner.txt" }, innerHits).HitsReturned);
+            Assert.All(innerHits.Hits, hit => Assert.Equal("Ω", snapshot.Materialize(hit, 0, 0).MatchText));
+        });
+
+        var stats = snapshot.Search(outerQuery, new() { PathPrefix = "outer.txt" }, collector);
+
+        Assert.Equal(SearchStopReason.None, stats.StopReason);
+        Assert.Equal(2, stats.HitsReturned);
+        Assert.Equal(Find("outer.txt", outerText, "éé", StringComparison.OrdinalIgnoreCase),
+            collector.Hits.Select(hit => ("outer.txt", hit.StartByte, hit.EndByte)));
+        Assert.All(collector.Hits, hit => Assert.Equal("ÉÉ", snapshot.Materialize(hit, 0, 0).MatchText));
+    }
+
+    private sealed class CallbackCollector(Action callback) : IHitCollector
+    {
+        public List<RawHit> Hits { get; } = [];
+        public bool OnHit(in RawHit hit)
+        {
+            Hits.Add(hit);
+            callback();
+            return true;
+        }
+    }
+
     private static IEnumerable<(string Path, int Start, int End)> Find(
         string path, string text, string pattern, StringComparison comparison)
     {

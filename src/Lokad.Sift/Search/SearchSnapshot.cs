@@ -1353,8 +1353,8 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return;
         }
 
-        var text = Encoding.UTF8.GetString(contentBytes);
-        decodedChars += text.Length;
+        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, ref decodedChars);
+        var text = decodedBuffer.AsSpan();
         var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var searchIndex = 0;
         // Literal matches can overlap. Each boundary advances monotonically on
@@ -1370,12 +1370,13 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                 return;
             }
 
-            var found = text.IndexOf(pattern, searchIndex, comparison);
-            if (found < 0)
+            var relativeIndex = text[searchIndex..].IndexOf(pattern, comparison);
+            if (relativeIndex < 0)
             {
                 return;
             }
 
+            var found = searchIndex + relativeIndex;
             var end = found + pattern.Length;
             if (query.WholeWord && !WordBoundary.IsWholeWord(text, found, end))
             {
@@ -1573,7 +1574,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                  value == (byte)'_');
     }
 
-    private static bool IsWholeLine(string text, int start, int end)
+    private static bool IsWholeLine(ReadOnlySpan<char> text, int start, int end)
     {
         var lineStart = start;
         while (lineStart > 0 && text[lineStart - 1] != '\n')
