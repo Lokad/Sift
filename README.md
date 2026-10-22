@@ -351,6 +351,10 @@ Unicode estimate. Opening or validating an old pack does not rewrite it. Updates
 may mix versions 3 and 4; normal compaction writes version 4. No rebuild or migration
 is needed for the histogram removal. Other unsupported versions still set
 `RequiresRebuild` on access/validation. The manifest format is unchanged.
+Explicit full validation checks each row's ASCII flag against its content and
+checks exact non-ASCII totals where stored. Manifest versions 2, 3 and 4 retain
+read support; fixed headers and exact file layout are checked before file-sized
+allocation. Unexplained bytes after the manifest checksum are rejected.
 
 Corrupt manifest, lease, or segment metadata is fail-closed. The `SiftIndex` instance
 remains constructible and reports `RequiresRebuild`; searches, updates, and

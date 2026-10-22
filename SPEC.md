@@ -213,6 +213,9 @@ Corpus root:
   * checksum / integrity metadata
 
 The manifest is the **only mutable authoritative file** in steady state.
+Manifest versions 2, 3 and 4 remain readable. Readers validate the fixed versioned
+header, counts, bounds and contiguous layout before allocating a file-sized buffer;
+the checksum must end exactly at EOF. There is no unchecked trailing extension area.
 
 ### 5.2 Segment model
 
@@ -1393,6 +1396,10 @@ Sift is optimized primarily for steady-state use in long-lived local processes. 
 Normal segment opens validate identity and structural bounds only. Applications run
 explicit full-pack checksum validation outside latency-sensitive search and update
 paths; a successful publication has already checksum-validated every new pack.
+Full validation also compares each row's ASCII flag with its actual content during
+the cancellation-aware content/line-index scan. Exact non-ASCII document/byte totals
+must agree where stored. The oldest version-3 statistics prefix retains its
+conservative estimate because it has no exact Unicode counters.
 
 1. Indexed selective literal queries on warm cache should complete in the low tens of milliseconds on commodity desktop/server CPUs for a 10–50M LOC corpus.
 2. Indexed regex queries with extractable mandatory fragments should usually verify only a tiny fraction of scoped documents, preferably through the byte-oriented regex engine rather than fallback `.NET Regex`.

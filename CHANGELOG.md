@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Generation leases decode directly into their final typed ID array, removing an
+  intermediate allocation and conversion pass. Lease semantics are unchanged.
 - Stopped generating the unused ASCII-folded path trigram index and removed its
   dedicated counting/filling passes. Existing v3/v4 files remain readable; new
   v4 files retain empty compatible regions for older readers. Case-sensitive
@@ -55,6 +57,12 @@
 
 ### Fixed
 
+- Full-pack validation now rejects ASCII flags and exact non-ASCII totals that
+  disagree with document content, even when region checksums are valid. The oldest
+  version-3 statistics layout retains its conservative Unicode estimate.
+- Manifest readers validate the fixed versioned header and exact layout before
+  file-sized allocation, rejecting unchecked trailing bytes. Valid manifest
+  versions 2/3/4 and existing segment compatibility are preserved.
 - Failures enumerating caller-owned deletion collections no longer mark healthy
   indexes as corrupt. Updates preserve the original exception, committed state,
   snapshot visibility and subsequent usability, including enumerator disposal.
