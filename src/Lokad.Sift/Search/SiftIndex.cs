@@ -716,7 +716,7 @@ public sealed class SiftIndex : ISiftIndex
                 var requiresManifestMigration = existingManifest.Segments.Any(
                     static segment => segment.DeadContentBytes < 0);
                 var rejectedDocuments = upsertLoad.RejectedDocuments.ToArray();
-                pendingStats = new PendingUpdateStats(
+                pendingStats = new UpdateCommitStats(
                     submittedUpserts: upsertLoad.Submitted,
                     upsertedDocuments: upsertLoad.Accepted,
                     skippedUpserts: upsertLoad.Skipped,
@@ -814,31 +814,6 @@ public sealed class SiftIndex : ISiftIndex
             return new UpdateStats(pendingStats, watch.ElapsedMilliseconds, committedIdentity);
         }
     }
-
-    private sealed class PendingUpdateStats(
-        int submittedUpserts,
-        int upsertedDocuments,
-        int skippedUpserts,
-        int rejectedUpserts,
-        int deletedDocuments,
-        int publishedSegments,
-        long submittedBytes,
-        long contentBytes,
-        long skippedBytes,
-        long rejectedBytes,
-        RejectedDocument[] rejectedDocumentDetails)
-        : UpdateCommitStats(
-            submittedUpserts,
-            upsertedDocuments,
-            skippedUpserts,
-            rejectedUpserts,
-            deletedDocuments,
-            publishedSegments,
-            submittedBytes,
-            contentBytes,
-            skippedBytes,
-            rejectedBytes,
-            rejectedDocumentDetails);
 
     private static IndexIdentity CreateIndexIdentity(CorpusManifest manifest)
     {

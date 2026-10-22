@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Removed an unused prepared-text ASCII classification and private statistics/
+  snapshot forwarding types. Public statistics and snapshot lifetimes are unchanged.
 - Generation leases decode directly into their final typed ID array, removing an
   intermediate allocation and conversion pass. Lease semantics are unchanged.
 - Stopped generating the unused ASCII-folded path trigram index and removed its

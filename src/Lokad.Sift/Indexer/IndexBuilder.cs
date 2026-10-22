@@ -104,7 +104,7 @@ internal sealed class IndexBuilder
                 }).ConfigureAwait(false);
 
             var rejectedDocuments = load.RejectedDocuments.ToArray();
-            pendingStats = new PendingBuildStats(
+            pendingStats = new BuildCommitStats(
                 submittedDocuments: load.Submitted,
                 indexedDocuments: load.Accepted,
                 rejectedDocuments: load.Rejected,
@@ -139,25 +139,6 @@ internal sealed class IndexBuilder
                 new ContentRevision(1),
                 generation));
     }
-
-    private sealed class PendingBuildStats(
-        int submittedDocuments,
-        int indexedDocuments,
-        int rejectedDocuments,
-        int segmentCount,
-        long submittedBytes,
-        long contentBytes,
-        long rejectedBytes,
-        RejectedDocument[] rejectedDocumentDetails)
-        : BuildCommitStats(
-            submittedDocuments,
-            indexedDocuments,
-            rejectedDocuments,
-            segmentCount,
-            submittedBytes,
-            contentBytes,
-            rejectedBytes,
-            rejectedDocumentDetails);
 
     public static StreamedDocuments StreamDocuments(
         IDocumentSource source,

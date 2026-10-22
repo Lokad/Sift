@@ -115,8 +115,6 @@ internal sealed class PreparedSearchText(string text, byte[] utf8Bytes)
 {
     public string Text { get; } = text;
     public byte[] Utf8Bytes { get; } = utf8Bytes;
-    public bool IsAscii { get; } =
-        utf8Bytes.AsSpan().IndexOfAnyExceptInRange((byte)0x00, (byte)0x7F) < 0;
 
     public static PreparedSearchText[] CreateMany(string[] values)
     {
