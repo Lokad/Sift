@@ -871,6 +871,8 @@ internal sealed unsafe partial class MappedSegment : IDisposable
         var contentBlob = GetRegion(SegmentRegionId.ContentBlob);
         var lineIndexBlob = GetRegion(SegmentRegionId.LineIndexBlob);
         string? previousPath = null;
+        var nonAsciiDocuments = 0;
+        long nonAsciiBytes = 0;
         for (uint ordinal = 0; ordinal < DocumentCount; ordinal++)
         {
             if ((ordinal & 0xFFF) == 0)
@@ -911,11 +913,27 @@ internal sealed unsafe partial class MappedSegment : IDisposable
             }
 
             previousPath = path;
-            LineMap.Validate(
+            var isAscii = LineMap.Validate(
                 GetEncodedLineIndexBytes(document),
                 GetContentBytes(document),
                 document.LineCount,
                 cancellationToken);
+            if (isAscii != ((document.Flags & SegmentDocumentFlags.Ascii) != 0))
+                throw new InvalidDataException($"Sift ASCII flag does not match content for document ordinal {ordinal}.");
+            if (!isAscii)
+            {
+                nonAsciiDocuments++;
+                nonAsciiBytes += document.ContentLength;
+            }
+        }
+
+        // The oldest v3 stats prefix has no exact counters and intentionally
+        // reports a conservative all-documents estimate.
+        if (GetRegion(SegmentRegionId.Stats).Length != SegmentFormat.PreviousStatsPrefixLength)
+        {
+            var stored = GetNonAsciiDocumentStats();
+            if (stored.DocumentCount != nonAsciiDocuments || stored.ContentBytes != nonAsciiBytes)
+                throw new InvalidDataException("Sift non-ASCII statistics do not match document content.");
         }
     }
 

@@ -45,7 +45,7 @@ internal static class LineMap
         }
     }
 
-    public static void Validate(
+    public static bool Validate(
         ReadOnlySpan<byte> encoded,
         ReadOnlySpan<byte> content,
         int expectedLineCount,
@@ -71,6 +71,7 @@ internal static class LineMap
         }
 
         var countedLines = 1;
+        var isAscii = true;
         for (var i = 0; i < content.Length; i++)
         {
             if ((i & 0xFFF) == 0)
@@ -79,6 +80,7 @@ internal static class LineMap
             }
 
             countedLines += content[i] == (byte)'\n' ? 1 : 0;
+            isAscii &= content[i] < 0x80;
         }
 
         if (countedLines != lineCount)
@@ -115,6 +117,7 @@ internal static class LineMap
 
             previousStart = (int)start;
         }
+        return isAscii;
     }
 
     public static int GetLineCount(ReadOnlySpan<byte> encoded)

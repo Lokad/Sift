@@ -8,6 +8,24 @@ namespace Lokad.Sift.Tests;
 public sealed class StorageCompatibilityTests
 {
     [Theory]
+    [InlineData(1032)]
+    [InlineData(1036)]
+    public async Task ExactLegacyUnicodeTotalsMustAgreeWithDocumentContent(int fieldOffset)
+    {
+        using var fixture = CreateFixture();
+        var path = await InstallReleasedPack(fixture, shortStats: false);
+        var bytes = File.ReadAllBytes(path);
+        var (offset, length) = StatsRegion(bytes);
+        if (fieldOffset == 1032) BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset + fieldOffset), 0);
+        else BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(offset + fieldOffset), 0);
+        UpdateStatsChecksum(bytes, offset, length);
+        File.WriteAllBytes(path, bytes);
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => index.Validate());
+        Assert.True(index.RequiresRebuild);
+    }
+
+    [Theory]
     [InlineData(3, false)]
     [InlineData(3, true)]
     [InlineData(4, false)]

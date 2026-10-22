@@ -12,6 +12,59 @@ namespace Lokad.Sift.Tests;
 [Collection("ProcessMetrics")]
 public sealed class StorageIntegrityTests
 {
+    [Theory]
+    [InlineData("Kelvin\n", false)]
+    [InlineData("Kelvin\n", true)]
+    [InlineData("alpha\n", false)]
+    [InlineData("alpha\n", true)]
+    [InlineData("", false)]
+    [InlineData("", true)]
+    public async Task ValidationRejectsAsciiFlagsThatDisagreeWithContent(string text, bool deleted)
+    {
+        using var fixture = new CorpusFixture(("a.txt", text));
+        using (var index = new SiftIndex(fixture.CorpusPath))
+        {
+            await index.Build(fixture.CreateSource());
+            await index.Validate();
+            if (deleted) await index.Update(new InMemoryDocumentSource([]), [new DocumentKey("a.txt")]);
+            else if (text.StartsWith('K'))
+            {
+                using var snapshot = index.OpenSnapshot();
+                Assert.Equal(1, snapshot.Search(new SearchQuery("k+", PatternMode.Regex, CaseMode.Insensitive), new(), new HitBuffer()).HitsReturned);
+            }
+        }
+        var path = Directory.GetFiles(Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+        RewriteChecksummedRegion(path, SegmentRegionId.DocumentTable, static (region, _) =>
+        {
+            var flags = BinaryPrimitives.ReadUInt16LittleEndian(region[40..]);
+            BinaryPrimitives.WriteUInt16LittleEndian(region[40..], (ushort)(flags ^ (ushort)SegmentDocumentFlags.Ascii));
+        });
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+        Assert.Contains("ASCII", failure.Message);
+        Assert.True(reopened.RequiresRebuild);
+        Assert.Equal(IndexValidationState.Failed, reopened.GetValidationStats().State);
+        Assert.Throws<InvalidDataException>(() => reopened.OpenSnapshot());
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(12)]
+    public async Task ValidationRejectsInRangeUnicodeTotalsThatDisagreeWithContent(int offset)
+    {
+        using var fixture = new CorpusFixture(("a.txt", "Kelvin\n"));
+        using (var index = new SiftIndex(fixture.CorpusPath)) await index.Build(fixture.CreateSource());
+        var path = Directory.GetFiles(Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+        RewriteChecksummedRegion(path, SegmentRegionId.Stats, (region, _) =>
+        {
+            if (offset == 8) BinaryPrimitives.WriteInt32LittleEndian(region[offset..], 0);
+            else BinaryPrimitives.WriteInt64LittleEndian(region[offset..], 0);
+        });
+        using var reopened = new SiftIndex(fixture.CorpusPath);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.Validate());
+        Assert.True(reopened.RequiresRebuild);
+    }
+
     [Fact]
     public async Task OlderManifestRefreshCannotReplaceNewerStoredGeneration()
     {
@@ -1661,7 +1714,8 @@ public sealed class StorageIntegrityTests
             Content = bytes,
             LineCount = lineCount,
             EncodedLineIndex = LineMap.EncodeLineIndex(bytes, lineCount),
-            Flags = 0,
+            Flags = SegmentDocumentFlags.Utf8Text |
+                (bytes.All(static value => value < 0x80) ? SegmentDocumentFlags.Ascii : 0),
             MTimeUtcTicks = 0,
             ContentHash64 = Hashing.Fnv1A64(bytes)
         };
