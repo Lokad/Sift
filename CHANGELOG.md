@@ -4,6 +4,8 @@
 
 ### Changed
 
+- UTF-16 match offsets use the runtime's UTF-8 byte counter on consecutive spans,
+  retaining monotonic projection and split-surrogate boundary behavior.
 - Well-formed case-sensitive Unicode literals use the existing UTF-8 byte verifier
   without decoding whole documents. Unicode case folding, word boundaries and
   lone-surrogate literals retain their existing verification semantics.

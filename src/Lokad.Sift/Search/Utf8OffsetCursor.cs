@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Lokad.Sift.Search;
 
 internal struct Utf8OffsetCursor
@@ -12,31 +14,17 @@ internal struct Utf8OffsetCursor
             throw new InvalidOperationException("Character offsets must be mapped in source order.");
         }
 
-        while (_charIndex < targetCharIndex)
+        if (targetCharIndex > 0 && targetCharIndex < text.Length &&
+            char.IsHighSurrogate(text[targetCharIndex - 1]) && char.IsLowSurrogate(text[targetCharIndex]))
         {
-            var current = text[_charIndex];
-            if (char.IsHighSurrogate(current) &&
-                _charIndex + 1 < text.Length &&
-                char.IsLowSurrogate(text[_charIndex + 1]))
-            {
-                if (_charIndex + 1 == targetCharIndex)
-                {
-                    // A UTF-16 match may split a scalar; both halves still share its UTF-8 boundary.
-                    return _byteOffset;
-                }
+            // Both UTF-16 halves project onto the scalar's UTF-8 start.
+            targetCharIndex--;
+        }
 
-                _byteOffset += 4;
-                _charIndex += 2;
-                continue;
-            }
-
-            _byteOffset += current switch
-            {
-                <= '\u007F' => 1,
-                <= '\u07FF' => 2,
-                _ => 3
-            };
-            _charIndex++;
+        if (targetCharIndex != _charIndex)
+        {
+            _byteOffset += Encoding.UTF8.GetByteCount(text[_charIndex..targetCharIndex]);
+            _charIndex = targetCharIndex;
         }
 
         return _byteOffset;

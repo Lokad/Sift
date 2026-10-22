@@ -220,6 +220,38 @@ public sealed class RegexEnumerationTests
         Assert.Equal(1, collector.Count);
     }
 
+    [Theory]
+    [InlineData(@"(?:é|[\uD800-\uDFFF]|z)")]
+    [InlineData(@"(?=.)")]
+    public async Task OffsetProjectionPreservesSurrogateBoundariesAfterLongPrefixes(string pattern)
+    {
+        var text = new string('x', 8192) + " é😀z café";
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/a.txt", text), ("other/b.txt", text)]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery(pattern, PatternMode.Regex, CaseMode.Sensitive);
+        var filter = new PathFilter { PathPrefix = "src/" };
+        var expected = ExpectedRanges(text, query);
+        var hits = new HitBuffer();
+        var bytes = Encoding.UTF8.GetBytes(text);
+
+        var stats = snapshot.Search(query, filter, hits);
+
+        Assert.Equal(SearchStopReason.None, stats.StopReason);
+        Assert.Equal(expected, hits.Hits.Select(hit => (hit.StartByte, hit.EndByte)));
+        foreach (var hit in hits.Hits)
+        {
+            var materialized = snapshot.Materialize(hit, 0, 0);
+            Assert.Equal("src/a.txt", materialized.Path);
+            Assert.Equal(Encoding.UTF8.GetString(bytes.AsSpan(hit.StartByte, hit.EndByte - hit.StartByte)),
+                materialized.MatchText);
+        }
+        var limited = new HitBuffer();
+        var limitedStats = snapshot.Search(query with { MaxHits = 3 }, filter, limited);
+        Assert.Equal(SearchStopReason.MaxHits, limitedStats.StopReason);
+        Assert.Equal(expected.Take(3), limited.Hits.Select(hit => (hit.StartByte, hit.EndByte)));
+    }
+
     private sealed class CallbackCollector(Func<bool> callback) : IHitCollector
     {
         public int Count { get; private set; }
