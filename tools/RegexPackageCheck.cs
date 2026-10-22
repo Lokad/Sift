@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -114,10 +115,58 @@ internal static class RegexPackageCheck
         await VerifyCollectorFailurePropagation(engine);
         await VerifyMutationCallbackFailures(engine);
         await VerifyDeletionCollectionFailures(engine);
+        await VerifyPersistedMetadataValidation(engine);
         await VerifyMutationProbeReentrancy(engine);
         await VerifyOverlayExportReentrancy(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyPersistedMetadataValidation(ISiftRegexEngine? engine)
+    {
+        var temporary = Directory.CreateTempSubdirectory("sift-validation-check-");
+        try
+        {
+            foreach (var corruptFlag in new[] { false, true })
+            {
+                var root = Path.Combine(temporary.FullName, corruptFlag ? "flag" : "tail");
+                var options = new SiftOptions { RegexEngine = engine, MinimumFreeBytesAfterMutation = 0 };
+                using (var index = new SiftIndex(root, options))
+                {
+                    await index.Build(new Documents([("a.txt", "Kelvin\n")]));
+                    await index.Validate();
+                    using var snapshot = index.OpenSnapshot();
+                    Require(snapshot.Search(new SearchQuery("k+", PatternMode.Regex, CaseMode.Insensitive), new(), new Hits()).HitsReturned == 1,
+                        "Valid Unicode metadata changed regex results.");
+                }
+                if (corruptFlag)
+                {
+                    var path = Directory.GetFiles(Path.Combine(root, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+                    var bytes = File.ReadAllBytes(path);
+                    var directory = checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(44)));
+                    var offset = checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(directory + 4)));
+                    var length = checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(directory + 12)));
+                    var flags = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset + 40));
+                    BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 40), (ushort)(flags | 2));
+                    ulong hash = 14695981039346656037UL;
+                    foreach (var value in bytes.AsSpan(offset, length)) { hash ^= value; hash *= 1099511628211UL; }
+                    var checksum = checked((int)BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(52)));
+                    BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(checksum + 4), hash);
+                    File.WriteAllBytes(path, bytes);
+                }
+                else
+                {
+                    using var stream = new FileStream(Path.Combine(root, "manifest.bin"), FileMode.Append);
+                    stream.WriteByte(0);
+                }
+                using var reopened = new SiftIndex(root, options);
+                var rejected = false;
+                try { await reopened.Validate(); }
+                catch (InvalidDataException) { rejected = true; }
+                Require(rejected && reopened.RequiresRebuild, "Persisted metadata inconsistency passed full validation.");
+            }
+        }
+        finally { temporary.Delete(recursive: true); }
     }
 
     private static async Task VerifyOverlayExportReentrancy(ISiftRegexEngine? engine)

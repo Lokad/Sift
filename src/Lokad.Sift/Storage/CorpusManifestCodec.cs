@@ -14,9 +14,9 @@ internal static class CorpusManifestCodec
         }
 
         var length = checked((int)stream.Length);
-        var bytes = GC.AllocateUninitializedArray<byte>(length);
-        stream.ReadExactly(bytes);
-        var span = bytes.AsSpan();
+        Span<byte> header = stackalloc byte[SegmentFormat.ManifestHeaderSize];
+        stream.ReadExactly(header[..SegmentFormat.LegacyManifestHeaderSize]);
+        ReadOnlySpan<byte> span = header[..SegmentFormat.LegacyManifestHeaderSize];
         if (LittleEndianCodec.ReadUInt64(span) != SegmentFormat.ManifestMagic)
         {
             throw new InvalidDataException("Invalid Sift manifest magic.");
@@ -33,10 +33,13 @@ internal static class CorpusManifestCodec
         var expectedHeaderSize = version == SegmentFormat.ManifestFormatVersion
             ? SegmentFormat.ManifestHeaderSize
             : SegmentFormat.LegacyManifestHeaderSize;
-        if (bytes.Length < expectedHeaderSize + sizeof(ulong))
+        if (length < expectedHeaderSize + sizeof(ulong))
         {
             throw new InvalidDataException("Invalid Sift manifest length.");
         }
+        if (expectedHeaderSize > SegmentFormat.LegacyManifestHeaderSize)
+            stream.ReadExactly(header[SegmentFormat.LegacyManifestHeaderSize..expectedHeaderSize]);
+        span = header[..expectedHeaderSize];
 
         var corpusId = new CorpusId(new Guid(span.Slice(12, 16)));
         var generation = new StorageGeneration(LittleEndianCodec.ReadUInt64(span[28..]));
@@ -59,23 +62,17 @@ internal static class CorpusManifestCodec
             throw new InvalidDataException("Invalid Sift manifest segment count.");
         }
 
-        ValidateManifestBounds(segmentTableOffset, segmentTableLength, bytes.Length, "segment table");
+        ValidateManifestBounds(segmentTableOffset, segmentTableLength, length, "segment table");
         if (version != SegmentFormat.ManifestFormatVersion)
         {
             metadataOffset = segmentTableOffset + segmentTableLength;
         }
 
-        ValidateManifestBounds(metadataOffset, metadataLength, bytes.Length, "commit metadata");
-        ValidateManifestBounds(checksumOffset, checksumLength, bytes.Length, "checksum region");
+        ValidateManifestBounds(metadataOffset, metadataLength, length, "commit metadata");
+        ValidateManifestBounds(checksumOffset, checksumLength, length, "checksum region");
         if (checksumLength != 8)
         {
             throw new InvalidDataException("Invalid Sift manifest checksum length.");
-        }
-
-        var expectedChecksum = LittleEndianCodec.ReadUInt64(span.Slice(checksumOffset, checksumLength));
-        if (expectedChecksum != Hashing.Fnv1A64(span.Slice(0, checksumOffset)))
-        {
-            throw new InvalidDataException("Invalid Sift manifest checksum.");
         }
 
         if (segmentTableOffset != expectedHeaderSize)
@@ -89,6 +86,8 @@ internal static class CorpusManifestCodec
         {
             throw new InvalidDataException("Invalid Sift manifest commit metadata region.");
         }
+        if (checksumOffset != length - checksumLength)
+            throw new InvalidDataException("Unexpected trailing bytes in Sift manifest.");
 
         var entryHeaderSize = version is SegmentFormat.ManifestFormatVersion or SegmentFormat.PreviousManifestFormatVersion
             ? SegmentFormat.ManifestEntryHeaderSize
@@ -97,6 +96,16 @@ internal static class CorpusManifestCodec
         {
             throw new InvalidDataException("Invalid Sift manifest segment count.");
         }
+
+        // Admit the complete versioned layout before allocating a file-sized
+        // buffer. Valid legacy manifests have no unchecked extension at EOF.
+        var bytes = GC.AllocateUninitializedArray<byte>(length);
+        header[..expectedHeaderSize].CopyTo(bytes);
+        stream.ReadExactly(bytes.AsSpan(expectedHeaderSize));
+        span = bytes;
+        var expectedChecksum = LittleEndianCodec.ReadUInt64(span.Slice(checksumOffset, checksumLength));
+        if (expectedChecksum != Hashing.Fnv1A64(span.Slice(0, checksumOffset)))
+            throw new InvalidDataException("Invalid Sift manifest checksum.");
 
         var segments = new SegmentManifestEntry[count];
         var segmentIds = new HashSet<SegmentId>();
