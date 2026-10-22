@@ -8,6 +8,96 @@ namespace Lokad.Sift.Tests;
 public sealed class CliSmokeTests
 {
     [Fact]
+    public async Task OversizedFilesBeyondArrayCapacityAreReportedAndRemoveStaleText()
+    {
+        using var fixture = new CliCorpusFixture();
+        Directory.CreateDirectory(fixture.InputPath);
+        var path = Path.Combine(fixture.InputPath, "large.txt");
+        File.WriteAllText(path, "stale needle");
+        Assert.Equal(0, RunCli(["build", fixture.CorpusPath, fixture.InputPath]).ExitCode);
+        using var index = new SiftIndex(fixture.CorpusPath);
+        using var retained = index.OpenSnapshot();
+        if (OperatingSystem.IsWindows())
+        {
+            var sparse = RunProcess("fsutil", ["sparse", "setflag", path]);
+            Assert.True(sparse.ExitCode == 0, sparse.StandardError + sparse.StandardOutput);
+            Assert.True(File.GetAttributes(path).HasFlag(FileAttributes.SparseFile));
+        }
+        using (var file = File.OpenWrite(path)) file.SetLength(2147483648L);
+        var update = RunCli(["update", fixture.CorpusPath, fixture.InputPath]);
+        Assert.True(update.ExitCode == 0, update.StandardError);
+        Assert.Contains("rejectedUpserts=1 deletions=1", update.StandardOutput);
+        Assert.Contains("submittedBytes=2147483648", update.StandardOutput);
+        Assert.Contains("rejectedBytes=2147483648", update.StandardOutput);
+        using var fresh = index.OpenSnapshot();
+        Assert.False(fresh.TryGetDocumentBytes(new DocumentKey("large.txt"), out _));
+        Assert.True(retained.TryGetDocumentBytes(new DocumentKey("large.txt"), out var old));
+        Assert.Equal("stale needle", Encoding.UTF8.GetString(old.Span));
+        var build = RunCli(["build", fixture.CorpusPath, fixture.InputPath]);
+        Assert.True(build.ExitCode == 0, build.StandardError);
+        Assert.Contains("submitted=1 indexed=0 rejected=1", build.StandardOutput);
+        Assert.Contains("rejectedBytes=2147483648", build.StandardOutput);
+        await index.Validate();
+    }
+
+    [Theory]
+    [InlineData("corpus")]
+    [InlineData("cycle")]
+    [InlineData("external")]
+    public void DirectoryLinksAreNotTraversed(string target)
+    {
+        using var fixture = new CliCorpusFixture();
+        Directory.CreateDirectory(fixture.InputPath);
+        File.WriteAllText(Path.Combine(fixture.InputPath, "a.txt"), "needle");
+        var corpus = Path.Combine(fixture.InputPath, ".sift");
+        Directory.CreateDirectory(corpus);
+        var external = Path.Combine(fixture.CorpusPath, "outside");
+        Directory.CreateDirectory(external);
+        File.WriteAllText(Path.Combine(external, "outside.txt"), "needle");
+        var link = Path.Combine(fixture.InputPath, "alias");
+        var destination = target == "corpus" ? corpus : target == "cycle" ? fixture.InputPath : external;
+        CreateDirectoryLink(link, destination);
+        try
+        {
+            var build = RunCli(["build", corpus, fixture.InputPath]);
+            Assert.True(build.ExitCode == 0, build.StandardError);
+            Assert.Contains("submitted=1 indexed=1 rejected=0", build.StandardOutput);
+            var update = RunCli(["update", corpus, fixture.InputPath]);
+            Assert.True(update.ExitCode == 0, update.StandardError);
+            Assert.Contains("submittedUpserts=1", update.StandardOutput);
+            Assert.Contains("skippedUpserts=1 rejectedUpserts=0", update.StandardOutput);
+        }
+        finally { Directory.Delete(link); }
+    }
+
+    [Theory]
+    [InlineData("build")]
+    [InlineData("update")]
+    public void ExplicitLinkedInputRootIsRejectedBeforeOpeningCorpus(string command)
+    {
+        using var fixture = new CliCorpusFixture();
+        Directory.CreateDirectory(fixture.InputPath);
+        var link = fixture.InputPath + "-link";
+        CreateDirectoryLink(link, fixture.InputPath);
+        try
+        {
+            var result = RunCli([command, fixture.CorpusPath, link]);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("must not be a symbolic link or junction", result.StandardError);
+            Assert.False(Directory.Exists(fixture.CorpusPath));
+        }
+        finally { Directory.Delete(link); }
+    }
+
+    private static void CreateDirectoryLink(string link, string destination)
+    {
+        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(link, destination); return; }
+        var junction = RunProcess("pwsh", ["-NoProfile", "-NonInteractive", "-Command",
+            $"New-Item -ItemType Junction -Path '{link.Replace("'", "''")}' -Target '{destination.Replace("'", "''")}' -ErrorAction Stop | Out-Null"]);
+        Assert.True(junction.ExitCode == 0, junction.StandardError);
+    }
+
+    [Fact]
     public async Task ContextIsPrintedPerHitAndRespectsTruncation()
     {
         var before = new string('é', 150000);
@@ -230,23 +320,32 @@ public sealed class CliSmokeTests
     {
         var repoRoot = GetRepositoryRoot();
         var cliAssembly = GetCliAssemblyPath(repoRoot);
-        var startInfo = new ProcessStartInfo("dotnet")
+        return RunProcess("dotnet", [cliAssembly, .. arguments], workingDirectory ?? repoRoot);
+    }
+
+    private static CliResult RunProcess(string command, string[] arguments, string? workingDirectory = null)
+    {
+        var startInfo = new ProcessStartInfo(command)
         {
-            WorkingDirectory = workingDirectory ?? repoRoot,
+            WorkingDirectory = workingDirectory ?? GetRepositoryRoot(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false
         };
-        startInfo.ArgumentList.Add(cliAssembly);
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start CLI process.");
-        var standardOutput = process.StandardOutput.ReadToEnd();
-        var standardError = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return new CliResult(process.ExitCode, standardOutput, standardError);
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30000))
+        {
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit();
+            throw new TimeoutException("CLI process did not finish within 30 seconds.");
+        }
+        return new CliResult(process.ExitCode, standardOutput.GetAwaiter().GetResult(), standardError.GetAwaiter().GetResult());
     }
 
     private static string GetRepositoryRoot()

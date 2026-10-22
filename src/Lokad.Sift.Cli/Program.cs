@@ -29,28 +29,34 @@ var corpusPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
 var inputRoot = command is "build" or "update"
     ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(args.Length >= 3 ? args[2] : Environment.CurrentDirectory))
     : null;
+if (inputRoot is not null && (File.GetAttributes(inputRoot) & FileAttributes.ReparsePoint) != 0)
+{
+    Console.Error.WriteLine("The input directory must not be a symbolic link or junction.");
+    return 1;
+}
 if (string.Equals(corpusPath, inputRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
 {
     Console.Error.WriteLine("The corpus directory must differ from the input directory.");
     return 1;
 }
-using var index = new SiftIndex(corpusPath);
+var siftOptions = new SiftOptions();
+using var index = new SiftIndex(corpusPath, siftOptions);
 
 switch (command)
 {
     case "build":
         {
-            using var source = new FileSystemDocumentSource(inputRoot!, corpusPath);
+            using var source = new FileSystemDocumentSource(inputRoot!, corpusPath, siftOptions.MaxDocumentBytes);
             var buildStats = await index.Build(source);
-            Console.WriteLine($"submitted={buildStats.SubmittedDocuments} indexed={buildStats.IndexedDocuments} rejected={buildStats.RejectedDocuments} submittedBytes={buildStats.SubmittedBytes} bytes={buildStats.ContentBytes} rejectedBytes={buildStats.RejectedBytes} ms={buildStats.ElapsedMilliseconds}");
+            Console.WriteLine($"submitted={buildStats.SubmittedDocuments} indexed={buildStats.IndexedDocuments} rejected={buildStats.RejectedDocuments} submittedBytes={buildStats.SubmittedBytes + source.UnmaterializedRejectedBytes} bytes={buildStats.ContentBytes} rejectedBytes={buildStats.RejectedBytes + source.UnmaterializedRejectedBytes} ms={buildStats.ElapsedMilliseconds}");
             return 0;
         }
     case "update":
         {
             var deletions = args.Skip(3).Select(static path => new DocumentKey(path)).ToArray();
-            using var source = new FileSystemDocumentSource(inputRoot!, corpusPath);
+            using var source = new FileSystemDocumentSource(inputRoot!, corpusPath, siftOptions.MaxDocumentBytes);
             var update = await index.Update(source, deletions, new UpdateOptions(RejectedUpsertPolicy.DeleteExisting));
-            Console.WriteLine($"submittedUpserts={update.SubmittedUpserts} upserts={update.UpsertedDocuments} skippedUpserts={update.SkippedUpserts} rejectedUpserts={update.RejectedUpserts} deletions={update.DeletedDocuments} segments={update.PublishedSegments} submittedBytes={update.SubmittedBytes} bytes={update.ContentBytes} skippedBytes={update.SkippedBytes} rejectedBytes={update.RejectedBytes} ms={update.ElapsedMilliseconds}");
+            Console.WriteLine($"submittedUpserts={update.SubmittedUpserts} upserts={update.UpsertedDocuments} skippedUpserts={update.SkippedUpserts} rejectedUpserts={update.RejectedUpserts} deletions={update.DeletedDocuments} segments={update.PublishedSegments} submittedBytes={update.SubmittedBytes + source.UnmaterializedRejectedBytes} bytes={update.ContentBytes} skippedBytes={update.SkippedBytes} rejectedBytes={update.RejectedBytes + source.UnmaterializedRejectedBytes} ms={update.ElapsedMilliseconds}");
             return 0;
         }
     case "search":
@@ -281,52 +287,6 @@ internal readonly record struct SearchCliOptions(
     PathFilter Filter,
     int ContextBefore,
     int ContextAfter);
-
-internal sealed class FileSystemDocumentSource : IDocumentSource, IDisposable
-{
-    private readonly IEnumerator<string> _files;
-    private readonly string _root;
-
-    public FileSystemDocumentSource(string root, string corpusPath)
-    {
-        _root = root;
-        _files = EnumerateFiles(root, corpusPath).GetEnumerator();
-    }
-
-    private static IEnumerable<string> EnumerateFiles(string root, string corpusPath)
-    {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var pending = new Stack<string>();
-        pending.Push(root);
-        while (pending.TryPop(out var directory))
-        {
-            foreach (var file in Directory.EnumerateFiles(directory)) yield return file;
-            foreach (var child in Directory.EnumerateDirectories(directory))
-            {
-                if (!string.Equals(child, corpusPath, comparison)) pending.Push(child);
-            }
-        }
-    }
-
-    public void Dispose() => _files.Dispose();
-
-    public bool TryReadNext(out SubmittedDocument document)
-    {
-        if (!_files.MoveNext())
-        {
-            document = default;
-            return false;
-        }
-
-        var file = _files.Current;
-        document = new SubmittedDocument(
-            Path.GetRelativePath(_root, file).Replace('\\', '/'),
-            File.ReadAllBytes(file),
-            File.GetLastWriteTimeUtc(file),
-            DocumentContentLifetime.UntilOperationCompletes);
-        return true;
-    }
-}
 
 internal sealed class ConsoleCollector : IHitCollector
 {

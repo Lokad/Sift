@@ -16,6 +16,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\examples\Utf8RegexAdapter.cs" Link="Adapters\Utf8RegexAdapter.cs" />
+    <Compile Include="..\..\src\Lokad.Sift.Cli\FileSystemDocumentSource.cs" Link="Cli\FileSystemDocumentSource.cs" />
     <EmbeddedResource Include="Fixtures\segment-v3.pack" />
     <EmbeddedResource Include="Fixtures\segment-v4.pack" />
   </ItemGroup>
