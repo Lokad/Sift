@@ -52,7 +52,7 @@ internal sealed class SearchPlanExplainer(
             if (query.Pattern.Length > 0 && segmentPlan.Scope.Count > 0)
             {
                 needsUnicodeDecode |= preparedQuery.Literal is { } literal
-                    ? !literal.CanUseByteVerifier(query, segmentPlan.Scope.NonAsciiDocuments == 0)
+                    ? !literal.CanUseByteVerifier(query, resolvedCaseMode, segmentPlan.Scope.NonAsciiDocuments == 0)
                     : !regexPlan.UsesUtf8Regex || segmentPlan.Scope.NonAsciiDocuments > 0;
             }
 

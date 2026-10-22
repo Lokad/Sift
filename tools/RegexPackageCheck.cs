@@ -687,10 +687,12 @@ internal static class RegexPackageCheck
             "Context clipping discarded an embedded carriage return.");
         foreach (var query in new[] { new SearchQuery("café", PatternMode.Literal, CaseMode.Sensitive),
             new SearchQuery(@"caf\u00E9", PatternMode.Regex, CaseMode.Sensitive),
+            new SearchQuery("CAFÉ", PatternMode.Literal, CaseMode.Insensitive),
             new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { WholeWord = true } })
         {
             var stats = snapshot.Search(query, new(), new Hits());
-            Require(stats.HitsReturned > 0 && stats.DecodedChars > 0 && snapshot.Explain(query, new()).NeedsUnicodeDecode,
+            var decodes = query.WholeWord || query.CaseMode == CaseMode.Insensitive;
+            Require(stats.HitsReturned > 0 && (stats.DecodedChars > 0) == decodes && snapshot.Explain(query, new()).NeedsUnicodeDecode == decodes,
                 "Decode diagnostic disagrees with Unicode literal verification.");
         }
         var ascii = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive)

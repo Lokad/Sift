@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Well-formed case-sensitive Unicode literals use the existing UTF-8 byte verifier
+  without decoding whole documents. Unicode case folding, word boundaries and
+  lone-surrogate literals retain their existing verification semantics.
 - Removed an unused prepared-text ASCII classification and private statistics/
   snapshot forwarding types. Public statistics and snapshot lifetimes are unchanged.
 - Generation leases decode directly into their final typed ID array, removing an

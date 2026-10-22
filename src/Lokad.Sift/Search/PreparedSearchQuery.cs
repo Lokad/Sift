@@ -83,8 +83,11 @@ internal sealed class PreparedLiteralQuery(
     public int[]? AsciiPrefixTable { get; } = asciiPrefixTable;
     public bool IsAscii { get; } = isAscii;
 
-    public bool CanUseByteVerifier(SearchQuery query, bool asciiDocument) =>
-        IsAscii && (!query.WholeWord || query.WholeLine || asciiDocument);
+    // Valid UTF-8 preserves ordinal scalar matches. Folding and Unicode word
+    // boundaries still need the decoded-text path; lone surrogates have no needle.
+    public bool CanUseByteVerifier(SearchQuery query, CaseMode resolvedCaseMode, bool asciiDocument) =>
+        Needle is not null && (IsAscii || resolvedCaseMode == CaseMode.Sensitive) &&
+        (!query.WholeWord || query.WholeLine || asciiDocument);
 
     public static PreparedLiteralQuery? Create(
         SearchQuery query,

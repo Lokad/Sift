@@ -1337,11 +1337,11 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         var pattern = preparedLiteral.Text;
         var needle = preparedLiteral.Needle;
         var asciiDocument = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
-        var useByteVerifier = preparedLiteral.CanUseByteVerifier(query, asciiDocument);
+        var useByteVerifier = preparedLiteral.CanUseByteVerifier(query, resolvedCaseMode, asciiDocument);
 
         if (resolvedCaseMode == CaseMode.Sensitive && useByteVerifier)
         {
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, watch, query.MaxElapsedMilliseconds, ref hitsReturned, ref stopReason);
+            SearchByteLiteralDocument(segment, document, encodedLineIndex, contentBytes, needle, [], query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: true, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, watch, query.MaxElapsedMilliseconds, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1349,7 +1349,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         {
             var loweredNeedle = preparedLiteral.LoweredAsciiNeedle!;
             var prefixTable = preparedLiteral.AsciiPrefixTable!;
-            SearchAsciiLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, watch, query.MaxElapsedMilliseconds, ref hitsReturned, ref stopReason);
+            SearchByteLiteralDocument(segment, document, encodedLineIndex, contentBytes, loweredNeedle, prefixTable, query.WholeWord && asciiDocument, query.WholeLine, caseSensitive: false, allowOverlaps: query.PatternMode == PatternMode.Literal, hitLimit, collector, cancellationToken, watch, query.MaxElapsedMilliseconds, ref hitsReturned, ref stopReason);
             return;
         }
 
@@ -1417,7 +1417,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
-    private static void SearchAsciiLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, bool allowOverlaps, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds, ref int hitsReturned, ref SearchStopReason stopReason)
+    private static void SearchByteLiteralDocument(MappedSegment segment, SegmentDocument document, ReadOnlySpan<byte> encodedLineIndex, ReadOnlySpan<byte> contentBytes, ReadOnlySpan<byte> needle, int[] prefixTable, bool wholeWord, bool wholeLine, bool caseSensitive, bool allowOverlaps, int hitLimit, IHitCollector collector, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds, ref int hitsReturned, ref SearchStopReason stopReason)
     {
         var offset = 0;
         while (offset <= contentBytes.Length - needle.Length)

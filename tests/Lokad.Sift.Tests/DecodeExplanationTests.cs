@@ -20,8 +20,9 @@ public sealed class DecodeExplanationTests
         var plan = snapshot.Explain(query, new());
 
         Assert.Equal(1, stats.HitsReturned);
-        Assert.Equal(11, stats.DecodedChars);
-        Assert.True(plan.NeedsUnicodeDecode);
+        var decodes = caseMode != CaseMode.Sensitive;
+        Assert.Equal(decodes ? 11 : 0, stats.DecodedChars);
+        Assert.Equal(decodes, plan.NeedsUnicodeDecode);
         Assert.Equal(mode == PatternMode.Literal || caseMode == CaseMode.Sensitive, plan.CanUseLiteralVerifier);
     }
 

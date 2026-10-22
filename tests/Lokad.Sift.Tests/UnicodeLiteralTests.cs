@@ -12,11 +12,11 @@ public sealed class UnicodeLiteralTests
     {
         (string, string)[] texts = [("a.txt", "😀x😀"), ("b.txt", "😀😀😀"),
             ("c.txt", "A😀 a😀 😀B 😀b"), ("d.txt", "ééé alpha"),
-            ("replacement.txt", "�x�"), ("empty.txt", "")];
+            ("uppercase.txt", "ÉéÉ CAFÉ 𐐀𐐨"), ("replacement.txt", "�x�"), ("empty.txt", "")];
         // Construct malformed UTF-16 at runtime; attribute strings can replace it.
         var malformed = new[] { "\uD83D", "\uDE00", "x\uD83D", "\uDE00x", "A\uD83D",
             "\uDE00B", "\uDE00\uD83D", "\uDE00😀\uD83D", "\uD83D\uD83D" };
-        var patterns = malformed.Concat(["😀", "😀😀", "éé", "alpha", "x", "�"]);
+        var patterns = malformed.Concat(["😀", "😀😀", "éé", "É", "CAFÉ", "𐐀", "alpha", "x", "�"]);
         foreach (var favorIndex in new[] { false, true })
         {
             using var index = SiftIndex.CreateInMemory(new SiftOptions
@@ -31,7 +31,7 @@ public sealed class UnicodeLiteralTests
             foreach (var pattern in patterns)
             {
                 var comparison = caseMode == CaseMode.Sensitive ||
-                    caseMode == CaseMode.Smart && pattern.Any(char.IsUpper)
+                    caseMode == CaseMode.Smart && pattern.EnumerateRunes().Any(Rune.IsUpper)
                     ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
                 var expected = texts.SelectMany(document => Find(document.Item1, document.Item2, pattern, comparison))
                     .OrderBy(hit => hit.Path, StringComparer.Ordinal).ToArray();
@@ -111,6 +111,12 @@ public sealed class UnicodeLiteralTests
             ("a.txt", hit.StartByte, hit.EndByte)));
         Assert.Equal(3, hits.Hits.Count);
         Assert.All(hits.Hits, hit => Assert.Equal(pattern, snapshot.Materialize(hit, 0, 0).MatchText));
+
+        var regexHits = new HitBuffer();
+        snapshot.Search(query with { PatternMode = PatternMode.Regex }, new(), regexHits);
+        var width = Encoding.UTF8.GetByteCount(pattern);
+        Assert.Equal(new[] { (0, width), (width, 2 * width) },
+            regexHits.Hits.Select(hit => (hit.StartByte, hit.EndByte)));
     }
 
     [Fact]
@@ -128,6 +134,31 @@ public sealed class UnicodeLiteralTests
             Assert.Equal(0, snapshot.Search(query with { WholeLine = true }, filter, new HitBuffer()).HitsReturned);
             Assert.False(snapshot.Explain(query, new PathFilter { PathPrefix = "missing/" }).NeedsUnicodeDecode);
         }
+    }
+
+    [Theory]
+    [InlineData("é", CaseMode.Sensitive)]
+    [InlineData("😀", CaseMode.Sensitive)]
+    [InlineData("É", CaseMode.Smart)]
+    [InlineData("𐐀", CaseMode.Smart)]
+    [InlineData("é", CaseMode.Smart)]
+    public async Task UnicodeLiteralsHonorLimitsAndCancellation(string pattern, CaseMode caseMode)
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("a.txt", pattern + pattern + pattern), ("b.txt", pattern)]));
+        using var snapshot = index.OpenSnapshot();
+        var query = new SearchQuery(pattern, PatternMode.Literal, caseMode);
+        var hits = new HitBuffer();
+        var stats = snapshot.Search(query with { MaxHits = 2 }, new(), hits);
+        var width = Encoding.UTF8.GetByteCount(pattern);
+        Assert.Equal(SearchStopReason.MaxHits, stats.StopReason);
+        Assert.Equal(new[] { (0, width), (width, 2 * width) }, hits.Hits.Select(hit => (hit.StartByte, hit.EndByte)));
+        Assert.Equal(2, snapshot.Search(query with { MaxHitsPerDocument = 1 }, new(), new HitBuffer()).HitsReturned);
+        Assert.Equal(3, snapshot.Search(query with { MaxMatchedDocuments = 1 }, new(), new HitBuffer()).HitsReturned);
+        using var cancellation = new CancellationTokenSource();
+        var cancelling = new CancellingCollector(cancellation);
+        Assert.Throws<OperationCanceledException>(() => snapshot.Search(query, new(), cancelling, cancellation.Token));
+        Assert.Equal(1, cancelling.Hits);
     }
 
     [Fact]
