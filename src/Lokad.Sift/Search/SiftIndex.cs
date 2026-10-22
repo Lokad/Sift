@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Lokad.Sift.Indexer;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Search;
@@ -888,19 +889,28 @@ public sealed class SiftIndex : ISiftIndex
         }
 
         _validationCancellation.Cancel();
-        _mutations.Stop();
-        _mutations.WaitForIdle();
+        ExceptionDispatchInfo? cancellationFailure = null;
+        try
+        {
+            _mutations.Dispose();
+        }
+        catch (AggregateException exception)
+        {
+            // Mutation-token callbacks are caller code. Finish releasing index
+            // resources before propagating their cancellation failure.
+            cancellationFailure = ExceptionDispatchInfo.Capture(exception);
+        }
         _validationsIdle.Wait();
         _reclamationCancellation.Cancel();
         _reclamationIdle.Wait();
         _retainedIndexingWorkspaceLease?.Dispose();
         _regexContext.ReleaseOwner();
-        _mutations.Dispose();
         _validationCancellation.Dispose();
         _validationsIdle.Dispose();
         _validationGate.Dispose();
         _reclamationCancellation.Dispose();
         _reclamationIdle.Dispose();
+        cancellationFailure?.Throw();
     }
 
     private static CorpusStorage CreateStorage(string rootPath, SiftOptions options)

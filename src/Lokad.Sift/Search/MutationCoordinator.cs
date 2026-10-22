@@ -65,7 +65,7 @@ internal sealed class MutationCoordinator : IDisposable
         }
     }
 
-    public void Stop()
+    private void Stop()
     {
         lock (_sync)
         {
@@ -80,7 +80,7 @@ internal sealed class MutationCoordinator : IDisposable
         _cancellation.Cancel();
     }
 
-    public void WaitForIdle()
+    private void WaitForIdle()
     {
         ThrowIfExecutingMutation();
         _idle.Wait();
@@ -99,11 +99,19 @@ internal sealed class MutationCoordinator : IDisposable
             _disposed = true;
         }
 
-        Stop();
-        WaitForIdle();
-        _cancellation.Dispose();
-        _idle.Dispose();
-        _gate.Dispose();
+        try
+        {
+            Stop();
+        }
+        finally
+        {
+            // Caller code can register throwing callbacks on a mutation token.
+            // Cancellation still reaches every request; drain them before cleanup.
+            WaitForIdle();
+            _cancellation.Dispose();
+            _idle.Dispose();
+            _gate.Dispose();
+        }
     }
 
     public void ThrowIfExecutingMutation()

@@ -152,7 +152,7 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
-    public async Task MutationStopCancelsCallbacksOutsideCoordinatorLock()
+    public async Task MutationDisposalCancelsCallbacksOutsideCoordinatorLock()
     {
         using var coordinator = new MutationCoordinator();
         var callbackRegistered = new TaskCompletionSource(
@@ -175,7 +175,7 @@ public sealed class ConcurrencyTests
             CancellationToken.None);
         await callbackRegistered.Task;
 
-        await Task.Run(coordinator.Stop).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Run(coordinator.Dispose).WaitAsync(TimeSpan.FromSeconds(5));
 
         await callbackRan.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await mutation);

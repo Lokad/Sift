@@ -57,6 +57,9 @@
 
 ### Fixed
 
+- Index disposal finishes draining mutations and releasing owned resources before
+  rethrowing failures from caller cancellation callbacks. Retained snapshots and
+  active queries keep their compiled regex handles until their own lifetimes end.
 - Full-pack validation now rejects ASCII flags and exact non-ASCII totals that
   disagree with document content, even when region checksums are valid. The oldest
   version-3 statistics layout retains its conservative Unicode estimate.
