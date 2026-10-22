@@ -1156,16 +1156,16 @@ internal sealed partial class CorpusStorage : ISiftStorage
             throw new InvalidDataException("Invalid Sift generation lease checksum.");
         }
 
-        var segmentIds = new ulong[count];
+        var segmentIds = new SegmentId[count];
         for (var i = 0; i < count; i++)
         {
-            segmentIds[i] = LittleEndianCodec.ReadUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..]);
+            segmentIds[i] = new SegmentId(LittleEndianCodec.ReadUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..]));
         }
 
         return new GenerationLeaseData(
             new CorpusId(new Guid(span[12..28])),
             new StorageGeneration(LittleEndianCodec.ReadUInt64(span[28..])),
-            segmentIds.Select(static segmentId => new SegmentId(segmentId)).ToArray());
+            segmentIds);
     }
 
     private static void ValidateGenerationLease(FileStream stream, CorpusManifest manifest)
