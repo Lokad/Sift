@@ -1205,6 +1205,9 @@ Memory ownership rule:
 * for `UntilOperationCompletes`, the source keeps `Content` immutable until the enclosing build or update task completes
 * the core library must not retain caller-owned buffers beyond the declared lifetime
 * deletion lists passed to update remain unchanged until the returned task completes
+* exceptions from caller-owned deletion enumeration propagate unchanged without
+  classifying the committed index as corrupt; enumerator acquisition, iteration,
+  Current and disposal all belong to that caller boundary
 
 API rules:
 
@@ -1256,6 +1259,13 @@ indexed version is removed, preventing stale text after a file becomes binary,
 invalid UTF-8 or oversized. The core default remains `FailUpdate`; explicit CLI
 deletion paths are still supported. Traversal enumerators are disposed with the
 command's source, including on failure.
+File reads admit at most `MaxDocumentBytes + 1` body bytes, using the overflow byte
+to retain core rejection/deletion behaviour if a file grows while being read.
+Known oversized files do not have their bodies read. CLI submitted/rejected byte
+totals include the observed file length, even beyond managed-array capacity.
+Traversal skips file and directory links/reparse points; an explicitly linked
+input root is rejected before opening storage. Ordinary nested corpus exclusion
+and similarly named sibling directories retain their existing behaviour.
 
 * `Lokad.Sift.Benchmarks`
 

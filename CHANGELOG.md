@@ -55,6 +55,15 @@
 
 ### Fixed
 
+- Failures enumerating caller-owned deletion collections no longer mark healthy
+  indexes as corrupt. Updates preserve the original exception, committed state,
+  snapshot visibility and subsequent usability, including enumerator disposal.
+- CLI filesystem reads enforce the document-size bound before whole-file loading.
+  Oversized files, including those beyond managed-array capacity, are reported
+  and remove stale indexed versions; byte totals retain observed file sizes.
+- CLI traversal skips file/directory links and junctions, preventing aliases from
+  reentering the corpus or forming traversal cycles. Linked input roots are rejected
+  before opening storage.
 - Disk manifest publication now retains the configured free-space reserve for
   builds, pack-producing updates/compaction and non-shrinking metadata commits.
   It accounts for leases and manifest replacement while retaining temporary-file

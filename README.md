@@ -15,6 +15,11 @@ outside that directory or in an excluded subtree such as `.sift`. Input and corp
 must be different directories. CLI updates report non-indexable files and remove
 their previously indexed versions, including text that becomes binary, invalid
 UTF-8 or oversized. The library's default rejection policy remains `FailUpdate`.
+Filesystem reads are bounded at the document-size limit plus one detection byte;
+oversized files are rejected without loading their bodies, including files too
+large for a managed array. CLI byte totals include their observed file sizes.
+Traversal skips file and directory links/reparse points, including junctions.
+An explicitly linked input root is rejected before opening the corpus.
 CLI output is UTF-8. Search `--before=N` and `--after=N` print bounded context
 per hit as `path-line- text`; the existing `path:line:column: match` record remains.
 Overlapping context may repeat across hits; truncated context is labelled.
