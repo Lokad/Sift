@@ -15,9 +15,10 @@
 
 ### Changed
 
-- Managed regex verification returns its temporary decoded text buffer before
-  the final permitted hit callback, allowing nested searches and collector work
-  to reuse it. Hit limits, regex semantics and returned hit lifetimes are unchanged.
+- Managed regex and decoded literal verification return temporary character
+  buffers before the final permitted hit callback, allowing nested searches and
+  collector work to reuse them. Hit limits, matching semantics and returned hit
+  lifetimes are unchanged.
 - Managed verification uses the document's existing ASCII flag to size its decoded
   character buffer without a counting pass. Unicode decoding, buffer sizes and
   decoded-character statistics are unchanged.

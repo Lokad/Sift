@@ -1407,68 +1407,79 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return;
         }
 
-        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, asciiDocument, ref decodedChars);
-        var text = decodedBuffer.AsSpan();
-        var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-        var searchIndex = 0;
-        // Literal matches can overlap. Each boundary advances monotonically on
-        // its own, including positions inside a UTF-16 surrogate pair.
-        var startOffsetCursor = new Utf8OffsetCursor();
-        var endOffsetCursor = new Utf8OffsetCursor();
-
-        while (searchIndex <= text.Length)
+        var decodedBuffer = RentedCharBuffer.Decode(contentBytes, asciiDocument, ref decodedChars);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (hitsReturned >= hitLimit)
-            {
-                return;
-            }
+            var text = decodedBuffer.AsSpan();
+            var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var searchIndex = 0;
+            // Literal matches can overlap. Each boundary advances monotonically on
+            // its own, including positions inside a UTF-16 surrogate pair.
+            var startOffsetCursor = new Utf8OffsetCursor();
+            var endOffsetCursor = new Utf8OffsetCursor();
 
-            var relativeIndex = text[searchIndex..].IndexOf(pattern, comparison);
-            if (relativeIndex < 0)
+            while (searchIndex <= text.Length)
             {
-                return;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (hitsReturned >= hitLimit)
+                {
+                    return;
+                }
 
-            var found = searchIndex + relativeIndex;
-            var end = found + pattern.Length;
-            if (query.WholeWord && !WordBoundary.IsWholeWord(text, found, end))
-            {
-                searchIndex = found + 1;
-                continue;
-            }
+                var relativeIndex = text[searchIndex..].IndexOf(pattern, comparison);
+                if (relativeIndex < 0)
+                {
+                    return;
+                }
 
-            if (query.WholeLine && !IsWholeLine(text, found, end))
-            {
-                searchIndex = found + 1;
-                continue;
-            }
+                var found = searchIndex + relativeIndex;
+                var end = found + pattern.Length;
+                if (query.WholeWord && !WordBoundary.IsWholeWord(text, found, end))
+                {
+                    searchIndex = found + 1;
+                    continue;
+                }
 
-            var startByte = startOffsetCursor.Map(text, found);
-            var endByte = endOffsetCursor.Map(text, end);
-            var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
-            var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
-            var shouldContinue = collector.OnHit(
-                new RawHit(
-                    segment.SegmentId,
-                    new DocumentOrdinal(document.Ordinal),
-                    startByte,
-                    endByte,
-                    startLine,
-                    endLine));
-            hitsReturned++;
-            if (!shouldContinue)
-            {
-                stopReason = SearchStopReason.CollectorStopped;
-                return;
-            }
+                if (query.WholeLine && !IsWholeLine(text, found, end))
+                {
+                    searchIndex = found + 1;
+                    continue;
+                }
 
-            if (hitsReturned >= hitLimit)
-            {
-                return;
-            }
+                var startByte = startOffsetCursor.Map(text, found);
+                var endByte = endOffsetCursor.Map(text, end);
+                var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
+                var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte - 1));
+                if (hitsReturned == hitLimit - 1)
+                {
+                    decodedBuffer.Dispose();
+                }
+                var shouldContinue = collector.OnHit(
+                    new RawHit(
+                        segment.SegmentId,
+                        new DocumentOrdinal(document.Ordinal),
+                        startByte,
+                        endByte,
+                        startLine,
+                        endLine));
+                hitsReturned++;
+                if (!shouldContinue)
+                {
+                    stopReason = SearchStopReason.CollectorStopped;
+                    return;
+                }
 
-            searchIndex = query.PatternMode == PatternMode.Literal ? found + 1 : end;
+                if (hitsReturned >= hitLimit)
+                {
+                    return;
+                }
+
+                searchIndex = query.PatternMode == PatternMode.Literal ? found + 1 : end;
+            }
+        }
+        finally
+        {
+            decodedBuffer.Dispose();
         }
     }
 
