@@ -11,6 +11,9 @@
 
 ### Changed
 
+- Managed verification uses the document's existing ASCII flag to size its decoded
+  character buffer without a counting pass. Unicode decoding, buffer sizes and
+  decoded-character statistics are unchanged.
 - Snapshot document lookups traverse segment metadata without allocating an
   enumerator. Segment ordering, deletion visibility and snapshot lifetimes are
   unchanged.

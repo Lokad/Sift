@@ -8,9 +8,9 @@ internal struct RentedCharBuffer : IDisposable
     private char[]? _buffer;
     private int _length;
 
-    public static RentedCharBuffer Decode(ReadOnlySpan<byte> utf8, ref long decodedChars)
+    public static RentedCharBuffer Decode(ReadOnlySpan<byte> utf8, bool asciiDocument, ref long decodedChars)
     {
-        var charCount = Encoding.UTF8.GetCharCount(utf8);
+        var charCount = asciiDocument ? utf8.Length : Encoding.UTF8.GetCharCount(utf8);
         decodedChars += charCount;
         if (charCount == 0)
         {

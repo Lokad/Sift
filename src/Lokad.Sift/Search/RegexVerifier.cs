@@ -38,7 +38,8 @@ internal static class RegexVerifier
         cancellationToken.ThrowIfCancellationRequested();
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
-        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, ref decodedChars);
+        var isAscii = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
+        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, isAscii, ref decodedChars);
         var text = decodedBuffer.AsSpan();
 
         regexInvocations++;
@@ -46,7 +47,6 @@ internal static class RegexVerifier
         {
             nonBacktrackingRegexInvocations++;
         }
-        var isAscii = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
         var offsetCursor = new Utf8OffsetCursor();
 
         try

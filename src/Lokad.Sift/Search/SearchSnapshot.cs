@@ -1377,7 +1377,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             return;
         }
 
-        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, ref decodedChars);
+        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, asciiDocument, ref decodedChars);
         var text = decodedBuffer.AsSpan();
         var comparison = resolvedCaseMode == CaseMode.Sensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var searchIndex = 0;
