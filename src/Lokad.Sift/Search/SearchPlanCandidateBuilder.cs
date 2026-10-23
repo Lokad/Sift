@@ -38,7 +38,7 @@ internal ref struct SearchPlanCandidateBuilder
         var scope = _scope;
         var features = _features;
         var options = _options;
-        var candidates = new List<SearchPlanCandidate>(4);
+        var candidates = new List<SearchPlanCandidate>(features.IsLiteralLike ? 2 : 3);
         if (features.IsLiteralLike)
         {
             var direct = LiteralPlan.Direct(scope.Count, scope.Bytes);
