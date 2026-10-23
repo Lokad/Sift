@@ -664,6 +664,20 @@ public interface IIndexSnapshot : IDisposable
     /// <summary>Gets a document body owned by this snapshot.</summary>
     /// <remarks>The returned memory remains valid until this snapshot is disposed.</remarks>
     bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
+
+    /// <summary>Gets the complete document body for a raw hit produced by this snapshot.</summary>
+    /// <remarks>
+    ///     The hit has the same lifetime and ownership requirements as <see cref="Materialize"/>.
+    ///     The returned memory is owned by the snapshot and remains valid until it is disposed,
+    ///     including across overlay updates. Built-in snapshots resolve the hit directly;
+    ///     the default implementation uses key lookup for existing custom implementations.
+    /// </remarks>
+    ReadOnlyMemory<byte> GetDocumentBytes(in RawHit hit)
+    {
+        if (TryGetDocumentBytes(GetDocumentKey(hit), out var content))
+            return content;
+        throw new InvalidOperationException("The hit's document is not available in this snapshot.");
+    }
 }
 
 public interface IOverlaySnapshot : IIndexSnapshot

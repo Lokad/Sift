@@ -325,12 +325,18 @@ public sealed class MutationIntegrationTests
             new InMemoryDocumentSource([("src/a.txt", "old value")]),
             []);
         Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/a.txt"), out var oldContent));
+        var hits = new HitBuffer();
+        overlay.Search(new SearchQuery("old", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
+        var oldHit = Assert.Single(hits.Hits);
+        var oldHitContent = overlay.GetDocumentBytes(oldHit);
 
         await overlay.Update(
             new InMemoryDocumentSource([("src/a.txt", "new value")]),
             []);
 
         Assert.Equal("old value"u8.ToArray(), oldContent.ToArray());
+        Assert.Equal("old value"u8.ToArray(), oldHitContent.ToArray());
+        Assert.Throws<ArgumentException>(() => overlay.GetDocumentBytes(oldHit));
     }
 
     [Fact]

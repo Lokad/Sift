@@ -8,7 +8,7 @@ public sealed class HitDocumentKeyTests
     public async Task KeysResolveDuringSearchAndSurviveGenerationReplacement(bool persistent)
     {
         const string path = "src/café-😀.txt";
-        using var fixture = new CorpusFixture((path, "before\nneedle after"));
+        using var fixture = new CorpusFixture((path, "before😀\nneedle café after"));
         using var index = persistent ? new SiftIndex(fixture.CorpusPath) : SiftIndex.CreateInMemory();
         await index.Build(fixture.CreateSource());
         using var snapshot = index.OpenSnapshot();
@@ -19,16 +19,22 @@ public sealed class HitDocumentKeyTests
         Assert.Equal(path, key.Path);
         Assert.Equal(snapshot.Materialize(hit, 0, 0).Path, key.Path);
         Assert.True(snapshot.TryGetDocumentBytes(key, out var content));
-        Assert.Equal("before\nneedle after"u8.ToArray(), content.ToArray());
+        Assert.Equal("before😀\nneedle café after"u8.ToArray(), content.ToArray());
+        Assert.Equal(content.ToArray(), snapshot.GetDocumentBytes(hit).ToArray());
+        Assert.Equal(content.ToArray(), Assert.Single(collector.Contents).ToArray());
 
         await index.Build(new InMemoryDocumentSource([("src/replacement.txt", "new content")]));
         Assert.Equal(key, snapshot.GetDocumentKey(hit));
+        Assert.Equal(content.ToArray(), snapshot.GetDocumentBytes(hit).ToArray());
         using var replacement = index.OpenSnapshot();
         Assert.Throws<ArgumentException>(() => replacement.GetDocumentKey(hit));
         Assert.Throws<ArgumentException>(() => snapshot.GetDocumentKey(default));
+        Assert.Throws<ArgumentException>(() => replacement.GetDocumentBytes(hit));
+        Assert.Throws<ArgumentException>(() => snapshot.GetDocumentBytes(default));
 
         snapshot.Dispose();
         Assert.Throws<ObjectDisposedException>(() => snapshot.GetDocumentKey(hit));
+        Assert.Throws<ObjectDisposedException>(() => snapshot.GetDocumentBytes(hit));
         Assert.Equal(path, key.Path);
     }
 
@@ -55,21 +61,43 @@ public sealed class HitDocumentKeyTests
         {
             Assert.Throws<ArgumentException>(() => other.GetDocumentKey(hit));
             Assert.Throws<ArgumentException>(() => plain.GetDocumentKey(hit));
+            Assert.Throws<ArgumentException>(() => other.GetDocumentBytes(hit));
+            Assert.Throws<ArgumentException>(() => plain.GetDocumentBytes(hit));
         }
-        await overlay.Update(new InMemoryDocumentSource([("src/later.txt", "needle")]), []);
+        await overlay.Update(new InMemoryDocumentSource([
+            ("src/later.txt", "needle"), ("src/base.txt", "shadow needle")]), []);
         foreach (var hit in collector.Hits)
         {
             if (collector.Keys[collector.Hits.IndexOf(hit)].Path == "src/base.txt")
+            {
                 Assert.Equal(overlay.Materialize(hit, 0, 0).Path, overlay.GetDocumentKey(hit).Path);
+                Assert.Equal("needle"u8.ToArray(), overlay.GetDocumentBytes(hit).ToArray());
+                Assert.True(overlay.TryGetDocumentBytes(new DocumentKey("src/base.txt"), out var currentContent));
+                Assert.Equal("shadow needle"u8.ToArray(), currentContent.ToArray());
+            }
             else
             {
                 Assert.Throws<ArgumentException>(() => overlay.Materialize(hit, 0, 0));
                 Assert.Throws<ArgumentException>(() => overlay.GetDocumentKey(hit));
+                Assert.Throws<ArgumentException>(() => overlay.GetDocumentBytes(hit));
             }
         }
         overlay.Dispose();
         Assert.All(collector.Keys, key => Assert.StartsWith("src/", key.Path));
         Assert.Throws<ObjectDisposedException>(() => overlay.GetDocumentKey(collector.Hits[0]));
+        Assert.Throws<ObjectDisposedException>(() => overlay.GetDocumentBytes(collector.Hits[0]));
+    }
+
+    [Fact]
+    public async Task EmptyDocumentBytesResolveFromAnOwnedZeroLengthHit()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new InMemoryDocumentSource([("src/empty.txt", "")]));
+        using var snapshot = index.OpenSnapshot();
+        var collector = new KeyCollector(snapshot);
+        snapshot.Search(new SearchQuery("(?:)", PatternMode.Regex, CaseMode.Sensitive), new(), collector);
+        Assert.Empty(Assert.Single(collector.Contents).ToArray());
+        Assert.Equal("src/empty.txt", Assert.Single(collector.Keys).Path);
     }
 
     [Fact]
@@ -82,16 +110,19 @@ public sealed class HitDocumentKeyTests
         var collector = new KeyCollector(custom);
         custom.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new(), collector, default);
         Assert.Equal("src/custom.txt", Assert.Single(collector.Keys).Path);
+        Assert.Equal("needle"u8.ToArray(), Assert.Single(collector.Contents).ToArray());
     }
 
     private sealed class KeyCollector(IIndexSnapshot snapshot) : IHitCollector
     {
         public List<DocumentKey> Keys { get; } = [];
         public List<RawHit> Hits { get; } = [];
+        public List<ReadOnlyMemory<byte>> Contents { get; } = [];
 
         public bool OnHit(in RawHit hit)
         {
             Keys.Add(snapshot.GetDocumentKey(hit));
+            Contents.Add(snapshot.GetDocumentBytes(hit));
             Hits.Add(hit);
             return true;
         }

@@ -4,6 +4,10 @@
 
 ### Added
 
+- `IIndexSnapshot.GetDocumentBytes(in RawHit)` reads a hit's complete document
+  directly in built-in snapshots. Returned memory belongs to the snapshot and
+  remains valid across overlay updates until snapshot disposal. Hit ownership,
+  generation leases and existing custom snapshot implementations are preserved.
 - `IIndexSnapshot.GetDocumentKey(in RawHit)` retrieves a hit's document key without
   materializing its match or context text in built-in snapshots. Hit ownership and
   snapshot/overlay lifetime checks are preserved. A default implementation keeps

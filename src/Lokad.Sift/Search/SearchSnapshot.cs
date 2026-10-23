@@ -722,6 +722,36 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return MaterializeWithMatchingLine(ownedHit, contextBefore, contextAfter);
     }
 
+    public ReadOnlyMemory<byte> GetDocumentBytes(in RawHit hit)
+    {
+        if (!hit.IsOwnedBy(_hitOwner))
+            throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
+
+        try
+        {
+            using var operation = BeginOperation();
+            var segment = OpenSegment(hit.SegmentId).Segment;
+            return segment.GetContentMemory(segment.GetDocument(hit.DocumentOrdinal.Value));
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
+    internal ReadOnlyMemory<byte> GetOverlayHitDocumentBytes(in RawHit hit, SegmentId segmentId)
+    {
+        if (_storage is not ISnapshotIndependentContentMemoryStorage)
+        {
+            throw new InvalidOperationException(
+                "The snapshot storage does not provide snapshot-independent content memory.");
+        }
+
+        var ownedHit = hit.WithSegmentId(segmentId).WithOwner(_hitOwner);
+        return GetDocumentBytes(ownedHit);
+    }
+
     public bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content)
     {
         try

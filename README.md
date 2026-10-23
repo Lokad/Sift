@@ -464,6 +464,10 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
 - Use `snapshot.GetDocumentKey(hit)` to identify a hit's document without building
   match or context text. Hit ownership and lifetime rules are the same as for
   `Materialize(...)`. The returned key owns its path and survives snapshot disposal.
+- Use `snapshot.GetDocumentBytes(hit)` to read the complete UTF-8 body directly
+  from a hit. The returned memory belongs to the snapshot and is valid until its
+  disposal, including across overlay updates. `TryGetDocumentBytes(key, ...)`
+  remains available for lookup by a document key.
 - Context budgets count source bytes, including line endings. Display trimming
   uses the complete line so clipping preserves embedded carriage returns.
 - `Explain(...).NeedsUnicodeDecode` describes possible content-verifier decoding
