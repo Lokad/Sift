@@ -642,6 +642,15 @@ public interface IIndexSnapshot : IDisposable
     /// </remarks>
     MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
 
+    /// <summary>Gets the document key for a raw hit produced by this snapshot.</summary>
+    /// <remarks>
+    ///     The hit has the same lifetime and ownership requirements as <see cref="Materialize"/>.
+    ///     The returned key owns its path and remains valid after the snapshot is disposed.
+    ///     Built-in snapshots retrieve the key without materializing match or context text.
+    ///     The default implementation preserves compatibility with other snapshot implementations.
+    /// </remarks>
+    DocumentKey GetDocumentKey(in RawHit hit) => new(Materialize(hit, 0, 0).Path);
+
     /// <summary>Materializes a raw hit and the complete line containing its start.</summary>
     /// <remarks>
     ///     The matching line is not subject to context byte limits; callers should use

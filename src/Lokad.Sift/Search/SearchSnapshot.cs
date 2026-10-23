@@ -646,6 +646,24 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         }
     }
 
+    public DocumentKey GetDocumentKey(in RawHit hit)
+    {
+        if (!hit.IsOwnedBy(_hitOwner))
+            throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
+
+        try
+        {
+            using var operation = BeginOperation();
+            var segment = OpenSegment(hit.SegmentId).Segment;
+            return new DocumentKey(segment.GetPath(segment.GetDocument(hit.DocumentOrdinal.Value)));
+        }
+        catch (Exception exception) when (IsIndexCorruption(exception))
+        {
+            ReportIndexFailure(exception);
+            throw;
+        }
+    }
+
     public MaterializedHitWithLine MaterializeWithMatchingLine(
         in RawHit hit,
         int contextBefore,
@@ -672,6 +690,12 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             ReportIndexFailure(exception);
             throw;
         }
+    }
+
+    internal DocumentKey GetOverlayHitDocumentKey(in RawHit hit, SegmentId segmentId)
+    {
+        var ownedHit = hit.WithSegmentId(segmentId).WithOwner(_hitOwner);
+        return GetDocumentKey(ownedHit);
     }
 
     internal MaterializedHit MaterializeOverlayHit(

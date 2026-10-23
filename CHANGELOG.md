@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- `IIndexSnapshot.GetDocumentKey(in RawHit)` retrieves a hit's document key without
+  materializing its match or context text in built-in snapshots. Hit ownership and
+  snapshot/overlay lifetime checks are preserved. A default implementation keeps
+  existing custom snapshot implementations compatible.
+
 ### Changed
 
 - Snapshot document lookups traverse segment metadata without allocating an

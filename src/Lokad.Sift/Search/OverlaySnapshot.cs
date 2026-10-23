@@ -537,6 +537,31 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
             contextAfter);
     }
 
+    public DocumentKey GetDocumentKey(in RawHit hit)
+    {
+        using var state = BeginRead();
+        OverlayHitOrigin? origin;
+        lock (_syntheticSync)
+        {
+            if (!_syntheticHitOrigins.TryGetValue(hit.SegmentId, out origin))
+            {
+                if (hit.IsOwnedBy(_hitOwner))
+                {
+                    throw new ArgumentException(
+                        "The overlay hit is no longer valid because the overlay was updated.",
+                        nameof(hit));
+                }
+
+                return _baseSnapshot.GetDocumentKey(hit);
+            }
+
+            if (!hit.IsOwnedBy(_hitOwner))
+                throw new ArgumentException("The hit was not produced by this snapshot.", nameof(hit));
+        }
+
+        return origin.Snapshot.GetOverlayHitDocumentKey(hit, origin.SegmentId);
+    }
+
     public MaterializedHitWithLine MaterializeWithMatchingLine(
         in RawHit hit,
         int contextBefore,

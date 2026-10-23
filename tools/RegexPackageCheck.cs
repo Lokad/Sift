@@ -61,6 +61,7 @@ internal static class RegexPackageCheck
         Require(plan.RegexRouteReason == expectedReason, "Incorrect engine route.");
         Require(stats.Utf8RegexInvocations == (engine is PackageAsciiEngine ? 1 : 0), "Incorrect native counter.");
         Require(snapshot.Materialize(hits.Values.Single(), 0, 0).MatchText == "alpha", "Incorrect byte-range projection.");
+        Require(snapshot.GetDocumentKey(hits.Values.Single()).Path == "src/a.txt", "Incorrect hit document key.");
         hits.Values.Clear();
         Require(snapshot.Search(new SearchQuery("café", PatternMode.Literal, CaseMode.Sensitive), new(), hits).HitsReturned == 1,
             "Unicode literal search failed.");
