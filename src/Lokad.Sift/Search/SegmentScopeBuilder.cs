@@ -15,6 +15,36 @@ internal ref struct SegmentScopeBuilder(
             : cache.Segment.FindPathPrefixRange(matcher.PathPrefix);
         var prefixDocuments = (int)(prefixRange.EndExclusive - prefixRange.StartInclusive);
 
+        if (!matcher.RequiresPathVerification && !matcher.UsesPathIndex)
+        {
+            var ordinals = OrdinalSet.FromRange(
+                prefixRange.StartInclusive,
+                prefixRange.EndExclusive,
+                cache.DeadOrdinals);
+            if (prefixRange.StartInclusive == 0 &&
+                prefixRange.EndExclusive == (uint)cache.Segment.DocumentCount)
+            {
+                return CreateResult(
+                    new SegmentScope(
+                        ordinals,
+                        cache.LiveContentBytes,
+                        cache.LiveNonAsciiDocuments,
+                        cache.LiveNonAsciiBytes),
+                    prefixDocuments,
+                    prefixDocuments);
+            }
+
+            var metrics = GetScopeMetrics(ordinals);
+            return CreateResult(
+                new SegmentScope(
+                    ordinals,
+                    metrics.ContentBytes,
+                    metrics.NonAsciiDocuments,
+                    metrics.NonAsciiBytes),
+                prefixDocuments,
+                prefixDocuments);
+        }
+
         OrdinalSet scopedOrdinals;
         if (matcher.UsesPathIndex)
         {
@@ -42,36 +72,6 @@ internal ref struct SegmentScopeBuilder(
         }
 
         var pathIndexCandidates = scopedOrdinals.Count;
-
-        if (!matcher.RequiresPathVerification && !matcher.UsesPathIndex)
-        {
-            var ordinals = OrdinalSet.FromRange(
-                prefixRange.StartInclusive,
-                prefixRange.EndExclusive,
-                cache.DeadOrdinals);
-            if (prefixRange.StartInclusive == 0 &&
-                prefixRange.EndExclusive == (uint)cache.Segment.DocumentCount)
-            {
-                return CreateResult(
-                    new SegmentScope(
-                        ordinals,
-                        cache.LiveContentBytes,
-                        cache.LiveNonAsciiDocuments,
-                        cache.LiveNonAsciiBytes),
-                    prefixDocuments,
-                    pathIndexCandidates);
-            }
-
-            var metrics = GetScopeMetrics(ordinals);
-            return CreateResult(
-                new SegmentScope(
-                    ordinals,
-                    metrics.ContentBytes,
-                    metrics.NonAsciiDocuments,
-                    metrics.NonAsciiBytes),
-                prefixDocuments,
-                pathIndexCandidates);
-        }
 
         var acceptedOrdinals = GC.AllocateUninitializedArray<uint>(scopedOrdinals.Count);
         var acceptedCount = 0;

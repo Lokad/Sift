@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Unfiltered and prefix-only scope construction skips a preliminary ordinal range
+  that was immediately discarded. Deletion visibility, Unicode statistics and
+  planning costs are unchanged.
 - Managed regex and decoded literal verification return temporary character
   buffers before the final permitted hit callback, allowing nested searches and
   collector work to reuse them. Hit limits, matching semantics and returned hit
