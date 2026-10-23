@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Segment opening formats region-bounds diagnostics only when validation fails,
+  avoiding temporary error strings for valid files. Bounds checks and corruption
+  errors are unchanged.
 - Literal planning copies the selected n-gram prefix directly into its final array,
   avoiding a temporary list and backing array. Selection order, candidate targets
   and estimates are unchanged.

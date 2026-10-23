@@ -665,12 +665,9 @@ internal sealed unsafe partial class MappedSegment : IDisposable
         return Unsafe.ReadUnaligned<T>(BasePointer + offset);
     }
 
-    private static void ValidateTableBounds(long offset, long length, long fileLength, string name)
+    private static bool HasInvalidBounds(long offset, long length, long fileLength)
     {
-        if (offset < 0 || length < 0 || offset > fileLength || length > fileLength - offset)
-        {
-            throw new InvalidDataException($"Invalid {name} bounds.");
-        }
+        return offset < 0 || length < 0 || offset > fileLength || length > fileLength - offset;
     }
 
     private void Initialize(
@@ -716,8 +713,14 @@ internal sealed unsafe partial class MappedSegment : IDisposable
 
         var regionDirectoryOffset = Read<long>(44);
         var checksumTableOffset = Read<long>(52);
-        ValidateTableBounds(regionDirectoryOffset, RegionCount * SegmentFormat.RegionDirectoryEntrySize, fileLength, "region directory");
-        ValidateTableBounds(checksumTableOffset, RegionCount * SegmentFormat.ChecksumEntrySize, fileLength, "checksum table");
+        if (HasInvalidBounds(regionDirectoryOffset, RegionCount * SegmentFormat.RegionDirectoryEntrySize, fileLength))
+        {
+            throw new InvalidDataException("Invalid region directory bounds.");
+        }
+        if (HasInvalidBounds(checksumTableOffset, RegionCount * SegmentFormat.ChecksumEntrySize, fileLength))
+        {
+            throw new InvalidDataException("Invalid checksum table bounds.");
+        }
 
         var cursor = regionDirectoryOffset;
         ulong seenRegionIds = 0;
@@ -737,7 +740,10 @@ internal sealed unsafe partial class MappedSegment : IDisposable
 
             var regionOffset = Read<long>(cursor + 4);
             var regionLength = Read<long>(cursor + 12);
-            ValidateTableBounds(regionOffset, regionLength, fileLength, $"region '{id}'");
+            if (HasInvalidBounds(regionOffset, regionLength, fileLength))
+            {
+                throw new InvalidDataException($"Invalid region '{id}' bounds.");
+            }
             seenRegionIds |= idMask;
             _regions[(int)id] = (regionOffset, regionLength);
             cursor += SegmentFormat.RegionDirectoryEntrySize;

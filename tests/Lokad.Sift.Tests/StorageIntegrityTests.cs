@@ -546,8 +546,16 @@ public sealed class StorageIntegrityTests
             storage.ValidateSegment(manifest.Segments[0], CancellationToken.None));
     }
 
-    [Fact]
-    public async Task InvalidRegionBoundsAreRejected()
+    [Theory]
+    [InlineData(44, -1L, "Invalid region directory bounds.")]
+    [InlineData(44, long.MaxValue, "Invalid region directory bounds.")]
+    [InlineData(52, -1L, "Invalid checksum table bounds.")]
+    [InlineData(52, long.MaxValue, "Invalid checksum table bounds.")]
+    [InlineData(64, -1L, "Invalid region 'DocumentTable' bounds.")]
+    [InlineData(64, long.MaxValue, "Invalid region 'DocumentTable' bounds.")]
+    [InlineData(72, -1L, "Invalid region 'DocumentTable' bounds.")]
+    [InlineData(72, long.MaxValue, "Invalid region 'DocumentTable' bounds.")]
+    public async Task InvalidSegmentBoundsAreRejected(int fieldOffset, long value, string message)
     {
         using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
         using var index = new SiftIndex(fixture.CorpusPath);
@@ -556,14 +564,15 @@ public sealed class StorageIntegrityTests
         var segmentPath = Directory.EnumerateFiles(Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
         using (var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            stream.Position = 60 + 4;
-            var badOffset = BitConverter.GetBytes(long.MaxValue);
-            stream.Write(badOffset, 0, badOffset.Length);
+            stream.Position = fieldOffset;
+            var badBounds = BitConverter.GetBytes(value);
+            stream.Write(badBounds, 0, badBounds.Length);
         }
 
         var storage = new CorpusStorage(fixture.CorpusPath);
         var manifest = storage.ReadManifest();
-        Assert.Throws<InvalidDataException>(() => storage.OpenSegment(manifest.Segments[0].SegmentId));
+        var failure = Assert.Throws<InvalidDataException>(() => storage.OpenSegment(manifest.Segments[0].SegmentId));
+        Assert.Equal(message, failure.Message);
     }
 
     [Theory]
