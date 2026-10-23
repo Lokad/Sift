@@ -39,18 +39,16 @@ internal static class RegexVerifier
         var contentBytes = segment.GetContentBytes(document);
         var encodedLineIndex = segment.GetEncodedLineIndexBytes(document);
         var isAscii = (document.Flags & SegmentDocumentFlags.Ascii) != 0;
-        using var decodedBuffer = RentedCharBuffer.Decode(contentBytes, isAscii, ref decodedChars);
-        var text = decodedBuffer.AsSpan();
-
-        regexInvocations++;
-        if (prepared.UsesNonBacktracking)
-        {
-            nonBacktrackingRegexInvocations++;
-        }
-        var offsetCursor = new Utf8OffsetCursor();
-
+        var decodedBuffer = RentedCharBuffer.Decode(contentBytes, isAscii, ref decodedChars);
         try
         {
+            var text = decodedBuffer.AsSpan();
+            regexInvocations++;
+            if (prepared.UsesNonBacktracking)
+            {
+                nonBacktrackingRegexInvocations++;
+            }
+            var offsetCursor = new Utf8OffsetCursor();
             var matches = prepared.Regex.EnumerateMatches(text);
             while (true)
             {
@@ -85,6 +83,12 @@ internal static class RegexVerifier
                 }
                 var startLine = LineMap.GetLineFromByteOffset(encodedLineIndex, startByte);
                 var endLine = LineMap.GetLineFromByteOffset(encodedLineIndex, Math.Max(startByte, endByte == 0 ? startByte : endByte - 1));
+                // The terminal hit needs only byte coordinates. Release the text
+                // before user code can perform another search or rent workspace.
+                if (hitsReturned == hitLimit - 1)
+                {
+                    decodedBuffer.Dispose();
+                }
                 var shouldContinue = collector.OnHit(
                     new RawHit(
                         segment.SegmentId,
@@ -114,6 +118,10 @@ internal static class RegexVerifier
             }
 
             stopReason = SearchStopReason.RegexTimeout;
+        }
+        finally
+        {
+            decodedBuffer.Dispose();
         }
     }
 
