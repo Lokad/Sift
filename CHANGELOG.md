@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Literal planning copies the selected n-gram prefix directly into its final array,
+  avoiding a temporary list and backing array. Selection order, candidate targets
+  and estimates are unchanged.
 - Unfiltered and prefix-only scope construction skips a preliminary ordinal range
   that was immediately discarded. Deletion visibility, Unicode statistics and
   planning costs are unchanged.

@@ -101,13 +101,13 @@ internal static class LiteralQueryPlanner
                 return grams.ToArray();
             }
 
-            var selected = new List<SelectedGram>(grams.Count);
+            var selectedCount = 0;
             // Match the planner's independence heuristic when choosing how many
             // grams to retain; this estimate is not a bound on actual candidates.
             var estimatedCandidates = (double)scopeDocuments;
             foreach (var gram in grams)
             {
-                selected.Add(gram);
+                selectedCount++;
                 var ratio = Math.Clamp((double)gram.DocFreq / scopeDocuments, 0d, 1d);
                 estimatedCandidates *= ratio;
                 if (estimatedCandidates <= targetCandidates)
@@ -116,7 +116,9 @@ internal static class LiteralQueryPlanner
                 }
             }
 
-            return [.. selected];
+            var selected = new SelectedGram[selectedCount];
+            grams.CopyTo(0, selected, 0, selectedCount);
+            return selected;
         }
 
         static IndexRegionPair SelectIndexRegionPair(int gramLength, bool caseInsensitiveAscii)
