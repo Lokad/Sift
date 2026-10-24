@@ -15,6 +15,8 @@
 
 ### Changed
 
+- Disk storage computes its segment-directory path once per instance, avoiding
+  repeated string construction when opening segments. Filesystem behavior is unchanged.
 - Plan candidate lists reserve only the capacity needed for literal or regex
   planning. Candidate choices, costs and diagnostic alternatives are unchanged.
 - Segment opening formats region-bounds diagnostics only when validation fails,

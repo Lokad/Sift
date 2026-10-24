@@ -43,11 +43,12 @@ internal sealed partial class CorpusStorage : ISiftStorage
     internal CorpusStorage(string rootPath, long maximumPhysicalBytes)
     {
         _rootPath = rootPath;
+        SegmentsPath = Path.Combine(rootPath, "segments");
         _maximumPhysicalBytes = maximumPhysicalBytes;
     }
 
     public string ManifestPath => Path.Combine(_rootPath, "manifest.bin");
-    public string SegmentsPath => Path.Combine(_rootPath, "segments");
+    public string SegmentsPath { get; }
     public string TempPath => Path.Combine(_rootPath, "temp");
     public string LockPath => Path.Combine(_rootPath, "lock");
     internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
