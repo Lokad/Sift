@@ -15,6 +15,8 @@
 
 ### Changed
 
+- Snapshot generation lease handles avoid an unnecessary managed file buffer.
+  Lease validation, file sharing and lock lifetimes are unchanged.
 - Disk storage computes its segment-directory path once per instance, avoiding
   repeated string construction when opening segments. Filesystem behavior is unchanged.
 - Plan candidate lists reserve only the capacity needed for literal or regex

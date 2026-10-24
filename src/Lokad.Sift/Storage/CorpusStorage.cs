@@ -528,7 +528,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
             try
             {
                 // FileShare.Read lets other readers join but prevents reclamation's exclusive delete.
-                lease = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                lease = new FileStream(leasePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1);
             }
             catch (FileNotFoundException)
             {
