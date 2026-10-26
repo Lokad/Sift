@@ -48,6 +48,7 @@ internal sealed class PathFilterMatcher
         _pathPrefix = filter.PathPrefix is { } pathPrefix && !string.IsNullOrWhiteSpace(pathPrefix)
             ? pathPrefix.Replace('\\', '/')
             : null;
+        PathPrefixUpperBound = _pathPrefix is null ? null : GetExclusivePrefixUpperBound(_pathPrefix);
         // Null retains an accepted UTF-16 prefix that cannot be checked as UTF-8.
         _pathPrefixUtf8 = _pathPrefix is null ? [] : UnicodeText.IsWellFormedUtf16(_pathPrefix)
             ? Encoding.UTF8.GetBytes(_pathPrefix) : null;
@@ -87,6 +88,7 @@ internal sealed class PathFilterMatcher
     }
 
     public string? PathPrefix => _pathPrefix;
+    public string? PathPrefixUpperBound { get; }
     public bool UsesPathIndex => _accelerationFragments.Length > 0;
     public bool RequiresPathVerification => _includes.Length > 0 || _excludes.Length > 0 || _pathRegex is not null;
     public bool RequiresStringPathVerification => _pathPrefixUtf8 is null || _pathRegex is not null ||
@@ -166,6 +168,25 @@ internal sealed class PathFilterMatcher
     }
 
     public int[] GetPathTrigrams() => _pathTrigrams;
+
+    private static string? GetExclusivePrefixUpperBound(string prefix)
+    {
+        for (var i = prefix.Length - 1; i >= 0; i--)
+        {
+            if (prefix[i] == char.MaxValue)
+            {
+                continue;
+            }
+
+            return string.Create(i + 1, prefix, static (upperBound, source) =>
+            {
+                source.AsSpan(0, upperBound.Length).CopyTo(upperBound);
+                upperBound[^1]++;
+            });
+        }
+
+        return null;
+    }
 
     private static GlobMatcher[] CompileGlobs(IReadOnlyList<string> globs)
     {

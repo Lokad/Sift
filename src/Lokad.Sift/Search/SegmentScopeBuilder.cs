@@ -12,7 +12,7 @@ internal ref struct SegmentScopeBuilder(
     {
         var prefixRange = matcher.PathPrefix is null
             ? (StartInclusive: 0u, EndExclusive: (uint)cache.Segment.DocumentCount)
-            : cache.Segment.FindPathPrefixRange(matcher.PathPrefix);
+            : cache.Segment.FindPathPrefixRange(matcher.PathPrefix, matcher.PathPrefixUpperBound);
         var prefixDocuments = (int)(prefixRange.EndExclusive - prefixRange.StartInclusive);
 
         if (!matcher.RequiresPathVerification && !matcher.UsesPathIndex)

@@ -27,8 +27,8 @@
 - Generation lease readers consume segment IDs directly from the validated payload,
   removing a second array and conversion pass. Validation and reclamation protection
   are unchanged.
-- Path-prefix range construction writes its upper bound directly into the final
-  string, removing a temporary character array. Ordinal UTF-16 semantics are unchanged.
+- Path-prefix upper bounds are computed once per prepared filter and reused across
+  segments. Ordinal UTF-16 semantics are unchanged.
 - Snapshot generation lease handles avoid an unnecessary managed file buffer.
   Lease validation, file sharing and lock lifetimes are unchanged.
 - Disk storage computes its segment and metadata paths once per instance, avoiding

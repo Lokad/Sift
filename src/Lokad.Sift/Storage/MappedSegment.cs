@@ -191,7 +191,7 @@ internal sealed unsafe partial class MappedSegment : IDisposable
         return new ReadOnlySpan<byte>(BasePointer + region.Offset + (long)document.PathOffset, document.PathLength);
     }
 
-    public (uint StartInclusive, uint EndExclusive) FindPathPrefixRange(string prefix)
+    public (uint StartInclusive, uint EndExclusive) FindPathPrefixRange(string prefix, string? upperPrefix)
     {
         if (DocumentCount == 0)
         {
@@ -209,7 +209,6 @@ internal sealed unsafe partial class MappedSegment : IDisposable
             return ((uint)DocumentCount, (uint)DocumentCount);
         }
 
-        var upperPrefix = GetExclusivePrefixUpperBound(prefix);
         var pastLast = upperPrefix is null
             ? (uint)DocumentCount
             : LowerBound(upperPrefix);
@@ -634,25 +633,6 @@ internal sealed unsafe partial class MappedSegment : IDisposable
         }
 
         return (uint)low;
-    }
-
-    private static string? GetExclusivePrefixUpperBound(string prefix)
-    {
-        for (var i = prefix.Length - 1; i >= 0; i--)
-        {
-            if (prefix[i] == char.MaxValue)
-            {
-                continue;
-            }
-
-            return string.Create(i + 1, prefix, static (upperBound, source) =>
-            {
-                source.AsSpan(0, upperBound.Length).CopyTo(upperBound);
-                upperBound[^1]++;
-            });
-        }
-
-        return null;
     }
 
     private void ValidateRegionChecksum(
