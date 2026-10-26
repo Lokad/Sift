@@ -66,6 +66,45 @@ Expected shape:
 
 The benchmark runner must treat these repositories as optional local inputs. If a repository is missing, the runner should skip it cleanly rather than fail the entire benchmark session.
 
+### Cache identity and refresh
+
+`-UseIndexCache` reuses a prepared, immutable input snapshot. `-QueryOnly` requires
+that snapshot to exist; prepare or refresh it in a separate invocation. Cached
+metadata must match the canonical source root, corpus ID, file cap, ingestion
+policy version and Git HEAD revision (when available). Mismatches and older
+benchmark cache metadata are rejected with instructions to use `-RefreshIndex`
+without `-QueryOnly`. Existing Sift index formats are unchanged; there is no
+benchmark-cache migration.
+
+Git HEAD is provenance, not a content fingerprint. Uncommitted edits, untracked
+files and changes in non-Git inputs require an explicit refresh. Keep the input
+fixed while building and measuring. Reports preserve the build's `sourceRevision`
+and `builderAssemblySha256`; `benchmarkAssemblySha256` identifies the executing
+source-linked Sift/benchmark assembly, allowing query builds to be compared against
+the same prepared index.
+
+The benchmark and CLI share the guarded filesystem reader. Benchmark input skips
+`.git`, `.hg`, `.svn`, `node_modules`, `bin` and `obj`, excludes its index subtree,
+skips file/directory links and rejects explicitly linked corpus roots. File caps
+count submitted files, including rejections. Oversized file bodies are not loaded;
+submitted-byte totals still include observed rejected file sizes. The shared
+traversal replaces the old benchmark-only traversal; refresh older capped indexes
+rather than assuming their selected files match.
+
+### Launcher and memory measurements
+
+Run `pwsh ./bench.ps1 ...` on Windows or Ubuntu. The launcher requires Release and
+holds a per-checkout lock through build and execution. Concurrent launches fail
+without stopping another process; interruption cleanup stops only its own child.
+Benchmark commands, including direct host invocations, must remain sequential.
+
+Build and compaction use one harness-only managed-heap sampler. Its worker owns the
+sampled maximum and is joined before the final measurement is combined and
+returned. `PeakManagedBytes` is a sampled process-wide absolute heap size, not an
+exact instantaneous peak, retained-memory figure or allocation count. The core
+library contains no memory sampler. These tooling corrections establish no
+performance improvement by themselves.
+
 ## 3. Corpus classes
 
 The benchmark suite should cover at least three different repository profiles.

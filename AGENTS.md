@@ -25,6 +25,10 @@ Important benchmark rule:
 - Run benchmark work in `Release`, not `Debug`, otherwise the numbers are misleading.
 - Prefer `.\bench.ps1` over ad hoc `dotnet run` so stale benchmark hosts and output paths are handled consistently.
 - Benchmark commands should be run sequentially, not in parallel.
+- The launcher requires Release, refuses concurrent launches in the same checkout,
+  and manages only its own child process. It runs on Windows and Ubuntu.
+- Benchmark smoke tests use Git and PowerShell for synthetic cache and launcher
+  checks; neither is a runtime dependency of the library.
 
 ## Packaging
 
@@ -43,6 +47,11 @@ package build. The library project rejects the symbol before compilation and
 packing so the verification hooks cannot enter the shipped assembly. Document
 any future conditional-compilation symbol here and give it an explicit package
 policy before introducing its first `#if`.
+
+`tools/verify-build-guard.ps1` checks the actual guard with dummy compile/pack
+targets, including whitespace and separators. It never instruments the library.
+Package verification runs this check and cleans its owned temporary files; use
+`-KeepTemporaryFiles` only when retaining diagnostics is useful.
 
 ## CI
 

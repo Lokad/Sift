@@ -15,6 +15,8 @@
 
 ### Changed
 
+- The specification links canonical public contracts instead of duplicating API
+  declarations, and retires its completed implementation roadmap.
 - Disk snapshot opening selects cached or refreshed manifest reads directly,
   avoiding a temporary delegate. Validation refresh and generation-lease retries
   are unchanged.
@@ -122,6 +124,13 @@
 
 ### Fixed
 
+- Benchmark cache reuse validates source root, file cap, ingestion policy and Git
+  revision, and reports the builder/executing assembly hashes. Old or mismatched
+  benchmark caches require explicit refresh; Sift index formats are unchanged.
+- Benchmark filesystem input shares the CLI's link/size guards, exclusions and
+  observed rejected-byte accounting. The portable Release launcher refuses
+  concurrent launches without killing unrelated processes; build/compaction
+  memory sampling joins one shared sampler before returning measurements.
 - Product builds and packs reject the internal verification symbol with compiler-
   accepted whitespace or separators. Package checks verify the guard and remove
   their temporary source/feed/package trees unless diagnostic retention is requested.

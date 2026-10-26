@@ -955,242 +955,47 @@ Provide an in-process, library-first, filesystem-agnostic API.
 The supported consumer surface is the root `Lokad.Sift` namespace. Storage
 formats, mapped segments, manifests, and codecs are implementation details.
 
+The canonical public declarations are maintained in source:
+
+* [document submission and sources](src/Lokad.Sift/DocumentContracts.cs)
+* [queries, filters, hits and search statistics](src/Lokad.Sift/SearchContracts.cs)
+* [index/snapshot interfaces, options and mutation statistics](src/Lokad.Sift/IndexContracts.cs)
+* [regex engine integration](src/Lokad.Sift/RegexContracts.cs)
+* [identifiers](src/Lokad.Sift/Identifiers.cs)
+* [convenience overloads](src/Lokad.Sift/SiftIndexExtensions.cs)
+
+The [README](README.md) contains a fuller build/search/update example. A minimal
+in-memory search uses the same interfaces as a disk index:
+
 ```csharp
-public enum PatternMode { Literal, Regex }
-public enum CaseMode { Sensitive, Insensitive, Smart }
-public enum TimeoutPolicy { StopSearch, Throw }
-public enum DocumentContentLifetime { UntilNextRead, UntilOperationCompletes }
+using Lokad.Sift;
 
-public sealed record SearchQuery
+using ISiftIndex index = SiftIndex.CreateInMemory();
+await index.Build(new OneDocument());
+using var snapshot = index.OpenSnapshot();
+var hits = new IgnoreHits();
+var stats = snapshot.Search(
+    new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
+    new PathFilter(), hits);
+
+sealed class OneDocument : IDocumentSource
 {
-    public SearchQuery(string pattern)
-        : this(pattern, PatternMode.Regex, CaseMode.Smart) { }
-
-    public SearchQuery(string pattern, PatternMode patternMode, CaseMode caseMode)
-        : this(
-            pattern,
-            patternMode,
-            caseMode,
-            wholeWord: false,
-            wholeLine: false,
-            multiline: false,
-            dotAll: false,
-            maxHits: 10_000,
-            maxMatchedDocuments: int.MaxValue,
-            maxBytesScanned: long.MaxValue,
-            timeoutPolicy: TimeoutPolicy.StopSearch,
-            maxHitsPerDocument: int.MaxValue,
-            maxElapsedMilliseconds: 30_000) { }
-
-    public SearchQuery(
-        string pattern,
-        PatternMode patternMode,
-        CaseMode caseMode,
-        bool wholeWord,
-        bool wholeLine,
-        bool multiline,
-        bool dotAll,
-        int maxHits,
-        int maxMatchedDocuments,
-        long maxBytesScanned,
-        TimeoutPolicy timeoutPolicy,
-        int maxHitsPerDocument,
-        long maxElapsedMilliseconds)
+    private bool _read;
+    public bool TryReadNext(out SubmittedDocument document)
     {
-        Pattern = pattern;
-        PatternMode = patternMode;
-        CaseMode = caseMode;
-        WholeWord = wholeWord;
-        WholeLine = wholeLine;
-        Multiline = multiline;
-        DotAll = dotAll;
-        MaxHits = maxHits;
-        MaxMatchedDocuments = maxMatchedDocuments;
-        MaxBytesScanned = maxBytesScanned;
-        TimeoutPolicy = timeoutPolicy;
-        MaxHitsPerDocument = maxHitsPerDocument;
-        MaxElapsedMilliseconds = maxElapsedMilliseconds;
+        if (_read) { document = default; return false; }
+        _read = true;
+        document = new SubmittedDocument("example.txt", "needle"u8.ToArray());
+        return true;
     }
-
-    public string Pattern { get; }
-    public PatternMode PatternMode { get; init; }
-    public CaseMode CaseMode { get; init; }
-    public bool WholeWord { get; init; }
-    public bool WholeLine { get; init; }
-    public bool Multiline { get; init; }
-    public bool DotAll { get; init; }
-    public int MaxHits { get; init; }
-    public int MaxMatchedDocuments { get; init; }
-    public long MaxBytesScanned { get; init; }
-    public TimeoutPolicy TimeoutPolicy { get; init; }
-    public int MaxHitsPerDocument { get; init; }
-    public long MaxElapsedMilliseconds { get; init; }
 }
 
-public sealed class PathFilter
+sealed class IgnoreHits : IHitCollector
 {
-    public PathFilter()
-        : this(pathPrefix: null, includeGlobs: null, excludeGlobs: null, pathRegex: null) { }
-
-    public PathFilter(
-        string? pathPrefix,
-        IReadOnlyList<string>? includeGlobs,
-        IReadOnlyList<string>? excludeGlobs,
-        string? pathRegex)
-    {
-        PathPrefix = pathPrefix;
-        IncludeGlobs = includeGlobs ?? Array.Empty<string>();
-        ExcludeGlobs = excludeGlobs ?? Array.Empty<string>();
-        PathRegex = pathRegex;
-    }
-
-    public string? PathPrefix { get; init; }
-    public IReadOnlyList<string> IncludeGlobs { get; init; }
-    public IReadOnlyList<string> ExcludeGlobs { get; init; }
-    public string? PathRegex { get; init; }
-}
-
-public readonly record struct RawHit(
-    SegmentId SegmentId,
-    DocumentOrdinal DocumentOrdinal,
-    int StartByte,
-    int EndByte,
-    int StartLine,
-    int EndLine);
-
-public readonly record struct CorpusId(Guid Value);
-public readonly record struct ContentRevision(ulong Value);
-public readonly record struct StorageGeneration(ulong Value);
-public readonly record struct SegmentId(ulong Value);
-public readonly record struct DocumentOrdinal(uint Value);
-
-public readonly record struct IndexIdentity(
-    CorpusId CorpusId,
-    ContentRevision ContentRevision,
-    StorageGeneration StorageGeneration);
-
-public readonly record struct DocumentKey
-{
-    private readonly string? _path;
-
-    public DocumentKey(string path)
-    {
-        _path = DocumentPath.Normalize(path);
-    }
-
-    public string Path => _path ?? throw new InvalidOperationException("The document key is uninitialized.");
-}
-
-public readonly record struct SubmittedDocument
-{
-    private readonly string? _path;
-
-    public SubmittedDocument(string path, ReadOnlyMemory<byte> content)
-        : this(path, content, lastModifiedUtc: null) { }
-
-    public SubmittedDocument(
-        string path,
-        ReadOnlyMemory<byte> content,
-        DateTimeOffset? lastModifiedUtc)
-        : this(
-            path,
-            content,
-            lastModifiedUtc,
-            DocumentContentLifetime.UntilNextRead) { }
-
-    public SubmittedDocument(
-        string path,
-        ReadOnlyMemory<byte> content,
-        DateTimeOffset? lastModifiedUtc,
-        DocumentContentLifetime contentLifetime)
-    {
-        _path = DocumentPath.Normalize(path);
-        Content = content;
-        LastModifiedUtc = lastModifiedUtc;
-        ContentLifetime = contentLifetime;
-    }
-
-    public string Path => _path ?? throw new InvalidOperationException("The submitted document is uninitialized.");
-    public ReadOnlyMemory<byte> Content { get; }
-    public DateTimeOffset? LastModifiedUtc { get; }
-    public DocumentContentLifetime ContentLifetime { get; }
-}
-
-public interface IHitCollector
-{
-    bool OnHit(in RawHit hit);
-}
-
-public interface IDocumentKeyCollector
-{
-    bool OnDocument(DocumentKey key);
-}
-
-public interface IDocumentSource
-{
-    bool TryReadNext(out SubmittedDocument document);
-}
-
-public interface IIndexSnapshot : IDisposable
-{
-    DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
-    SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
-    SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
-    MaterializedHit Materialize(in RawHit hit, int contextBefore, int contextAfter);
-    bool TryGetDocumentBytes(DocumentKey key, out ReadOnlyMemory<byte> content);
-}
-
-public interface IOverlaySnapshot : IIndexSnapshot
-{
-    Task<UpdateStats> Update(IDocumentSource upserts, IReadOnlyList<DocumentKey> deletions, CancellationToken cancellationToken);
-    Task<UpdateStats> Update(
-        IDocumentSource upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        OverlayUpdateOptions options,
-        CancellationToken cancellationToken);
-    Task<UpdateStats> CommitToBase(ISiftIndex baseIndex, UpdateOptions options, CancellationToken cancellationToken);
-    Task<UpdateStats> ApplyDeltaTo(ISiftIndex target, UpdateOptions options, CancellationToken cancellationToken);
-}
-
-public interface ISiftIndex : IDisposable
-{
-    bool RequiresRebuild { get; }
-    IndexIdentity GetIndexIdentity();
-    IndexState GetIndexState();
-    IIndexSnapshot OpenSnapshot(SearchOptions options);
-    IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
-    WriteActivityStats GetWriteActivityStats();
-    IndexValidationStats GetValidationStats();
-    MaintenanceStats GetMaintenanceStats();
-    StorageStats GetStorageStats();
-    bool ShouldCompact(CompactOptions options);
-    Task<IndexValidationStats> Validate(CancellationToken cancellationToken);
-    Task<BuildStats> Build(IDocumentSource documents, BuildOptions options, CancellationToken cancellationToken);
-    Task<BuildStats> Build(
-        IAsyncEnumerable<SubmittedDocument> documents,
-        BuildOptions options,
-        CancellationToken cancellationToken);
-    Task<UpdateStats> Update(
-        IDocumentSource upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        CancellationToken cancellationToken);
-    Task<UpdateStats> Update(
-        IDocumentSource upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        UpdateOptions options,
-        CancellationToken cancellationToken);
-    Task<UpdateStats> Update(
-        IAsyncEnumerable<SubmittedDocument> upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        CancellationToken cancellationToken);
-    Task<UpdateStats> Update(
-        IAsyncEnumerable<SubmittedDocument> upserts,
-        IReadOnlyList<DocumentKey> deletions,
-        UpdateOptions options,
-        CancellationToken cancellationToken);
-    Task<CompactStats> Compact(CompactOptions options, CancellationToken cancellationToken);
+    public bool OnHit(in RawHit hit) => true;
 }
 ```
+
 
 Convenience overloads that supply default options or cancellation tokens are
 extension methods in `SiftIndexExtensions`; the interfaces keep their core
@@ -1198,8 +1003,7 @@ contracts explicit.
 
 Build/compaction telemetry includes elapsed time and document/byte/segment
 counts. Managed-heap sampling is outside the library and belongs in the benchmark
-harness. The public `MeasurePeakManagedMemory` option and `PeakManagedBytes`
-properties on `BuildStats`/`CompactStats` have been removed.
+harness. The core exposes no managed-memory profiler or peak-memory statistics.
 
 Memory ownership rule:
 
@@ -1515,99 +1319,14 @@ Build a **snapshot-based, immutable-segment, memory-mapped local code-search eng
 
 ---
 
-## 18. Implementation roadmap
+## 18. Implementation status
 
-Implement the system in the following phases. Later phases may refine earlier phases, but each phase must leave the codebase in a working, testable state.
-
-### 18.1 Phase 1: storage and exact literal search
-
-Required scope:
-
-* public contracts for document submission, snapshots, and raw hit streaming
-* manifest and segment storage with immutable publication
-* path storage, path filtering, and line index storage
-* exact literal search over stored UTF-8 content
-* materialization of path, line, column, and context text
-
-Required tests:
-
-* storage integrity for manifest swap and segment publication
-* differential correctness for fixed-string search
-* path filter correctness for prefix, glob, and path-regex filters
-
-Non-goals:
-
-* regex acceleration
-* incremental update
-* compaction
-* advanced SIMD or postings optimizations beyond what is required for a clean baseline
-
-### 18.2 Phase 2: indexed candidate generation
-
-Required scope:
-
-* content bigram/trigram index build
-* path trigram index build
-* cost-aware candidate generation over document ordinals
-* mandatory-fragment precheck for literal and regex paths
-* adaptive dense/sparse candidate representations
-
-Required tests:
-
-* differential correctness for indexed literal queries
-* missing-gram and empty-candidate behavior
-* postings intersection and path-trigram correctness tests
-
-Non-goals:
-
-* full regex analyzer sophistication beyond conservative mandatory fragments
-* incremental update
-* compaction
-
-### 18.3 Phase 3: regex and query planning
-
-Required scope:
-
-* byte-oriented regex verification for the supported fast subset, plus `.NET Regex` fallback/oracle handling
-* conservative mandatory-fragment extraction
-* smart case handling
-* multiline, whole-word, and whole-line semantics
-* explainability and query statistics
-* decode-minimizing verifier paths
-* explicit planner candidates and centralized benchmark-tuned scoring
-
-Required tests:
-
-* differential correctness for regex, multiline regex, whole-word, and whole-line queries
-* regex analyzer soundness fuzzing
-* timeout and fallback-path tests
-
-Non-goals:
-
-* persistent planner telemetry
-* speculative advanced optimizations not yet justified by measurement
-
-### 18.4 Phase 4: update, compaction, and performance tuning
-
-Required scope:
-
-* incremental update with document upserts and deletions
-* dead-ordinal tracking in manifests
-* compaction over live documents
-* benchmark suite and performance regression gates
-* targeted low-level optimizations justified by benchmark evidence
-
-Required tests:
-
-* update-batch rule enforcement
-* crash safety across update and compaction
-* performance regression benchmarks for hot-path primitives
-
-Non-goals:
-
-* distributed execution
-* semantic indexing
-* speculative complexity that is not backed by measured wins on real corpora
+The original storage, literal/indexed search, regex planning and incremental
+update/compaction phases are implemented. This specification describes their
+behavioral contracts; it is not an outstanding implementation checklist.
+[CHANGELOG.md](CHANGELOG.md) records release changes, and the tests exercise the
+storage, search, adapter and lifecycle contracts. Further performance work requires
+measurements and must preserve those contracts.
 
 [1]: https://learn.microsoft.com/en-us/dotnet/api/system.io.memorymappedfiles.memorymappedfile?view=net-10.0 "https://learn.microsoft.com/en-us/dotnet/api/system.io.memorymappedfiles.memorymappedfile?view=net-10.0"
 [2]: https://learn.microsoft.com/en-us/dotnet/standard/base-types/regular-expression-options "https://learn.microsoft.com/en-us/dotnet/standard/base-types/regular-expression-options"
