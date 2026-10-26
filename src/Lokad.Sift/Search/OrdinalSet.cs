@@ -106,6 +106,23 @@ internal sealed class OrdinalSet
 
     public void CopyTo(PooledBitSet destination)
     {
+        // Filling runs touches at most the range's words plus two boundary words
+        // per exclusion. Keep point writes when that bound exceeds the live count.
+        var rangeWords = _endExclusive == _startInclusive ? 0 :
+            (long)((_endExclusive - 1) >> 5) - (_startInclusive >> 5) + 1;
+        if (_isRange && rangeWords + 2L * (_excludedEnd - _excludedStart) < Count)
+        {
+            var start = _startInclusive;
+            for (var i = _excludedStart; i < _excludedEnd; i++)
+            {
+                var excluded = _excludedOrdinals[i];
+                destination.SetRange((int)start, (int)excluded);
+                start = excluded + 1;
+            }
+            destination.SetRange((int)start, (int)_endExclusive);
+            return;
+        }
+
         foreach (var ordinal in this)
         {
             destination.Set((int)ordinal);

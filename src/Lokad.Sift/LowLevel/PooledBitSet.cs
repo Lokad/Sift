@@ -22,6 +22,28 @@ internal ref struct PooledBitSet
         _words[bit >> 5] |= 1u << (bit & 31);
     }
 
+    public void SetRange(int startInclusive, int endExclusive)
+    {
+        if (startInclusive == endExclusive)
+        {
+            return;
+        }
+
+        var firstWord = startInclusive >> 5;
+        var lastWord = (endExclusive - 1) >> 5;
+        var firstMask = uint.MaxValue << (startInclusive & 31);
+        var lastMask = uint.MaxValue >> (31 - ((endExclusive - 1) & 31));
+        if (firstWord == lastWord)
+        {
+            _words[firstWord] |= firstMask & lastMask;
+            return;
+        }
+
+        _words[firstWord] |= firstMask;
+        _words.AsSpan(firstWord + 1, lastWord - firstWord - 1).Fill(uint.MaxValue);
+        _words[lastWord] |= lastMask;
+    }
+
     public void And(PooledBitSet other)
     {
         for (var i = 0; i < _count; i++)

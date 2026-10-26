@@ -15,6 +15,10 @@
 
 ### Changed
 
+- Contiguous ordinal scopes fill bitmap words in runs, retaining point writes
+  when excluded-document holes make them cheaper. Existing destination bits,
+  snapshot visibility and index compatibility are preserved.
+
 - Literal include-glob sets choose exact dictionary lookup or sorted membership
   before content verification. Proven include membership is reused, and the
   prepared filter determines its verification mode once. Filtering, Unicode path
