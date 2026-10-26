@@ -60,9 +60,7 @@ internal sealed class BoundedLruCache<TKey, TValue>
             }
             else
             {
-                value = new Lazy<TValue>(
-                    () => create(key),
-                    LazyThreadSafetyMode.ExecutionAndPublication);
+                value = CreateValue(key, create);
                 var weight = Math.Max(0, _getWeight(key));
                 var node = _recency.AddFirst(new Entry(key, value, weight));
                 _entries.Add(key, node);
@@ -88,6 +86,9 @@ internal sealed class BoundedLruCache<TKey, TValue>
             RemoveFaultedValue(key, value);
             throw;
         }
+
+        static Lazy<TValue> CreateValue(TKey cacheKey, Func<TKey, TValue> factory) =>
+            new(() => factory(cacheKey), LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     private void TrimCompletedValuesUnderLock()

@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Bounded caches allocate value-factory closures only on
+  misses, avoiding a temporary object on cache hits. Coalescing, eviction and
+  fault handling are unchanged.
 - Fixed-size manifest stamp and reclamation-marker reads avoid unnecessary managed
   file buffers. Metadata validation, sharing, generation leases and durable
   reclamation intent are unchanged.
