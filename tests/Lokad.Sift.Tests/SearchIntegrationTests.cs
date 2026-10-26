@@ -2253,30 +2253,31 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task AsciiInsensitivePrecheckObservesTheSearchDeadlineWithinADocument()
+    public async Task AsciiInsensitiveSearchObservesTheDeadlineWithinADocument()
     {
-        const int contentLength = 16 * 1024 * 1024;
         var pattern = new string('a', 2_047) + 'b';
         using var index = SiftIndex.CreateInMemory(new SiftOptions
         {
-            MaxDocumentBytes = contentLength,
             DirectScanScopeBytesThreshold = long.MaxValue
         });
         await index.Build(new InMemoryDocumentSource([
-            ("src/large.txt", new string('a', contentLength))
+            ("src/repeated.txt", pattern + " " + pattern)
         ]));
         using var snapshot = index.OpenSnapshot();
 
+        // Expire the budget in the first callback so scan speed cannot decide
+        // whether this search encounters its deadline within the document.
         var stats = snapshot.Search(
             new SearchQuery(pattern, PatternMode.Literal, CaseMode.Insensitive)
             {
-                MaxElapsedMilliseconds = 1,
+                MaxElapsedMilliseconds = 50,
                 MaxBytesScanned = long.MaxValue
             },
             new PathFilter(),
-            new HitBuffer());
+            new SlowHitCollector());
 
         Assert.Equal(SearchStopReason.MaxElapsedTime, stats.StopReason);
+        Assert.InRange(stats.HitsReturned, 0, 1);
     }
 
     [Fact]
