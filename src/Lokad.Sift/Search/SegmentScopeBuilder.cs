@@ -46,7 +46,28 @@ internal ref struct SegmentScopeBuilder(
         }
 
         OrdinalSet scopedOrdinals;
-        if (matcher.UsesPathIndex)
+        // Include the final equality check after the lower-bound search.
+        // Bound dictionary probes by the work of walking the prefix range.
+        // Dense alternatives in small segments retain the existing scan path.
+        if (matcher.ExactIncludePaths is { } paths &&
+            (long)paths.Length * (2 + System.Numerics.BitOperations.Log2((uint)Math.Max(1, cache.Segment.DocumentCount))) < prefixDocuments)
+        {
+            var found = new uint[paths.Length];
+            var count = 0;
+            foreach (var path in paths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (cache.Segment.TryFindDocumentOrdinal(path, out var ordinal) &&
+                    ordinal >= prefixRange.StartInclusive && ordinal < prefixRange.EndExclusive)
+                {
+                    found[count++] = ordinal;
+                }
+            }
+            // Document ordinals preserve this segment's natural search order.
+            Array.Sort(found, 0, count);
+            scopedOrdinals = OrdinalSet.FromSorted(found, count);
+        }
+        else if (matcher.UsesPathIndex)
         {
             var indexPair = new IndexRegionPair(
                 SegmentRegionId.PathTriCsLex,

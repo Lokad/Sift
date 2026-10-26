@@ -53,6 +53,9 @@ internal sealed class PathFilterMatcher
         _pathPrefixUtf8 = _pathPrefix is null ? [] : UnicodeText.IsWellFormedUtf16(_pathPrefix)
             ? Encoding.UTF8.GetBytes(_pathPrefix) : null;
         _includes = CompileGlobs(filter.IncludeGlobs);
+        ExactIncludePaths = _includes.Length > 0 && _includes.All(static glob => glob.Kind == GlobMatcherKind.Exact)
+            ? _includes.Select(static glob => glob.ExactPath).Distinct(StringComparer.Ordinal).ToArray()
+            : null;
         _excludes = CompileGlobs(filter.ExcludeGlobs);
         _pathRegex = string.IsNullOrWhiteSpace(filter.PathRegex)
             ? null
@@ -87,6 +90,7 @@ internal sealed class PathFilterMatcher
         }
     }
 
+    public string[]? ExactIncludePaths { get; }
     public string? PathPrefix => _pathPrefix;
     public string? PathPrefixUpperBound { get; }
     public bool UsesPathIndex => _accelerationFragments.Length > 0;
@@ -382,6 +386,7 @@ internal sealed class GlobMatcher
     }
 
     public GlobMatcherKind Kind => _kind;
+    public string ExactPath => _value;
 
     public static GlobMatcher Create(string glob)
     {

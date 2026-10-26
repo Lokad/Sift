@@ -136,6 +136,12 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 * Generated glob regexes use strict whole-input anchors; user path regexes retain
   .NET regex anchor and newline semantics
 
+Literal include-glob alternatives may use exact lookups in the existing sorted
+path dictionary before content verification. A comparison bound selects lookups
+only when their binary-search work is smaller than walking the prefix range;
+dense scopes retain the existing scan. Accepted ordinals stay in segment order
+and still pass exclusions, path regexes, deletion and overlay visibility checks.
+
 ### 4.3 Case semantics
 
 * `Sensitive`: exact case
