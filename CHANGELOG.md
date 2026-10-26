@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Fixed-size manifest stamp and reclamation-marker reads avoid unnecessary managed
+  file buffers. Metadata validation, sharing, generation leases and durable
+  reclamation intent are unchanged.
 - Snapshot hit access resolves segments directly from the existing mapping cache,
   removing a redundant segment-metadata dictionary. Hit ownership, generation leases
   and snapshot/overlay lifetimes are unchanged.

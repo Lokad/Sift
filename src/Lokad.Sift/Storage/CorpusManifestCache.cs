@@ -78,7 +78,8 @@ internal sealed class CorpusManifestCache
             manifestPath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 1);
         if (stream.Length < SegmentFormat.LegacyManifestHeaderSize + sizeof(ulong))
         {
             throw new InvalidDataException("Invalid Sift manifest length.");

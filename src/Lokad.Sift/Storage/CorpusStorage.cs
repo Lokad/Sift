@@ -1552,7 +1552,8 @@ internal sealed partial class CorpusStorage : ISiftStorage
             ReclamationStatePath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.ReadWrite);
+            FileShare.ReadWrite,
+            bufferSize: 1);
         return stream.ReadByte() != 0;
     }
 

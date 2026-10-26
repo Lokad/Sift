@@ -819,6 +819,30 @@ public sealed class StorageLifecycleTests
         await Assert.ThrowsAsync<IOException>(() => index.Compact(options));
     }
 
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("00", false)]
+    [InlineData("01", true)]
+    [InlineData("FF", true)]
+    [InlineData("0001", false)]
+    [InlineData("0100", true)]
+    public void ReclamationMarkerReadsFirstByteWithoutChangingFile(string hex, bool expectedPending)
+    {
+        using var fixture = new CorpusFixture();
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        Directory.CreateDirectory(storage.LockPath);
+        var path = Path.Combine(storage.LockPath, "reclamation.state");
+        var bytes = Convert.FromHexString(hex);
+        File.WriteAllBytes(path, bytes);
+        var writeTime = File.GetLastWriteTimeUtc(path);
+
+        Assert.Equal(expectedPending, ((ISiftStorage)storage).IsReclamationPending);
+        Assert.Equal(bytes, File.ReadAllBytes(path));
+        Assert.Equal(writeTime, File.GetLastWriteTimeUtc(path));
+        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Assert.Equal(bytes.Length, exclusive.Length);
+    }
+
     [Fact]
     public async Task CleanMaintenanceChecksLeaveReclamationMarkerUntouched()
     {
