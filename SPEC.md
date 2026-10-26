@@ -794,7 +794,12 @@ Fast path:
 
 * operate directly on normalized UTF-8 content bytes
 * case-sensitive ASCII literals use span-based substring search
-* ASCII-insensitive literals use folded bytes and a prepared prefix table
+* ASCII-insensitive literals filter positions by folded endpoint bytes when
+  vector acceleration is available; a one-byte filter is already an exact match
+* filtered positions fund interior comparisons; when the comparison budget is
+  exhausted, the unverified suffix uses the prepared prefix table and linear KMP
+* short tails and scalar platforms use the same KMP fallback; scanning and
+  verification retain cooperative cancellation and elapsed-deadline checks
 * check whole-word and whole-line constraints on each candidate match
 
 Case-insensitive literal mode:

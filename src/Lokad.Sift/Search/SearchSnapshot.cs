@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -1583,7 +1585,66 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return true;
     }
 
+    // Filter candidate positions by folded endpoint bytes, with an amortized
+    // verification budget. Filtered positions fund comparisons; an exhausted
+    // budget hands the unverified suffix to the existing linear KMP scanner.
     private static int IndexOfAsciiInsensitive(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle, ReadOnlySpan<int> prefixTable, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds)
+    {
+        var positions = haystack.Length - loweredNeedle.Length + 1;
+        if (!Vector256.IsHardwareAccelerated || loweredNeedle.IsEmpty || positions < Vector256<byte>.Count)
+            return IndexOfAsciiInsensitiveKmp(haystack, loweredNeedle, prefixTable, cancellationToken, watch, maxElapsedMilliseconds);
+        var last = loweredNeedle.Length - 1;
+        var verifyCost = Math.Max(0, loweredNeedle.Length - 2);
+        var offset = 0;
+        var budget = 0;
+        while (offset <= positions - Vector256<byte>.Count)
+        {
+            if ((offset & 0xFFF) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (watch.ElapsedMilliseconds >= maxElapsedMilliseconds) return -1;
+            }
+            var filtered = EqualFolded(haystack, offset, loweredNeedle[0]);
+            // A one-byte needle is an exact filter with no remaining verifier.
+            if (last != 0) filtered &= EqualFolded(haystack, offset + last, loweredNeedle[last]);
+            var candidates = Vector256.ExtractMostSignificantBits(filtered);
+            budget += Vector256<byte>.Count;
+            while (candidates != 0)
+            {
+                var candidate = offset + BitOperations.TrailingZeroCount(candidates);
+                if (budget < verifyCost)
+                {
+                    var found = IndexOfAsciiInsensitiveKmp(haystack[candidate..], loweredNeedle, prefixTable, cancellationToken, watch, maxElapsedMilliseconds);
+                    return found < 0 ? -1 : candidate + found;
+                }
+                budget -= verifyCost;
+                var matches = true;
+                for (var j = 1; j < last; j++)
+                {
+                    if ((j & 0xFFF) == 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (watch.ElapsedMilliseconds >= maxElapsedMilliseconds) return -1;
+                    }
+                    if (AsciiCase.Fold(haystack[candidate + j]) != loweredNeedle[j]) { matches = false; break; }
+                }
+                if (matches) return candidate;
+                candidates &= candidates - 1;
+            }
+            offset += Vector256<byte>.Count;
+        }
+        var tail = IndexOfAsciiInsensitiveKmp(haystack[offset..], loweredNeedle, prefixTable, cancellationToken, watch, maxElapsedMilliseconds);
+        return tail < 0 ? -1 : offset + tail;
+
+        static Vector256<byte> EqualFolded(ReadOnlySpan<byte> input, int offset, byte value)
+        {
+            var data = Vector256.LoadUnsafe(ref MemoryMarshal.GetReference(input), (nuint)offset);
+            if (value is >= (byte)'a' and <= (byte)'z') data |= Vector256.Create((byte)0x20);
+            return Vector256.Equals(data, Vector256.Create(value));
+        }
+    }
+
+    private static int IndexOfAsciiInsensitiveKmp(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> loweredNeedle, ReadOnlySpan<int> prefixTable, CancellationToken cancellationToken, ValueStopwatch watch, long maxElapsedMilliseconds)
     {
         if (loweredNeedle.Length == 0)
         {

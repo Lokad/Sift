@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Insensitive byte scanning filters candidate positions by folded endpoint bytes.
+  A comparison budget bounds verification work and falls back to linear KMP;
+  ordering, overlaps, cancellation and scalar-platform behavior are preserved.
 - The specification links canonical public contracts instead of duplicating API
   declarations, and retires its completed implementation roadmap.
 - Disk snapshot opening selects cached or refreshed manifest reads directly,
