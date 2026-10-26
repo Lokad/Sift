@@ -35,160 +35,183 @@ Set-Location $repoRoot
 
 $benchmarkAssembly = Join-Path $repoRoot "src\Lokad.Sift.Benchmarks\bin\$Configuration\net10.0\Lokad.Sift.Benchmarks.dll"
 
-$staleBenchmarks = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf("Lokad.Sift.Benchmarks.dll", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }
-foreach ($process in $staleBenchmarks) {
-    Stop-Process -Id $process.ProcessId -Force
-}
-
-if (-not $SkipBuild) {
-    dotnet build Lokad.Sift.slnx --configuration $Configuration --tl:off --nologo -v minimal --no-restore
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+if ($Configuration -ne 'Release') { throw 'Benchmarks require -Configuration Release.' }
+$lockDirectory = Join-Path $repoRoot 'bench/out'
+New-Item -ItemType Directory -Path $lockDirectory -Force | Out-Null
+$runLock = $null
+$benchmarkProcess = $null
+try {
+    try {
+        $runLock = [IO.FileStream]::new((Join-Path $lockDirectory '.run.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     }
-}
+    catch [IO.IOException] {
+        if (($_.Exception.HResult -band 0xFFFF) -notin @(11, 32, 33, 35)) { throw }
+        throw 'Another benchmark launch is active in this checkout.'
+    }
 
-if (-not (Test-Path $benchmarkAssembly)) {
-    throw "Expected benchmark assembly at '$benchmarkAssembly'."
-}
+    if (-not $SkipBuild) {
+        dotnet build Lokad.Sift.slnx --configuration $Configuration --tl:off --nologo -v minimal --no-restore
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
 
-if (-not $OutputPath) {
-    $outputDirectory = Join-Path $repoRoot "bench\out"
-    New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    if (-not (Test-Path $benchmarkAssembly)) {
+        throw "Expected benchmark assembly at '$benchmarkAssembly'."
+    }
+
+    if (-not $OutputPath) {
+        $outputDirectory = Join-Path $repoRoot "bench\out"
+        New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        if ($PostingsMicro) {
+            $OutputPath = Join-Path $outputDirectory "postings-micro-$timestamp.json"
+        }
+        elseif ($PostingsStats) {
+            $OutputPath = Join-Path $outputDirectory "postings-stats-$timestamp.json"
+        }
+        elseif ($PostingsBdn) {
+            $OutputPath = Join-Path $outputDirectory "postings-bdn-$timestamp.json"
+        }
+        elseif ($UpdateBench) {
+            $OutputPath = Join-Path $outputDirectory "update-bench-$timestamp.json"
+        }
+        elseif ($CompactBench) {
+            $OutputPath = Join-Path $outputDirectory "compact-bench-$timestamp.json"
+        }
+        else {
+            $OutputPath = Join-Path $outputDirectory "real-corpus-$timestamp.json"
+        }
+    }
+
+    $benchmarkArguments = @(
+        $benchmarkAssembly,
+        "--json=$OutputPath",
+        "--warmup=$Warmup",
+        "--iterations=$Iterations"
+    )
+
     if ($PostingsMicro) {
-        $OutputPath = Join-Path $outputDirectory "postings-micro-$timestamp.json"
+        $benchmarkArguments += "--postings-micro"
     }
     elseif ($PostingsStats) {
-        $OutputPath = Join-Path $outputDirectory "postings-stats-$timestamp.json"
+        $benchmarkArguments += "--postings-stats"
+
+        if ($Corpora -and $Corpora.Count -gt 0) {
+            $benchmarkArguments += "--corpora=$($Corpora -join ',')"
+        }
+
+        if ($IndexCacheRoot) {
+            $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
+        }
     }
     elseif ($PostingsBdn) {
-        $OutputPath = Join-Path $outputDirectory "postings-bdn-$timestamp.json"
+        $benchmarkArguments += "--postings-bdn"
+
+        if ($BdnFilter -and $BdnFilter.Count -gt 0) {
+            $benchmarkArguments += "--bdn-filter=$($BdnFilter -join ',')"
+        }
     }
     elseif ($UpdateBench) {
-        $OutputPath = Join-Path $outputDirectory "update-bench-$timestamp.json"
+        $benchmarkArguments += "--update-bench"
+
+        if ($Corpora -and $Corpora.Count -gt 0) {
+            $benchmarkArguments += "--corpora=$($Corpora -join ',')"
+        }
+
+        if ($RealCorpusRoot) {
+            $benchmarkArguments += "--real-corpus-root=$RealCorpusRoot"
+        }
+
+        if ($IndexCacheRoot) {
+            $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
+        }
+
+        if ($RefreshIndex) {
+            $benchmarkArguments += "--refresh-index"
+        }
     }
     elseif ($CompactBench) {
-        $OutputPath = Join-Path $outputDirectory "compact-bench-$timestamp.json"
+        $benchmarkArguments += "--compact-bench"
+
+        if ($Corpora -and $Corpora.Count -gt 0) {
+            $benchmarkArguments += "--corpora=$($Corpora -join ',')"
+        }
+
+        if ($RealCorpusRoot) {
+            $benchmarkArguments += "--real-corpus-root=$RealCorpusRoot"
+        }
+
+        if ($IndexCacheRoot) {
+            $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
+        }
+
+        if ($RefreshIndex) {
+            $benchmarkArguments += "--refresh-index"
+        }
     }
     else {
-        $OutputPath = Join-Path $outputDirectory "real-corpus-$timestamp.json"
+        $benchmarkArguments += "--real-corpus"
+
+        if (-not $FullRepo) {
+            $benchmarkArguments += "--max-files=$MaxFiles"
+        }
+
+        if ($Corpora -and $Corpora.Count -gt 0) {
+            $benchmarkArguments += "--corpora=$($Corpora -join ',')"
+        }
+
+        if ($RealCorpusRoot) {
+            $benchmarkArguments += "--real-corpus-root=$RealCorpusRoot"
+        }
+
+        if ($IndexCacheRoot) {
+            $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
+        }
+
+        if ($UseIndexCache) {
+            $benchmarkArguments += "--use-index-cache"
+        }
+
+        if ($QueryOnly) {
+            $benchmarkArguments += "--query-only"
+        }
+
+        if ($RefreshIndex) {
+            $benchmarkArguments += "--refresh-index"
+        }
+
+        if ($PrepareIndexOnly) {
+            $benchmarkArguments += "--prepare-index-only"
+        }
+
+        if ($QueryPack) {
+            $benchmarkArguments += "--real-query-pack-json=$QueryPack"
+        }
+
+        if ($QueryId) {
+            $benchmarkArguments += "--query-id=$QueryId"
+        }
     }
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new('dotnet')
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.WorkingDirectory = $repoRoot
+    foreach ($argument in $benchmarkArguments) { $startInfo.ArgumentList.Add($argument) }
+    $benchmarkProcess = [Diagnostics.Process]::Start($startInfo)
+    while (-not $benchmarkProcess.WaitForExit(1000)) { }
+    $benchmarkExitCode = $benchmarkProcess.ExitCode
+    if ($benchmarkExitCode -eq 0) { Write-Output "Benchmark report: $OutputPath" }
+    exit $benchmarkExitCode
 }
-
-$benchmarkArguments = @(
-    $benchmarkAssembly,
-    "--json=$OutputPath",
-    "--warmup=$Warmup",
-    "--iterations=$Iterations"
-)
-
-if ($PostingsMicro) {
-    $benchmarkArguments += "--postings-micro"
+finally {
+    if ($null -ne $benchmarkProcess) {
+        if (-not $benchmarkProcess.HasExited) {
+            $benchmarkProcess.Kill($true)
+            $benchmarkProcess.WaitForExit()
+        }
+        $benchmarkProcess.Dispose()
+    }
+    if ($null -ne $runLock) { $runLock.Dispose() }
 }
-elseif ($PostingsStats) {
-    $benchmarkArguments += "--postings-stats"
-
-    if ($Corpora -and $Corpora.Count -gt 0) {
-        $benchmarkArguments += "--corpora=$($Corpora -join ',')"
-    }
-
-    if ($IndexCacheRoot) {
-        $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
-    }
-}
-elseif ($PostingsBdn) {
-    $benchmarkArguments += "--postings-bdn"
-
-    if ($BdnFilter -and $BdnFilter.Count -gt 0) {
-        $benchmarkArguments += "--bdn-filter=$($BdnFilter -join ',')"
-    }
-}
-elseif ($UpdateBench) {
-    $benchmarkArguments += "--update-bench"
-
-    if ($Corpora -and $Corpora.Count -gt 0) {
-        $benchmarkArguments += "--corpora=$($Corpora -join ',')"
-    }
-
-    if ($RealCorpusRoot) {
-        $benchmarkArguments += "--real-corpus-root=$RealCorpusRoot"
-    }
-
-    if ($IndexCacheRoot) {
-        $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
-    }
-
-    if ($RefreshIndex) {
-        $benchmarkArguments += "--refresh-index"
-    }
-}
-elseif ($CompactBench) {
-    $benchmarkArguments += "--compact-bench"
-
-    if ($Corpora -and $Corpora.Count -gt 0) {
-        $benchmarkArguments += "--corpora=$($Corpora -join ',')"
-    }
-
-    if ($RealCorpusRoot) {
-        $benchmarkArguments += "--real-corpus-root=$RealCorpusRoot"
-    }
-
-    if ($IndexCacheRoot) {
-        $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
-    }
-
-    if ($RefreshIndex) {
-        $benchmarkArguments += "--refresh-index"
-    }
-}
-else {
-    $benchmarkArguments += "--real-corpus"
-
-    if (-not $FullRepo) {
-        $benchmarkArguments += "--max-files=$MaxFiles"
-    }
-
-    if ($Corpora -and $Corpora.Count -gt 0) {
-        $benchmarkArguments += "--corpora=$($Corpora -join ',')"
-    }
-
-    if ($RealCorpusRoot) {
-        $benchmarkArguments += "--real-corpus-root=$RealCorpusRoot"
-    }
-
-    if ($IndexCacheRoot) {
-        $benchmarkArguments += "--index-cache-root=$IndexCacheRoot"
-    }
-
-    if ($UseIndexCache) {
-        $benchmarkArguments += "--use-index-cache"
-    }
-
-    if ($QueryOnly) {
-        $benchmarkArguments += "--query-only"
-    }
-
-    if ($RefreshIndex) {
-        $benchmarkArguments += "--refresh-index"
-    }
-
-    if ($PrepareIndexOnly) {
-        $benchmarkArguments += "--prepare-index-only"
-    }
-
-    if ($QueryPack) {
-        $benchmarkArguments += "--real-query-pack-json=$QueryPack"
-    }
-
-    if ($QueryId) {
-        $benchmarkArguments += "--query-id=$QueryId"
-    }
-}
-
-dotnet @benchmarkArguments
-if ($LASTEXITCODE -eq 0) {
-    Write-Output "Benchmark report: $OutputPath"
-}
-
-exit $LASTEXITCODE

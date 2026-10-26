@@ -21,34 +21,43 @@ using Lokad.Sift.Storage;
 
 const int BenchmarkSearchParallelism = 1;
 
-var options = BenchmarkOptions.Parse(args);
-if (options.Mode == BenchmarkMode.RealCorpus)
+try
 {
-    RunRealCorpusBenchmarks(options);
+    var options = BenchmarkOptions.Parse(args);
+    if (options.Mode == BenchmarkMode.RealCorpus)
+    {
+        RunRealCorpusBenchmarks(options);
+    }
+    else if (options.Mode == BenchmarkMode.UpdateBench)
+    {
+        RunUpdateBenchmarks(options);
+    }
+    else if (options.Mode == BenchmarkMode.CompactBench)
+    {
+        RunCompactBenchmarks(options);
+    }
+    else if (options.Mode == BenchmarkMode.PostingsMicro)
+    {
+        RunPostingsMicroBenchmarks(options);
+    }
+    else if (options.Mode == BenchmarkMode.PostingsStats)
+    {
+        RunPostingsStats(options);
+    }
+    else if (options.Mode == BenchmarkMode.PostingsBdn)
+    {
+        RunPostingsBenchmarkDotNet(options);
+    }
+    else
+    {
+        RunSyntheticBenchmarks(options);
+    }
+    return Environment.ExitCode;
 }
-else if (options.Mode == BenchmarkMode.UpdateBench)
+catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
 {
-    RunUpdateBenchmarks(options);
-}
-else if (options.Mode == BenchmarkMode.CompactBench)
-{
-    RunCompactBenchmarks(options);
-}
-else if (options.Mode == BenchmarkMode.PostingsMicro)
-{
-    RunPostingsMicroBenchmarks(options);
-}
-else if (options.Mode == BenchmarkMode.PostingsStats)
-{
-    RunPostingsStats(options);
-}
-else if (options.Mode == BenchmarkMode.PostingsBdn)
-{
-    RunPostingsBenchmarkDotNet(options);
-}
-else
-{
-    RunSyntheticBenchmarks(options);
+    Console.Error.WriteLine(exception.Message);
+    return 1;
 }
 
 static void RunSyntheticBenchmarks(BenchmarkOptions options)
@@ -1315,7 +1324,7 @@ static void RunPostingsMicroBenchmarks(BenchmarkOptions options)
 static void RunPostingsStats(BenchmarkOptions options)
 {
     var repoRoot = GetRepositoryRoot();
-    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "sift", "bench", "indexes");
+    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "bench", "indexes");
     var corpora = DiscoverCachedIndexes(indexCacheRoot, options.CorpusIds);
     var results = new List<PostingsStatsCorpusResult>(corpora.Count);
     foreach (var corpus in corpora)
@@ -1346,7 +1355,7 @@ static void RunPostingsBenchmarkDotNet(BenchmarkOptions options)
         .AddColumn(TargetMethodColumn.Method, StatisticColumn.Mean, StatisticColumn.Median, StatisticColumn.P95)
         .AddExporter(JsonExporter.BriefCompressed)
         .WithOrderer(new DefaultOrderer(SummaryOrderPolicy.FastestToSlowest))
-        .WithArtifactsPath(Path.Combine(GetRepositoryRoot(), "sift", "benchmarks", "out", "bdn"));
+        .WithArtifactsPath(Path.Combine(GetRepositoryRoot(), "bench", "out", "bdn"));
 
     var benchmark = new PostingsCodecBenchmarks();
     if (options.PostingsBdnFilter is { Length: > 0 })
@@ -1365,8 +1374,8 @@ static void RunPostingsBenchmarkDotNet(BenchmarkOptions options)
 static void RunRealCorpusBenchmarks(BenchmarkOptions options)
 {
     var repoRoot = GetRepositoryRoot();
-    var corpusRoot = options.RealCorpusRoot ?? Path.Combine(repoRoot, "sift", "bench", "repos");
-    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "sift", "bench", "indexes");
+    var corpusRoot = options.RealCorpusRoot ?? Path.Combine(repoRoot, "bench", "repos");
+    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "bench", "indexes");
     var queryPackPath = options.RealQueryPackJsonPath ?? Path.Combine(repoRoot, "src", "Lokad.Sift.Benchmarks", "Assets", "real-diverse.json");
     var queryPack = LoadRealQueryPack(queryPackPath);
     if (!string.IsNullOrWhiteSpace(options.QueryId))
@@ -1395,7 +1404,8 @@ static void RunRealCorpusBenchmarks(BenchmarkOptions options)
         machine,
         queryPack.Id,
         options.MaxFiles,
-        results.ToArray());
+        results.ToArray(),
+        GetBenchmarkAssemblyHash());
 
     if (options.JsonOutputPath is not null)
     {
@@ -1473,10 +1483,15 @@ static RealCorpusBenchmarkResult RunRealCorpusWithCachedIndex(DiscoveredCorpus c
 
 static RealBuildMetrics BuildRealCorpusIndex(string indexRoot, DiscoveredCorpus corpus, BenchmarkOptions options)
 {
+    var sourceRevision = GetSourceRevision(corpus.Path);
+    var builderAssemblyHash = GetBenchmarkAssemblyHash();
     var buildStart = Stopwatch.GetTimestamp();
-    using var index = new SiftIndex(indexRoot, new SiftOptions());
-    var source = new FileSystemDocumentSource(corpus.Path, options.MaxFiles);
-    var buildMeasurement = MeasureBuildMetrics(() => index.Build(source).GetAwaiter().GetResult());
+    var siftOptions = new SiftOptions();
+    using var source = new FileSystemDocumentSource(
+        corpus.Path, indexRoot, siftOptions.MaxDocumentBytes, options.MaxFiles,
+        new HashSet<string>([".git", ".hg", ".svn", "node_modules", "bin", "obj"], StringComparer.OrdinalIgnoreCase));
+    using var index = new SiftIndex(indexRoot, siftOptions);
+    var buildMeasurement = MeasureManagedMemory(() => index.Build(source).GetAwaiter().GetResult());
     var buildStats = buildMeasurement.Stats;
     var buildElapsed = Stopwatch.GetElapsedTime(buildStart);
     var indexBytes = CountIndexBytes(indexRoot);
@@ -1489,7 +1504,7 @@ static RealBuildMetrics BuildRealCorpusIndex(string indexRoot, DiscoveredCorpus 
         buildStats.SubmittedDocuments,
         buildStats.IndexedDocuments,
         buildStats.RejectedDocuments,
-        buildStats.SubmittedBytes,
+        buildStats.SubmittedBytes + source.UnmaterializedRejectedBytes,
         buildStats.ContentBytes,
         indexBytes,
         inflationRatio,
@@ -1499,7 +1514,9 @@ static RealBuildMetrics BuildRealCorpusIndex(string indexRoot, DiscoveredCorpus 
         buildBytesPerSecond,
         buildMeasurement.PeakManagedBytes,
         options.MaxFiles,
-        CountSegments(indexRoot));
+        CountSegments(indexRoot),
+        sourceRevision,
+        builderAssemblyHash);
 }
 
 static UpdateBenchmarkCorpusResult RunUpdateBenchmarksForCorpus(
@@ -1720,7 +1737,7 @@ static CompactScenarioResult RunCompactScenarioIsolated(
             var beforeManifestBytes = new FileInfo(storage.ManifestPath).Length;
             var beforeSegmentSizes = GetSegmentSizes(storage, beforeManifest);
             var start = Stopwatch.GetTimestamp();
-            var compactMetrics = MeasureCompactionMetrics(() => index.Compact(new CompactOptions
+            var compactMetrics = MeasureManagedMemory(() => index.Compact(new CompactOptions
             {
                 MaxMergedSegments = 16,
                 DeadFractionThreshold = 0.0,
@@ -1802,7 +1819,7 @@ static CompactScenarioResult RunCompactScenarioSteadyState(
             var beforeManifestBytes = new FileInfo(storage.ManifestPath).Length;
             var beforeSegmentSizes = GetSegmentSizes(storage, beforeManifest);
             var start = Stopwatch.GetTimestamp();
-            var compactMetrics = MeasureCompactionMetrics(() => index.Compact(new CompactOptions
+            var compactMetrics = MeasureManagedMemory(() => index.Compact(new CompactOptions
             {
                 MaxMergedSegments = 16,
                 DeadFractionThreshold = 0.0,
@@ -1903,92 +1920,33 @@ static CompactScenarioMetrics BuildCompactScenarioMetrics(
         bytesWrittenToNewSegments);
 }
 
-static CompactionMeasurement MeasureCompactionMetrics(Func<CompactStats> run)
+static (T Stats, long PeakManagedBytes) MeasureManagedMemory<T>(Func<T> run)
 {
-    var peakManagedBytes = GC.GetTotalMemory(forceFullCollection: false);
+    var sampledPeak = GC.GetTotalMemory(forceFullCollection: false);
     using var cts = new CancellationTokenSource();
     var sampler = Task.Run(async () =>
     {
         while (!cts.IsCancellationRequested)
         {
-            var managedBytes = GC.GetTotalMemory(forceFullCollection: false);
-            if (managedBytes > peakManagedBytes)
-            {
-                peakManagedBytes = managedBytes;
-            }
-
-            try
-            {
-                await Task.Delay(5, cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+            sampledPeak = Math.Max(sampledPeak, GC.GetTotalMemory(forceFullCollection: false));
+            try { await Task.Delay(5, cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested) { break; }
         }
     });
 
+    T stats;
+    long finalBytes;
     try
     {
-        var stats = run();
-        peakManagedBytes = Math.Max(peakManagedBytes, GC.GetTotalMemory(forceFullCollection: false));
-        return new CompactionMeasurement(stats, peakManagedBytes);
+        stats = run();
+        finalBytes = GC.GetTotalMemory(forceFullCollection: false);
     }
     finally
     {
         cts.Cancel();
-        try
-        {
-            sampler.Wait();
-        }
-        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner => inner is TaskCanceledException or OperationCanceledException))
-        {
-        }
+        sampler.GetAwaiter().GetResult();
     }
-}
-
-static BuildMeasurement MeasureBuildMetrics(Func<BuildStats> run)
-{
-    var peakManagedBytes = GC.GetTotalMemory(forceFullCollection: false);
-    using var cts = new CancellationTokenSource();
-    var sampler = Task.Run(async () =>
-    {
-        while (!cts.IsCancellationRequested)
-        {
-            var managedBytes = GC.GetTotalMemory(forceFullCollection: false);
-            if (managedBytes > peakManagedBytes)
-            {
-                peakManagedBytes = managedBytes;
-            }
-
-            try
-            {
-                await Task.Delay(5, cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-        }
-    });
-
-    try
-    {
-        var stats = run();
-        peakManagedBytes = Math.Max(peakManagedBytes, GC.GetTotalMemory(forceFullCollection: false));
-        return new BuildMeasurement(stats, peakManagedBytes);
-    }
-    finally
-    {
-        cts.Cancel();
-        try
-        {
-            sampler.Wait();
-        }
-        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner => inner is TaskCanceledException or OperationCanceledException))
-        {
-        }
-    }
+    return (stats, Math.Max(sampledPeak, finalBytes));
 }
 
 static Dictionary<SegmentId, long> GetSegmentSizes(CorpusStorage storage, CorpusManifest manifest)
@@ -2502,6 +2460,21 @@ static CachedIndexState EnsureCachedIndex(DiscoveredCorpus corpus, BenchmarkOpti
         throw new InvalidOperationException($"Cached benchmark index '{cachePath}' is missing. Run with index preparation first.");
     }
 
+    if (!needsBuild)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (metadata.CacheVersion != 1 || metadata.CorpusId != corpus.Id || metadata.MaxFiles != options.MaxFiles ||
+            string.IsNullOrWhiteSpace(metadata.CorpusPath) ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(metadata.CorpusPath)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(corpus.Path)), comparison) ||
+            metadata.Build.SourceRevision != GetSourceRevision(corpus.Path))
+        {
+            throw new InvalidOperationException(
+                $"Cached benchmark index '{cachePath}' has different or obsolete source provenance. " +
+                "Rebuild with --refresh-index without --query-only.");
+        }
+    }
+
     if (needsBuild)
     {
         if (Directory.Exists(cachePath))
@@ -2516,7 +2489,8 @@ static CachedIndexState EnsureCachedIndex(DiscoveredCorpus corpus, BenchmarkOpti
             corpus.Path,
             options.MaxFiles,
             DateTimeOffset.UtcNow,
-            buildMetrics);
+            buildMetrics,
+            CacheVersion: 1);
         WriteCachedIndexMetadata(cachePath, metadata);
     }
 
@@ -2525,9 +2499,9 @@ static CachedIndexState EnsureCachedIndex(DiscoveredCorpus corpus, BenchmarkOpti
 
 static void RunUpdateBenchmarks(BenchmarkOptions options)
 {
-    var repoRoot = Directory.GetCurrentDirectory();
-    var corpusRoot = options.RealCorpusRoot ?? Path.Combine(repoRoot, "sift", "bench", "repos");
-    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "sift", "bench", "indexes");
+    var repoRoot = GetRepositoryRoot();
+    var corpusRoot = options.RealCorpusRoot ?? Path.Combine(repoRoot, "bench", "repos");
+    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "bench", "indexes");
     var corpora = DiscoverCorpora(corpusRoot, options.CorpusIds);
     var machine = new MachineInfo(
         RuntimeInformation.OSDescription,
@@ -2555,7 +2529,8 @@ static void RunUpdateBenchmarks(BenchmarkOptions options)
         DateTimeOffset.UtcNow,
         machine,
         options.MaxFiles,
-        results.ToArray());
+        results.ToArray(),
+        GetBenchmarkAssemblyHash());
 
     if (options.JsonOutputPath is not null)
     {
@@ -2566,9 +2541,9 @@ static void RunUpdateBenchmarks(BenchmarkOptions options)
 
 static void RunCompactBenchmarks(BenchmarkOptions options)
 {
-    var repoRoot = Directory.GetCurrentDirectory();
-    var corpusRoot = options.RealCorpusRoot ?? Path.Combine(repoRoot, "sift", "bench", "repos");
-    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "sift", "bench", "indexes");
+    var repoRoot = GetRepositoryRoot();
+    var corpusRoot = options.RealCorpusRoot ?? Path.Combine(repoRoot, "bench", "repos");
+    var indexCacheRoot = options.IndexCacheRoot ?? Path.Combine(repoRoot, "bench", "indexes");
     var corpora = DiscoverCorpora(corpusRoot, options.CorpusIds);
     var machine = new MachineInfo(
         RuntimeInformation.OSDescription,
@@ -2595,7 +2570,8 @@ static void RunCompactBenchmarks(BenchmarkOptions options)
         DateTimeOffset.UtcNow,
         machine,
         options.MaxFiles,
-        results.ToArray());
+        results.ToArray(),
+        GetBenchmarkAssemblyHash());
 
     if (options.JsonOutputPath is not null)
     {
@@ -2699,6 +2675,39 @@ static long CountIndexBytes(string corpusPath)
     return Directory.Exists(segmentsPath)
         ? Directory.EnumerateFiles(segmentsPath, "segment.pack", SearchOption.AllDirectories).Sum(static path => new FileInfo(path).Length)
         : 0L;
+}
+
+static string GetBenchmarkAssemblyHash()
+{
+    using var stream = File.OpenRead(typeof(SiftIndex).Assembly.Location);
+    return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
+}
+
+static string? GetSourceRevision(string corpusPath)
+{
+    var start = new ProcessStartInfo("git")
+    {
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false
+    };
+    foreach (var argument in new[] { "-C", Path.GetFullPath(corpusPath), "rev-parse", "HEAD" })
+        start.ArgumentList.Add(argument);
+    try
+    {
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(5000))
+        {
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit();
+            throw new InvalidOperationException("Timed out reading benchmark source revision.");
+        }
+        _ = error.GetAwaiter().GetResult();
+        return process.ExitCode == 0 ? output.GetAwaiter().GetResult().Trim() : null;
+    }
+    catch (System.ComponentModel.Win32Exception) { return null; } // Git is optional for non-repository corpora.
 }
 
 static string GetIndexCacheKey(string corpusId, int? maxFiles)
@@ -2826,7 +2835,7 @@ static uint[] IntersectAdaptiveSimd(uint[] left, uint[] right, byte[] checkpoint
 
 static string GetRepositoryRoot()
 {
-    return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+    return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 }
 
 static string GetProcessorName()

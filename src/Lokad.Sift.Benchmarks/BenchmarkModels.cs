@@ -62,21 +62,24 @@ internal readonly record struct RealCorpusBenchmarkRun(
     MachineInfo Machine,
     string QueryPackId,
     int? MaxFiles,
-    RealCorpusBenchmarkResult[] Corpora);
+    RealCorpusBenchmarkResult[] Corpora,
+    string BenchmarkAssemblySha256);
 
 internal readonly record struct UpdateBenchmarkRun(
     string ToolVersion,
     DateTimeOffset TimestampUtc,
     MachineInfo Machine,
     int? MaxFiles,
-    UpdateBenchmarkCorpusResult[] Corpora);
+    UpdateBenchmarkCorpusResult[] Corpora,
+    string BenchmarkAssemblySha256);
 
 internal readonly record struct CompactBenchmarkRun(
     string ToolVersion,
     DateTimeOffset TimestampUtc,
     MachineInfo Machine,
     int? MaxFiles,
-    CompactBenchmarkCorpusResult[] Corpora);
+    CompactBenchmarkCorpusResult[] Corpora,
+    string BenchmarkAssemblySha256);
 
 internal readonly record struct RealCorpusBenchmarkResult(
     string Id,
@@ -140,20 +143,13 @@ internal readonly record struct CompactScenarioMetrics(
     long BytesReadFromOldSegments,
     long BytesWrittenToNewSegments);
 
-internal readonly record struct CompactionMeasurement(
-    CompactStats Stats,
-    long PeakManagedBytes);
-
-internal readonly record struct BuildMeasurement(
-    BuildStats Stats,
-    long PeakManagedBytes);
-
 internal readonly record struct CachedIndexMetadata(
     string CorpusId,
     string CorpusPath,
     int? MaxFiles,
     DateTimeOffset BuiltAtUtc,
-    RealBuildMetrics Build);
+    RealBuildMetrics Build,
+    int CacheVersion = 0);
 
 internal readonly record struct RealBuildMetrics(
     int SubmittedDocuments,
@@ -169,7 +165,9 @@ internal readonly record struct RealBuildMetrics(
     double BuildBytesPerSecond,
     long PeakManagedBytes,
     int? MaxFiles,
-    int SegmentCount);
+    int SegmentCount,
+    string? SourceRevision = null,
+    string? BuilderAssemblySha256 = null);
 
 internal readonly record struct RealSnapshotMetrics(
     double OpenElapsedMilliseconds,

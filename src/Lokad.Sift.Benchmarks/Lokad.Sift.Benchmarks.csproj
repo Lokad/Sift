@@ -7,6 +7,7 @@
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="Lokad.Utf8Regex" />
     <Compile Include="..\..\examples\Utf8RegexAdapter.cs" Link="Adapters\Utf8RegexAdapter.cs" />
+    <Compile Include="..\Lokad.Sift.Cli\FileSystemDocumentSource.cs" Link="Input\FileSystemDocumentSource.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- Bench internal kernels in-assembly without granting friend access from

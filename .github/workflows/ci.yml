@@ -49,6 +49,12 @@ jobs:
           New-Item -ItemType Directory -Path artifacts/ci -Force | Out-Null
           try { ./tools/verify-regex-package.ps1 2>&1 | Tee-Object -FilePath artifacts/ci/package.log } catch { exit 1 }
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Verify portable benchmark launcher
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts/ci/empty-corpora -Force | Out-Null
+          ./bench.ps1 -SkipBuild -RealCorpusRoot artifacts/ci/empty-corpora -Warmup 0 -Iterations 1 -OutputPath artifacts/ci/benchmark-launcher.json
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Publish crash dumps
         if: failure()
         uses: actions/upload-artifact@v4

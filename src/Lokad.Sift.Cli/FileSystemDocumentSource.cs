@@ -5,20 +5,30 @@ internal sealed class FileSystemDocumentSource : IDocumentSource, IDisposable
     private readonly IEnumerator<string> _files;
     private readonly string _root;
     private readonly int _maximumBytes;
+    private readonly int? _maximumFiles;
+    private int _submittedFiles;
     private byte[]? _oversizedContent;
 
-    public FileSystemDocumentSource(string root, string corpusPath, int maximumBytes)
+    public FileSystemDocumentSource(
+        string root,
+        string corpusPath,
+        int maximumBytes,
+        int? maximumFiles = null,
+        IReadOnlySet<string>? excludedDirectories = null)
     {
-        _root = root;
+        _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        if ((File.GetAttributes(_root) & FileAttributes.ReparsePoint) != 0)
+            throw new ArgumentException("The input directory must not be a symbolic link or junction.", nameof(root));
         _maximumBytes = maximumBytes;
-        _files = EnumerateFiles(root, corpusPath).GetEnumerator();
+        _maximumFiles = maximumFiles;
+        _files = EnumerateFiles(_root, Path.TrimEndingDirectorySeparator(Path.GetFullPath(corpusPath)), excludedDirectories).GetEnumerator();
     }
 
     // The core's content length is int-sized. Rejection bodies are bounded overflow
     // buffers, so restore observed file sizes when reporting CLI byte totals.
     public long UnmaterializedRejectedBytes { get; private set; }
 
-    private static IEnumerable<string> EnumerateFiles(string root, string corpusPath)
+    private static IEnumerable<string> EnumerateFiles(string root, string corpusPath, IReadOnlySet<string>? excludedDirectories)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var pending = new Stack<string>();
@@ -29,6 +39,7 @@ internal sealed class FileSystemDocumentSource : IDocumentSource, IDisposable
                 if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0) yield return file;
             foreach (var child in Directory.EnumerateDirectories(directory))
                 if (!string.Equals(child, corpusPath, comparison) &&
+                    excludedDirectories?.Contains(Path.GetFileName(child)) != true &&
                     (File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
         }
     }
@@ -37,12 +48,13 @@ internal sealed class FileSystemDocumentSource : IDocumentSource, IDisposable
 
     public bool TryReadNext(out SubmittedDocument document)
     {
-        if (!_files.MoveNext())
+        if (_maximumFiles is int maximum && _submittedFiles >= maximum || !_files.MoveNext())
         {
             document = default;
             return false;
         }
         var file = _files.Current;
+        _submittedFiles++;
         using var stream = new FileStream(file, FileMode.Open, FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete, bufferSize: 1);
         var content = ReadContent(stream, out var observedLength);
