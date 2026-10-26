@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Runtime.CompilerServices;
 
 namespace Lokad.Sift.Tests;
 
@@ -88,6 +89,8 @@ public sealed class DeletionCollectionFailureTests
         public int DisposeCalls { get; private set; }
         public int Count => 1;
         public DocumentKey this[int index] => new("missing.txt");
+        // Keep the external throw sites visible to the stack-preservation assertion in Release.
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public IEnumerator<DocumentKey> GetEnumerator() => phase == "get-enumerator" ? throw failure : new Enumerator(this);
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
         private sealed class Enumerator(FailingDeletions owner) : IEnumerator<DocumentKey>
@@ -105,8 +108,11 @@ public sealed class DeletionCollectionFailureTests
             public void Dispose() => owner.DisposeEnumerator();
             public void Reset() => throw new NotSupportedException();
         }
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private DocumentKey GetCurrent() => phase == "current" ? throw failure : new("missing.txt");
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private void CheckMoveNext() { if (phase == "move-next") throw failure; }
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private void DisposeEnumerator() { DisposeCalls++; if (phase == "dispose") throw failure; }
     }
 }
