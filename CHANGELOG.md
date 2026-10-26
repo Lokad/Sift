@@ -19,6 +19,9 @@
   before content verification. Proven include membership is reused, and the
   prepared filter determines its verification mode once. Filtering, Unicode path
   semantics, natural result order and index compatibility are preserved.
+- Exact-path lookup can prune sorted keys to a segment's path range, accounting
+  for boundary-search work while retaining cheap path walks. Matching ordinals
+  are already ordered and no longer require a second sort.
 - Insensitive byte scanning filters candidate positions by folded endpoint bytes.
   A comparison budget bounds verification work and falls back to linear KMP;
   ordering, overlaps, cancellation and scalar-platform behavior are preserved.

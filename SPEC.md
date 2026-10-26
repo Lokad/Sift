@@ -144,6 +144,11 @@ apply. Both membership routes preserve ordinal UTF-16 semantics for Unicode path
 The prepared immutable filter determines whether path decoding is needed once,
 avoiding a repeated scan of its glob kinds for every document. Accepted ordinals
 stay in segment order. Mixed and wildcard include sets retain glob verification.
+Dictionary lookup can narrow the sorted keys to the first/last persisted path of
+the selected prefix range. The comparison budget includes both boundary searches;
+cheap path walks do not pay that setup cost. Ordered keys resolve to ordered
+ordinals without an additional sort. Dead and overlay visibility still apply to
+the resulting physical candidates.
 
 ### 4.3 Case semantics
 

@@ -46,14 +46,31 @@ internal ref struct SegmentScopeBuilder(
                 prefixDocuments);
         }
 
+        var exactPaths = matcher.ExactIncludePaths;
+        var membershipComparisons = exactPaths is null ? 0 : 1 + BitOperations.Log2((uint)exactPaths.Length);
+        var lookupComparisons = exactPaths is null ? 0 : (long)exactPaths.Length *
+            (2 + BitOperations.Log2((uint)Math.Max(1, cache.Segment.DocumentCount)));
+        var walkComparisons = (long)prefixDocuments * membershipComparisons;
         OrdinalSet scopedOrdinals;
         var includesVerified = false;
         // Compare dictionary probes (including the final equality check) with
         // walking the prefix range and testing sorted include membership.
-        if (matcher.ExactIncludePaths is { } paths &&
-            (long)paths.Length * (2 + BitOperations.Log2((uint)Math.Max(1, cache.Segment.DocumentCount))) <
-            (long)prefixDocuments * (1 + BitOperations.Log2((uint)paths.Length)))
+        if (exactPaths is not null && lookupComparisons < walkComparisons)
         {
+            ReadOnlySpan<string> paths = exactPaths;
+            // Account for both boundary searches without penalizing cheap walks.
+            if (lookupComparisons + 2 * membershipComparisons < walkComparisons)
+            {
+                var first = cache.Segment.GetDocument(prefixRange.StartInclusive);
+                var last = cache.Segment.GetDocument(prefixRange.EndExclusive - 1);
+                var start = FindPathBound(paths, first, afterEqual: false);
+                var end = FindPathBound(paths, last, afterEqual: true);
+                if (end < start)
+                {
+                    throw new InvalidDataException("Sift segment document paths are not strictly ordered.");
+                }
+                paths = paths[start..end];
+            }
             var found = new uint[paths.Length];
             var count = 0;
             foreach (var path in paths)
@@ -65,8 +82,7 @@ internal ref struct SegmentScopeBuilder(
                     found[count++] = ordinal;
                 }
             }
-            // Document ordinals preserve this segment's natural search order.
-            Array.Sort(found, 0, count);
+            // Sorted exact paths resolve to increasing ordinals; no second sort is needed.
             scopedOrdinals = OrdinalSet.FromSorted(found, count);
             // The remaining path checks must still apply prefix, excludes and regex.
             includesVerified = true;
@@ -154,6 +170,26 @@ internal ref struct SegmentScopeBuilder(
                 nonAsciiBytes),
             prefixDocuments,
             pathIndexCandidates);
+    }
+
+    private int FindPathBound(ReadOnlySpan<string> paths, SegmentDocument boundary, bool afterEqual)
+    {
+        var low = 0;
+        var high = paths.Length;
+        while (low < high)
+        {
+            var middle = low + ((high - low) >> 1);
+            var comparison = cache.Segment.ComparePathOrdinal(boundary, paths[middle]);
+            if (comparison > 0 || (afterEqual && comparison == 0))
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+        return low;
     }
 
     private SegmentPathScope CreateResult(
