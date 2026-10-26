@@ -1157,16 +1157,10 @@ internal sealed partial class CorpusStorage : ISiftStorage
             throw new InvalidDataException("Invalid Sift generation lease checksum.");
         }
 
-        var segmentIds = new SegmentId[count];
-        for (var i = 0; i < count; i++)
-        {
-            segmentIds[i] = new SegmentId(LittleEndianCodec.ReadUInt64(span[(GenerationLeaseHeaderSize + i * sizeof(ulong))..]));
-        }
-
         return new GenerationLeaseData(
             new CorpusId(new Guid(span[12..28])),
             new StorageGeneration(LittleEndianCodec.ReadUInt64(span[28..])),
-            segmentIds);
+            span.Slice(GenerationLeaseHeaderSize, count * sizeof(ulong)));
     }
 
     private static void ValidateGenerationLease(FileStream stream, CorpusManifest manifest)
@@ -1174,14 +1168,14 @@ internal sealed partial class CorpusStorage : ISiftStorage
         var lease = ReadGenerationLease(stream);
         if (lease.CorpusId != manifest.CorpusId ||
             lease.Generation != manifest.Generation ||
-            lease.SegmentIds.Length != manifest.Segments.Count)
+            lease.SegmentCount != manifest.Segments.Count)
         {
             throw new InvalidDataException("Sift generation lease does not match its manifest.");
         }
 
-        for (var i = 0; i < lease.SegmentIds.Length; i++)
+        for (var i = 0; i < lease.SegmentCount; i++)
         {
-            if (lease.SegmentIds[i] != manifest.Segments[i].SegmentId)
+            if (lease.GetSegmentId(i) != manifest.Segments[i].SegmentId)
             {
                 throw new InvalidDataException("Sift generation lease segment table does not match its manifest.");
             }
@@ -1261,9 +1255,9 @@ internal sealed partial class CorpusStorage : ISiftStorage
                     continue;
                 }
 
-                for (var i = 0; i < lease.SegmentIds.Length; i++)
+                for (var i = 0; i < lease.SegmentCount; i++)
                 {
-                    protectedSegmentIds.Add(lease.SegmentIds[i]);
+                    protectedSegmentIds.Add(lease.GetSegmentId(i));
                 }
 
                 leasedGenerationCount++;

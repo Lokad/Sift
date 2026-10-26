@@ -1,3 +1,5 @@
+using Lokad.Sift.LowLevel;
+
 namespace Lokad.Sift.Storage;
 
 internal sealed partial class CorpusStorage
@@ -7,10 +9,19 @@ internal sealed partial class CorpusStorage
         string DirectoryPath,
         long Bytes);
 
-    private readonly record struct GenerationLeaseData(
-        CorpusId CorpusId,
-        StorageGeneration Generation,
-        SegmentId[] SegmentIds);
+    private readonly ref struct GenerationLeaseData(
+        CorpusId corpusId,
+        StorageGeneration generation,
+        ReadOnlySpan<byte> segmentTable)
+    {
+        public CorpusId CorpusId { get; } = corpusId;
+        public StorageGeneration Generation { get; } = generation;
+        private ReadOnlySpan<byte> SegmentTable { get; } = segmentTable;
+        public int SegmentCount => SegmentTable.Length / sizeof(ulong);
+
+        public SegmentId GetSegmentId(int index) =>
+            new(LittleEndianCodec.ReadUInt64(SegmentTable[(index * sizeof(ulong))..]));
+    }
 
     private readonly record struct LeaseProtection(
         HashSet<SegmentId> ProtectedSegmentIds,

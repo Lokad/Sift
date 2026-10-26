@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using Lokad.Sift;
+using Lokad.Sift.LowLevel;
 using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Tests;
@@ -424,11 +425,17 @@ public sealed class StorageLifecycleTests
         Assert.False(index.GetStorageStats().IsReclamationBlocked);
     }
 
-    [Fact]
-    public async Task CorruptCurrentGenerationLeaseFailsClosed()
+    [Theory]
+    [InlineData("count")]
+    [InlineData("corpus")]
+    [InlineData("generation")]
+    [InlineData("first-segment")]
+    [InlineData("last-segment")]
+    [InlineData("segment-order")]
+    public async Task CorruptCurrentGenerationLeaseFailsClosed(string corruption)
     {
-        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
-        using var index = new SiftIndex(fixture.CorpusPath);
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"), ("src/b.txt", "beta\n"));
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(fixture.CreateSource());
         var storage = TestHelpers.GetStorage(index);
         var manifest = storage.ReadManifest();
@@ -445,13 +452,49 @@ public sealed class StorageLifecycleTests
         File.Copy(sourcePack, orphanPack);
 
         var corruptLeaseBytes = File.ReadAllBytes(leasePath);
-        BinaryPrimitives.WriteInt32LittleEndian(corruptLeaseBytes.AsSpan(36), int.MaxValue);
+        if (corruption == "count")
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(corruptLeaseBytes.AsSpan(36), int.MaxValue);
+        }
+        else
+        {
+            Assert.Equal(2, manifest.Segments.Count);
+            if (corruption == "segment-order")
+            {
+                var first = BinaryPrimitives.ReadUInt64LittleEndian(corruptLeaseBytes.AsSpan(40));
+                var last = BinaryPrimitives.ReadUInt64LittleEndian(corruptLeaseBytes.AsSpan(48));
+                BinaryPrimitives.WriteUInt64LittleEndian(corruptLeaseBytes.AsSpan(40), last);
+                BinaryPrimitives.WriteUInt64LittleEndian(corruptLeaseBytes.AsSpan(48), first);
+            }
+            else
+            {
+                var offset = corruption switch
+                {
+                    "corpus" => 12,
+                    "generation" => 28,
+                    "first-segment" => 40,
+                    "last-segment" => 48,
+                    _ => throw new ArgumentException("Unknown corruption.", nameof(corruption))
+                };
+                corruptLeaseBytes[offset] ^= 1;
+            }
+
+            var checksumOffset = corruptLeaseBytes.Length - sizeof(ulong);
+            BinaryPrimitives.WriteUInt64LittleEndian(corruptLeaseBytes.AsSpan(checksumOffset),
+                Hashing.Fnv1A64(corruptLeaseBytes.AsSpan(0, checksumOffset)));
+        }
         File.WriteAllBytes(leasePath, corruptLeaseBytes);
 
         var blocked = index.GetStorageStats();
         Assert.True(blocked.IsReclamationBlocked);
         Assert.True(File.Exists(orphanPack));
-        Assert.Throws<InvalidDataException>(() => index.OpenSnapshot());
+        var failure = Assert.Throws<InvalidDataException>(() => index.OpenSnapshot());
+        Assert.Equal(corruption switch
+        {
+            "count" => "Invalid Sift generation lease segment count.",
+            "corpus" or "generation" => "Sift generation lease does not match its manifest.",
+            _ => "Sift generation lease segment table does not match its manifest."
+        }, failure.Message);
         Assert.True(index.RequiresRebuild);
 
         await index.Build(fixture.CreateSource());
