@@ -15,7 +15,7 @@ internal static class ReentrancyGuard
     {
         for (var scope = Current.Value; scope is not null; scope = scope.Parent)
         {
-            if (scope.IsActive && ReferenceEquals(scope.Owner, owner))
+            if (scope.Owner is { } activeOwner && ReferenceEquals(activeOwner, owner))
             {
                 return true;
             }
@@ -26,21 +26,21 @@ internal static class ReentrancyGuard
 
     internal sealed class Scope(object owner, Scope? parent) : IDisposable
     {
-        private int _active = 1;
+        private object? _owner = owner;
 
-        internal object Owner { get; } = owner;
+        internal object? Owner => Volatile.Read(ref _owner);
         internal Scope? Parent { get; } = parent;
-        internal bool IsActive => Volatile.Read(ref _active) != 0;
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _active, 0) == 0)
+            if (Interlocked.Exchange(ref _owner, null) is null)
             {
                 return;
             }
 
             // Child execution contexts can retain this node after the owning operation exits.
-            // Marking it inactive keeps those inherited stacks from reporting stale ownership.
+            // Clearing ownership both deactivates the guard and stops inherited
+            // contexts from keeping a completed operation's index/snapshot alive.
             if (ReferenceEquals(Current.Value, this))
             {
                 Current.Value = Parent;

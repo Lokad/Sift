@@ -124,6 +124,9 @@
 
 ### Fixed
 
+- Completed reentrancy guards release their owner references so inherited child
+  execution contexts do not retain disposed indexes, snapshots or managed document
+  packs. Active nested and inherited callback protections remain in force.
 - Index disposal cancels queued mutations, validation and reclamation without
   waiting for a spare thread-pool worker. Running work still drains, mutation
   serialization is preserved, and reclamation worker ownership is handed off

@@ -11,7 +11,9 @@ public sealed class LifetimeProbeTests
     [InlineData("queued-compact")]
     [InlineData("queued-reclamation")]
     [InlineData("active-drain")]
-    public async Task ProductShutdownDrainsRunningWorkWithoutWaitingForQueuedWorkers(string scenario)
+    [InlineData("scope-retention")]
+    [InlineData("guard-protection")]
+    public async Task ProductLifetimesRemainSafeAcrossQueuedAndInheritedWork(string scenario)
     {
         using var fixture = new CorpusFixture();
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).AncestorsAndSelf()

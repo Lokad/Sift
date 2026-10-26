@@ -427,6 +427,10 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   `RegexTimeoutPolicy` controls Sift's regex preparation/verification timeouts;
   it does not convert collector failures into search results.
 - Dispose snapshots when they are no longer needed; old generations intentionally defer physical segment reclamation.
+- Index disposal cancels queued mutations, validation and reclamation without
+  requiring a spare thread-pool worker, and waits for running work to drain.
+  Active callbacks must cooperate with cancellation. Completed callback guards
+  release their owners even when child tasks retain an inherited execution context.
 - `Update(...)` is batch-atomic: a path cannot appear in both upserts and deletions in the same batch.
 - Document source, content-memory access and commit metadata callback failures propagate unchanged.
   A caller failure during build/update does not itself require rebuilding a

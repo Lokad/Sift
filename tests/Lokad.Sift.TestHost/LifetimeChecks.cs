@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Lokad.Sift;
 
 internal static class LifetimeChecks
@@ -9,6 +10,8 @@ internal static class LifetimeChecks
         {
             if (scenario == "active-drain") await CheckActiveDrain();
             else if (scenario == "queued-reclamation") await CheckReclamation(root);
+            else if (scenario == "scope-retention") await CheckScopeRetention();
+            else if (scenario == "guard-protection") await CheckGuardProtection();
             else await CheckQueued(scenario);
             Console.WriteLine("Lifetime check passed: " + scenario);
             return 0;
@@ -119,6 +122,98 @@ internal static class LifetimeChecks
         throw new Exception("Queued operation completed instead of cancelling.");
     }
 
+    private static async Task CheckScopeRetention()
+    {
+        var control = CreateDisposedOwners();
+        RequireCollectible(control.Owners);
+        using var release = new ManualResetEventSlim();
+        using var started = new ManualResetEventSlim();
+        var inherited = CreateDisposedOwners(release, started);
+        try
+        {
+            Require(started.Wait(TimeSpan.FromSeconds(5)), "Inherited child did not start.");
+            RequireCollectible(inherited.Owners);
+            Require(!inherited.Child.IsCompleted, "Child did not outlive its disposed owners.");
+        }
+        finally { release.Set(); await inherited.Child; }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (WeakReference[] Owners, Task Child) CreateDisposedOwners(
+        ManualResetEventSlim? release = null, ManualResetEventSlim? started = null)
+    {
+        using var index = SiftIndex.CreateInMemory();
+        index.Build(new Documents("needle")).GetAwaiter().GetResult();
+        using var snapshot = index.OpenSnapshot();
+        var hits = new InheritingHits(release, started);
+        snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
+        var owners = new List<WeakReference> { new(index), new(snapshot) };
+        Require(snapshot.TryGetDocumentBytes(new DocumentKey("a.txt"), out var bytes), "Document was not indexed.");
+        if (MemoryMarshal.TryGetArray(bytes, out var array) && array.Array is not null)
+            owners.Add(new WeakReference(array.Array));
+        return (owners.ToArray(), hits.Child);
+    }
+
+    private static void RequireCollectible(WeakReference[] owners)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (owners.All(owner => !owner.IsAlive)) return;
+            Thread.Sleep(10);
+        }
+        throw new Exception("An inactive inherited guard retained a disposed index, snapshot or managed document pack.");
+    }
+
+    private static async Task CheckGuardProtection()
+    {
+        using var index = SiftIndex.CreateInMemory();
+        await index.Build(new Documents("needle"));
+        using var outer = index.OpenSnapshot();
+        using var inner = index.OpenSnapshot();
+        using var release = new ManualResetEventSlim();
+        Task inherited = Task.CompletedTask;
+        var callbacks = 0;
+        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive);
+        try
+        {
+            outer.Search(query, new(), new Hits(() =>
+            {
+                callbacks++;
+                inner.Search(query, new(), new Hits(() =>
+                {
+                    callbacks++;
+                    RequireRejected(inner.Dispose);
+                    RequireRejected(outer.Dispose);
+                    Task.Run(() =>
+                    {
+                        RequireRejected(inner.Dispose);
+                        RequireRejected(outer.Dispose);
+                    }).GetAwaiter().GetResult();
+                    inherited = Task.Run(() => { release.Wait(); inner.Dispose(); outer.Dispose(); });
+                    return false;
+                }));
+                RequireRejected(outer.Dispose);
+                inner.Dispose();
+                return false;
+            }));
+        }
+        finally { release.Set(); await inherited; }
+        Require(callbacks == 2, "Nested search callbacks did not run.");
+        // Disposal remains idempotent, including after inherited inactive scopes exit.
+        inner.Dispose();
+        outer.Dispose();
+    }
+
+    private static void RequireRejected(Action action)
+    {
+        try { action(); }
+        catch (InvalidOperationException) { return; }
+        throw new Exception("An active callback was allowed to dispose its own snapshot.");
+    }
+
     private static Task DrainQueuedCallbacks()
     {
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -129,6 +224,22 @@ internal static class LifetimeChecks
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
+    }
+
+    private sealed class Hits(Func<bool> onHit) : IHitCollector
+    {
+        public bool OnHit(in RawHit hit) => onHit();
+    }
+
+    private sealed class InheritingHits(ManualResetEventSlim? release, ManualResetEventSlim? started) : IHitCollector
+    {
+        public Task Child = Task.CompletedTask;
+        public bool OnHit(in RawHit hit)
+        {
+            if (release is not null)
+                Child = Task.Run(() => { started!.Set(); release.Wait(); });
+            return false;
+        }
     }
 
     private sealed class Documents(string text) : IDocumentSource
