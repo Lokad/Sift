@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Disk snapshot opening selects cached or refreshed manifest reads directly,
+  avoiding a temporary delegate. Validation refresh and generation-lease retries
+  are unchanged.
 - Bounded caches allocate value-factory closures only on
   misses, avoiding a temporary object on cache hits. Coalescing, eviction and
   fault handling are unchanged.

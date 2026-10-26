@@ -513,15 +513,15 @@ internal sealed partial class CorpusStorage : ISiftStorage
 
     StorageReadSnapshot ISiftStorage.OpenReadSnapshot()
     {
-        return OpenReadSnapshot(_manifestCache.Read);
+        return OpenReadSnapshot(refreshManifest: false);
     }
 
     StorageReadSnapshot ISiftStorage.OpenReadSnapshotForValidation()
     {
-        return OpenReadSnapshot(_manifestCache.Refresh);
+        return OpenReadSnapshot(refreshManifest: true);
     }
 
-    private StorageReadSnapshot OpenReadSnapshot(Func<string, CorpusManifest> readManifest)
+    private StorageReadSnapshot OpenReadSnapshot(bool refreshManifest)
     {
         // Publication can advance the manifest between the read and lease open; retry only that race.
         while (true)
@@ -533,7 +533,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
                     EmptyDisposable.Instance);
             }
 
-            var manifest = readManifest(ManifestPath);
+            var manifest = ReadSnapshotManifest(refreshManifest);
             var leasePath = GetGenerationLeasePath(manifest.Generation);
             FileStream lease;
             try
@@ -543,7 +543,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
             }
             catch (FileNotFoundException)
             {
-                if (HasManifest && readManifest(ManifestPath).Generation != manifest.Generation)
+                if (HasManifest && ReadSnapshotManifest(refreshManifest).Generation != manifest.Generation)
                 {
                     continue;
                 }
@@ -553,7 +553,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
             }
             catch (DirectoryNotFoundException)
             {
-                if (HasManifest && readManifest(ManifestPath).Generation != manifest.Generation)
+                if (HasManifest && ReadSnapshotManifest(refreshManifest).Generation != manifest.Generation)
                 {
                     continue;
                 }
@@ -563,7 +563,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
             }
             catch (IOException)
             {
-                if (HasManifest && readManifest(ManifestPath).Generation != manifest.Generation)
+                if (HasManifest && ReadSnapshotManifest(refreshManifest).Generation != manifest.Generation)
                 {
                     continue;
                 }
@@ -583,6 +583,9 @@ internal sealed partial class CorpusStorage : ISiftStorage
             }
         }
     }
+
+    private CorpusManifest ReadSnapshotManifest(bool refreshManifest) =>
+        refreshManifest ? RefreshManifest() : ReadManifest();
 
     StorageStats ISiftStorage.GetStorageStats()
     {
