@@ -38,21 +38,19 @@ internal sealed class MutationCoordinator : IDisposable
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _cancellation.Token);
-        await _gate.WaitAsync(operationCancellation.Token).ConfigureAwait(false);
+        var operationToken = operationCancellation.Token;
+        request.ObserveCancellation(operationToken);
+        await _gate.WaitAsync(operationToken).ConfigureAwait(false);
         try
         {
-            lock (_sync)
-            {
-                _currentActivity = activity;
-            }
-
             return await Task.Run(
                 async () =>
                 {
+                    if (!request.TryStart(activity)) throw new OperationCanceledException(operationToken);
                     using var callbackScope = ReentrancyGuard.Enter(this);
-                    return await mutation(operationCancellation.Token).ConfigureAwait(false);
+                    return await mutation(operationToken).ConfigureAwait(false);
                 },
-                CancellationToken.None).ConfigureAwait(false);
+                operationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -110,7 +108,8 @@ internal sealed class MutationCoordinator : IDisposable
             WaitForIdle();
             _cancellation.Dispose();
             _idle.Dispose();
-            _gate.Dispose();
+            // Cancelled requests may still resume their gate/task cleanup. They
+            // own no mutation resources, but an acquired permit still needs release.
         }
     }
 
@@ -125,23 +124,44 @@ internal sealed class MutationCoordinator : IDisposable
 
     private sealed class RequestScope(MutationCoordinator owner) : IDisposable
     {
-        private MutationCoordinator? _owner = owner;
+        private int _state; // 0 queued, 1 running, 2 settled
+        private CancellationTokenRegistration _cancellation;
+
+        public void ObserveCancellation(CancellationToken token) =>
+            _cancellation = token.UnsafeRegister(static state => ((RequestScope)state!).CancelQueued(), this);
+
+        public bool TryStart(SiftWriteActivity activity)
+        {
+            lock (owner._sync)
+            {
+                if (_state != 0 || owner._stopped) return false;
+                _state = 1;
+                owner._currentActivity = activity;
+                return true;
+            }
+        }
+
+        private void CancelQueued()
+        {
+            lock (owner._sync)
+            {
+                if (_state == 0) Settle();
+            }
+        }
 
         public void Dispose()
         {
-            var currentOwner = Interlocked.Exchange(ref _owner, null);
-            if (currentOwner is null)
+            _cancellation.Dispose();
+            lock (owner._sync)
             {
-                return;
+                if (_state != 2) Settle();
             }
+        }
 
-            lock (currentOwner._sync)
-            {
-                if (--currentOwner._requests == 0)
-                {
-                    currentOwner._idle.Set();
-                }
-            }
+        private void Settle()
+        {
+            _state = 2;
+            if (--owner._requests == 0) owner._idle.Set();
         }
     }
 }

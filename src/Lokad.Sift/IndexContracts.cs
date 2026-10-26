@@ -379,7 +379,7 @@ public readonly record struct WriteActivityStats
 
     // True while a mutation is running or waiting for the writer gate.
     public bool IsWriteBusy { get; }
-    // Idle when work is queued but no mutation currently owns the writer gate.
+    // Idle while work is queued and no mutation body has started.
     public SiftWriteActivity CurrentActivity { get; }
 }
 

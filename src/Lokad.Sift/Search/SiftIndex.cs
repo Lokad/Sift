@@ -45,7 +45,7 @@ public sealed class SiftIndex : ISiftIndex
         failure: null);
     private int _activeValidations;
     private int _reclamationRequests;
-    private int _reclamationWorkerActive;
+    private ReclamationWorkerState _reclamationWorkerState;
     private int _disposed;
     private long _validationStatsRevision;
     private Exception? _rebuildCause;
@@ -268,20 +268,32 @@ public sealed class SiftIndex : ISiftIndex
     public Task<IndexValidationStats> Validate(CancellationToken cancellationToken)
     {
         ThrowIfRebuildRequired();
-        var validation = BeginValidation();
-        return Task.Run(() =>
+        lock (_activitySync)
         {
-            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                _validationCancellation.Token);
+            ThrowIfDisposed();
+            var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, _validationCancellation.Token);
+            var token = operationCancellation.Token;
+            Task<IndexValidationStats> task;
+            try { task = Task.Run(() => RunValidation(token), token); }
+            catch { operationCancellation.Dispose(); throw; }
+            _ = task.ContinueWith(static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+                operationCancellation, CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return task;
+        }
+
+        IndexValidationStats RunValidation(CancellationToken operationToken)
+        {
+            using var validation = BeginValidation(operationToken);
             var acquiredGate = false;
             var validationRevision = 0L;
             try
             {
-                _validationGate.Wait(operationCancellation.Token);
+                _validationGate.Wait(operationToken);
                 acquiredGate = true;
                 validationRevision = BeginValidationAttempt();
-                return ValidateIndex(operationCancellation.Token, validationRevision);
+                return ValidateIndex(operationToken, validationRevision);
             }
             catch (OperationCanceledException)
             {
@@ -312,10 +324,8 @@ public sealed class SiftIndex : ISiftIndex
                 {
                     _validationGate.Release();
                 }
-
-                validation.Dispose();
             }
-        });
+        }
 
         IndexValidationStats ValidateIndex(
             CancellationToken cancellationToken,
@@ -877,6 +887,14 @@ public sealed class SiftIndex : ISiftIndex
         }
         _validationsIdle.Wait();
         _reclamationCancellation.Cancel();
+        lock (_reclamationSync)
+        {
+            if (_reclamationWorkerState == ReclamationWorkerState.Queued)
+            {
+                _reclamationWorkerState = ReclamationWorkerState.Idle;
+                _reclamationIdle.Set();
+            }
+        }
         _reclamationIdle.Wait();
         _retainedIndexingWorkspaceLease?.Dispose();
         _regexContext.ReleaseOwner();
@@ -922,21 +940,28 @@ public sealed class SiftIndex : ISiftIndex
             }
 
             _reclamationRequests = 1;
-            if (_reclamationWorkerActive != 0)
-            {
-                return;
-            }
-
-            _reclamationWorkerActive = 1;
-            _reclamationIdle.Reset();
-            if (!QueueReclamationWorkItem())
-            {
-                // Queue rejection transfers no ownership to a worker. Restore the idle
-                // state while leaving the request pending for a later scheduling attempt.
-                _reclamationWorkerActive = 0;
-                _reclamationIdle.Set();
-            }
+            if (_reclamationWorkerState != ReclamationWorkerState.Idle) return;
+            QueueReclamationUnderLock();
         }
+    }
+
+    private void QueueReclamationUnderLock()
+    {
+        _reclamationWorkerState = ReclamationWorkerState.Queued;
+        _reclamationIdle.Reset();
+        try
+        {
+            if (QueueReclamationWorkItem()) return;
+        }
+        catch
+        {
+            _reclamationWorkerState = ReclamationWorkerState.Idle;
+            _reclamationIdle.Set();
+            throw;
+        }
+        // Queue rejection leaves the durable request pending for a later attempt.
+        _reclamationWorkerState = ReclamationWorkerState.Idle;
+        _reclamationIdle.Set();
     }
 
     private bool QueueReclamationWorkItem()
@@ -955,6 +980,12 @@ public sealed class SiftIndex : ISiftIndex
 
     private void RunScheduledReclamation()
     {
+        lock (_reclamationSync)
+        {
+            // Dispose may retire a queued callback without requiring a pool worker.
+            if (_reclamationWorkerState != ReclamationWorkerState.Queued) return;
+            _reclamationWorkerState = ReclamationWorkerState.Running;
+        }
         try
         {
             while (true)
@@ -983,8 +1014,6 @@ public sealed class SiftIndex : ISiftIndex
                         continue;
                     }
 
-                    _reclamationWorkerActive = 0;
-                    _reclamationIdle.Set();
                     return;
                 }
             }
@@ -993,20 +1022,28 @@ public sealed class SiftIndex : ISiftIndex
         {
             lock (_reclamationSync)
             {
-                if (_reclamationWorkerActive != 0)
+                // Keep this worker's ownership until the final handoff. Publishing
+                // Idle earlier lets this finally overwrite a replacement worker.
+                if (_disposed == 0 && _reclamationRequests != 0) QueueReclamationUnderLock();
+                else
                 {
-                    _reclamationWorkerActive = 0;
+                    _reclamationWorkerState = ReclamationWorkerState.Idle;
                     _reclamationIdle.Set();
                 }
             }
         }
     }
 
-    private IDisposable BeginValidation()
+    private enum ReclamationWorkerState { Idle, Queued, Running }
+
+    private IDisposable BeginValidation(CancellationToken cancellationToken)
     {
         lock (_activitySync)
         {
-            ThrowIfDisposed();
+            // A scheduled callback can lose the race to Dispose before registering.
+            // It owns no activity yet and must not touch the retired primitives.
+            if (_disposed != 0) throw new OperationCanceledException(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (++_activeValidations == 1)
             {
                 _validationsIdle.Reset();

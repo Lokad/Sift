@@ -124,6 +124,10 @@
 
 ### Fixed
 
+- Index disposal cancels queued mutations, validation and reclamation without
+  waiting for a spare thread-pool worker. Running work still drains, mutation
+  serialization is preserved, and reclamation worker ownership is handed off
+  atomically so a finishing worker cannot retire its replacement.
 - Benchmark cache reuse validates source root, file cap, ingestion policy and Git
   revision, and reports the builder/executing assembly hashes. Old or mismatched
   benchmark caches require explicit refresh; Sift index formats are unchanged.
