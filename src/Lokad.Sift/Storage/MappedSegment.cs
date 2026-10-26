@@ -34,8 +34,20 @@ internal sealed unsafe partial class MappedSegment : IDisposable
         try
         {
             // Mapped-view capacity is page-rounded on Windows; persisted bounds use the exact file length.
-            _fileLength = new FileInfo(path).Length;
-            _mappedFile = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+            var fileHandle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            try
+            {
+                _fileLength = RandomAccess.GetLength(fileHandle);
+                _mappedFile = MemoryMappedFile.CreateFromFile(
+                    fileHandle, null, 0, MemoryMappedFileAccess.Read,
+                    HandleInheritability.None, leaveOpen: false);
+            }
+            catch
+            {
+                // Ownership transfers to the mapping only after creation succeeds.
+                fileHandle.Dispose();
+                throw;
+            }
             _view = _mappedFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
             _view.SafeMemoryMappedViewHandle.AcquirePointer(ref _pointer);
             _pointer += _view.PointerOffset;

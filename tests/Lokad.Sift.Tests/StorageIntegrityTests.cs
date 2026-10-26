@@ -801,16 +801,53 @@ public sealed class StorageIntegrityTests
         Assert.True(newSnapshot.TryGetDocumentBytes(new DocumentKey("src/new.txt"), out _));
     }
 
-    [Fact]
-    public void TruncatedSegmentIsRejectedAsInvalidData()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(SegmentFormat.HeaderSize)]
+    public void FailedMappedSegmentOpenReleasesFile(int length)
     {
         using var fixture = new CorpusFixture();
-        var path = Path.Combine(fixture.CorpusPath, "truncated.pack");
         Directory.CreateDirectory(fixture.CorpusPath);
-        File.WriteAllBytes(path, [0x01, 0x02, 0x03]);
+        var path = Path.Combine(fixture.CorpusPath, "invalid.pack");
+        File.WriteAllBytes(path, new byte[length]);
 
-        Assert.Throws<InvalidDataException>(() =>
-            new MappedSegment(path, validateChecksums: true, CancellationToken.None));
+        if (length == 0)
+        {
+            Assert.Throws<ArgumentException>(() =>
+                new MappedSegment(path, validateChecksums: true, CancellationToken.None));
+        }
+        else
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                new MappedSegment(path, validateChecksums: true, CancellationToken.None));
+        }
+
+        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Assert.Equal(length, exclusive.Length);
+    }
+
+    [Fact]
+    public async Task MappedSegmentHoldsReadSharingUntilDisposed()
+    {
+        using var fixture = new CorpusFixture(("src/a.txt", "alpha\n"));
+        using var index = new SiftIndex(fixture.CorpusPath);
+        await index.Build(fixture.CreateSource());
+        var storage = new CorpusStorage(fixture.CorpusPath);
+        var segmentId = storage.ReadManifest().Segments.Single().SegmentId;
+        var path = Directory.EnumerateFiles(
+            Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
+
+        using (var segment = storage.OpenSegment(segmentId))
+        {
+            using var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Assert.True(reader.Length > SegmentFormat.HeaderSize);
+            Assert.Throws<IOException>(() =>
+                new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None));
+        }
+
+        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Assert.True(exclusive.Length > SegmentFormat.HeaderSize);
     }
 
     [Fact]

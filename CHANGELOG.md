@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Segment opening reads the exact file length from the handle used by its memory
+  mapping, avoiding a separate file metadata object. Read sharing, mapping lifetimes
+  and corruption validation are unchanged.
 - Generation lease readers consume segment IDs directly from the validated payload,
   removing a second array and conversion pass. Validation and reclamation protection
   are unchanged.
@@ -55,8 +58,6 @@
   lone-surrogate literals retain their existing verification semantics.
 - Removed an unused prepared-text ASCII classification and private statistics/
   snapshot forwarding types. Public statistics and snapshot lifetimes are unchanged.
-- Generation leases decode directly into their final typed ID array, removing an
-  intermediate allocation and conversion pass. Lease semantics are unchanged.
 - Stopped generating the unused ASCII-folded path trigram index and removed its
   dedicated counting/filling passes. Existing v3/v4 files remain readable; new
   v4 files retain empty compatible regions for older readers. Case-sensitive
