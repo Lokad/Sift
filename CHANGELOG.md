@@ -122,6 +122,9 @@
 
 ### Fixed
 
+- Product builds and packs reject the internal verification symbol with compiler-
+  accepted whitespace or separators. Package checks verify the guard and remove
+  their temporary source/feed/package trees unless diagnostic retention is requested.
 - Index disposal finishes draining mutations and releasing owned resources before
   rethrowing failures from caller cancellation callbacks. Retained snapshots and
   active queries keep their compiled regex handles until their own lifetimes end.

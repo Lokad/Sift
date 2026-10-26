@@ -1,9 +1,11 @@
-param([switch]$SkipPack)
+param([switch]$SkipPack, [switch]$KeepTemporaryFiles)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'verify-build-guard.ps1')
 $packageFeed = Join-Path $repoRoot 'artifacts\regex-decoupling\nuget'
 $checkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('sift-package-check-' + [guid]::NewGuid().ToString('N'))
+try {
 [xml]$projectDefinition = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Lokad.Sift\Lokad.Sift.csproj') -Raw
 $packageVersion = $projectDefinition.Project.PropertyGroup.Version
 [xml]$centralVersions = Get-Content -LiteralPath (Join-Path $repoRoot 'Directory.Packages.props') -Raw
@@ -117,4 +119,19 @@ foreach ($consumerKind in @('core', 'producer')) {
     }
     Invoke-DotNet @('run', '--project', $projectPath, '-c', 'Release', '--no-restore', '--tl:off', '--nologo', '-v', 'minimal')
 }
-Write-Output ('Exact Release package and isolated consumers verified: ' + $checkRoot)
+Write-Output 'Exact Release package and isolated consumers verified.'
+}
+finally {
+    if ($KeepTemporaryFiles) {
+        Write-Output ('Package-check temporary files retained: ' + $checkRoot)
+    }
+    elseif (Test-Path -LiteralPath $checkRoot) {
+        $temporaryParent = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+        $cleanupRoot = [System.IO.Path]::GetFullPath($checkRoot)
+        if ([System.IO.Path]::GetDirectoryName($cleanupRoot) -ne $temporaryParent.TrimEnd([System.IO.Path]::DirectorySeparatorChar) -or
+            [System.IO.Path]::GetFileName($cleanupRoot) -notmatch '^sift-package-check-[0-9a-f]{32}$') {
+            throw 'Refusing to remove an unexpected package-check temporary directory.'
+        }
+        Remove-Item -LiteralPath $cleanupRoot -Recurse -Force
+    }
+}

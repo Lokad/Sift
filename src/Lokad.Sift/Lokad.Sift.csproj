@@ -35,7 +35,7 @@
   </ItemGroup>
   <Target Name="RejectInternalVerificationInProduct" BeforeTargets="CoreCompile;Pack">
     <Error
-      Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';SIFT_INTERNAL_VERIFICATION;'))"
+      Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(DefineConstants)', '(^|[;,\s])SIFT_INTERNAL_VERIFICATION($|[;,\s])'))"
       Text="SIFT_INTERNAL_VERIFICATION is test-only and must not be compiled or packed into Lokad.Sift." />
   </Target>
   <Target Name="EnforceReleasePackageConfiguration" BeforeTargets="GenerateNuspec"
