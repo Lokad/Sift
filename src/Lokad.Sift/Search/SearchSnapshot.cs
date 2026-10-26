@@ -16,7 +16,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
 {
     private const int ParallelHitBufferCapacity = 256;
     private readonly IReadOnlyList<SegmentManifestEntry> _segments;
-    private readonly Dictionary<SegmentId, SegmentManifestEntry> _segmentsById;
     private readonly ISiftStorage _storage;
     private readonly SiftOptions _options;
     private readonly RegexExecutionContext _regexContext;
@@ -89,7 +88,6 @@ internal sealed class SearchSnapshot : IIndexSnapshot
             // A snapshot pins the manifest generation, not every segment mapping.
             // Search operations open only the segment packs they are actively using.
             _segments = _storageSnapshot.Manifest.Segments;
-            _segmentsById = _segments.ToDictionary(static entry => entry.SegmentId);
             _planExplainer = new SearchPlanExplainer(_segments, _options, OpenSegment);
             _regexContext = regexContext?.AddOwner() ?? new RegexExecutionContext(options.RegexEngine);
         }
@@ -631,7 +629,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId);
+            var cache = GetHitSegment(hit.SegmentId);
             return HitMaterializer.Materialize(
                 cache.Segment,
                 hit,
@@ -654,7 +652,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var segment = OpenSegment(hit.SegmentId).Segment;
+            var segment = GetHitSegment(hit.SegmentId).Segment;
             return new DocumentKey(segment.GetPath(segment.GetDocument(hit.DocumentOrdinal.Value)));
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
@@ -677,7 +675,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var cache = OpenSegment(hit.SegmentId);
+            var cache = GetHitSegment(hit.SegmentId);
             return HitMaterializer.MaterializeWithMatchingLine(
                 cache.Segment,
                 hit,
@@ -730,7 +728,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         try
         {
             using var operation = BeginOperation();
-            var segment = OpenSegment(hit.SegmentId).Segment;
+            var segment = GetHitSegment(hit.SegmentId).Segment;
             return segment.GetContentMemory(segment.GetDocument(hit.DocumentOrdinal.Value));
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
@@ -869,11 +867,15 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         // Disposing the lock here would race that caller's cleanup path.
     }
 
-    private SegmentCache OpenSegment(SegmentId segmentId)
+    private SegmentCache GetHitSegment(SegmentId segmentId)
     {
-        if (_segmentsById.TryGetValue(segmentId, out var entry))
+        // A hit is emitted only after its segment is cached. Entries live until snapshot disposal.
+        lock (_segmentCachesSync)
         {
-            return OpenSegment(entry);
+            if (_segmentCaches.TryGetValue(segmentId, out var cache))
+            {
+                return cache;
+            }
         }
 
         throw new InvalidOperationException($"Unknown segment id {segmentId.Value}.");

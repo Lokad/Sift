@@ -15,6 +15,9 @@
 
 ### Changed
 
+- Snapshot hit access resolves segments directly from the existing mapping cache,
+  removing a redundant segment-metadata dictionary. Hit ownership, generation leases
+  and snapshot/overlay lifetimes are unchanged.
 - Segment opening reads the exact file length from the handle used by its memory
   mapping, avoiding a separate file metadata object. Read sharing, mapping lifetimes
   and corruption validation are unchanged.

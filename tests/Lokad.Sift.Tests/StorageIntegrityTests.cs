@@ -107,25 +107,22 @@ public sealed class StorageIntegrityTests
     [Fact]
     public void SnapshotConstructionFailureReleasesGenerationLease()
     {
-        var entry = new SegmentManifestEntry(
-            new SegmentId(1),
-            DocumentCount: 0,
-            ContentBytes: 0,
-            DeadOrdinalSet.Empty,
-            DeadContentBytes: 0);
         var manifest = new CorpusManifest(
             CorpusId.New(),
             new StorageGeneration(1),
-            [entry, entry]);
+            []);
         var lease = new TrackingDisposable();
         var storage = new SnapshotOnlyStorage(manifest, lease);
+        var regexContext = new RegexExecutionContext(engine: null);
+        regexContext.ReleaseOwner();
 
-        Assert.Throws<ArgumentException>(() => new SearchSnapshot(
+        Assert.Throws<ObjectDisposedException>(() => new SearchSnapshot(
             storage,
             new SiftOptions(),
             new SearchOptions(),
             onDisposed: null,
-            onIndexFailure: null));
+            onIndexFailure: null,
+            regexContext: regexContext));
 
         Assert.True(lease.IsDisposed);
     }

@@ -38,6 +38,46 @@ public sealed class HitDocumentKeyTests
         Assert.Equal(path, key.Path);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentSearchesResolveOwnedHitsAcrossSegments(bool persistent)
+    {
+        using var fixture = new CorpusFixture(
+            ("src/a.txt", "needle café"),
+            ("src/b-😀.txt", "needle café"),
+            ("src/c.txt", "needle café"));
+        var options = new SiftOptions { TargetSegmentDocumentCount = 1 };
+        using var index = persistent
+            ? new SiftIndex(fixture.CorpusPath, options)
+            : SiftIndex.CreateInMemory(options);
+        await index.Build(fixture.CreateSource());
+        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 2));
+        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive);
+        var collectors = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            var collector = new KeyCollector(snapshot);
+            snapshot.Search(query, new PathFilter(), collector);
+            return collector;
+        }))).WaitAsync(TimeSpan.FromSeconds(10));
+
+        await index.Build(new InMemoryDocumentSource([("src/replacement.txt", "replacement")]));
+        foreach (var collector in collectors)
+        {
+            Assert.Equal(new[] { "src/a.txt", "src/b-😀.txt", "src/c.txt" },
+                collector.Keys.Select(key => key.Path).Order(StringComparer.Ordinal));
+            for (var i = 0; i < collector.Hits.Count; i++)
+            {
+                var hit = collector.Hits[i];
+                Assert.Equal(collector.Keys[i], snapshot.GetDocumentKey(hit));
+                Assert.Equal(collector.Keys[i].Path, snapshot.Materialize(hit, 0, 0).Path);
+                Assert.Equal(collector.Keys[i].Path, snapshot.MaterializeWithMatchingLine(hit, 0, 0).Hit.Path);
+                Assert.Equal("needle café"u8.ToArray(), snapshot.GetDocumentBytes(hit).ToArray());
+                Assert.Equal("needle café"u8.ToArray(), collector.Contents[i].ToArray());
+            }
+        }
+    }
+
     [Fact]
     public async Task OverlayKeysFollowVisibilityAndRejectForeignAndExpiredHits()
     {
