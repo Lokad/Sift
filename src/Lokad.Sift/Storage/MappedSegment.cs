@@ -626,16 +626,18 @@ internal sealed unsafe partial class MappedSegment : IDisposable
 
     private static string? GetExclusivePrefixUpperBound(string prefix)
     {
-        var upperBound = prefix.ToCharArray();
-        for (var i = upperBound.Length - 1; i >= 0; i--)
+        for (var i = prefix.Length - 1; i >= 0; i--)
         {
-            if (upperBound[i] == char.MaxValue)
+            if (prefix[i] == char.MaxValue)
             {
                 continue;
             }
 
-            upperBound[i]++;
-            return new string(upperBound, 0, i + 1);
+            return string.Create(i + 1, prefix, static (upperBound, source) =>
+            {
+                source.AsSpan(0, upperBound.Length).CopyTo(upperBound);
+                upperBound[^1]++;
+            });
         }
 
         return null;

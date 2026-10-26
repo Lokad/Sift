@@ -4,6 +4,47 @@ namespace Lokad.Sift.Tests;
 
 public sealed class UnicodePathFilterTests
 {
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData('a', 1)]
+    [InlineData('a', 2)]
+    [InlineData(0, 1)]
+    [InlineData(0, 2)]
+    [InlineData(0xD7FF, 0)]
+    [InlineData(0xD800, 0)]
+    [InlineData(0xDBFF, 0)]
+    [InlineData(0x10FFFF, 0)]
+    [InlineData(0x10FFFF, 1)]
+    [InlineData(0xE000, 0)]
+    public async Task OrdinalPrefixBoundariesPreserveMaximumCharactersAndSurrogates(int prefixStart, int trailingMaximumCharacters)
+    {
+        var first = prefixStart switch
+        {
+            0 => string.Empty,
+            > char.MaxValue => char.ConvertFromUtf32(prefixStart),
+            _ => ((char)prefixStart).ToString()
+        };
+        var prefix = first + new string(char.MaxValue, trailingMaximumCharacters);
+        string[] paths = ["a/leaf", "a\uffff/leaf", "a\uffff\uffff/leaf", "b/leaf",
+            "\ud7ff/leaf", "\U00010000/leaf", "\U0010ffff/leaf", "\U0010ffff\uffff/leaf",
+            "\ue000/leaf", "\uffff/leaf", "\uffff\uffff/leaf", "\uffff\uffff\uffff/leaf"];
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 3 });
+        await index.Build(Source(paths));
+        using var retained = index.OpenSnapshot();
+        using var overlay = index.OpenOverlaySnapshot();
+        string[] added = ["a\uffff-new.txt", "\uffff\uffff-new.txt"];
+        await overlay.Update(Source(added), [new DocumentKey("a\uffff/leaf")]);
+        var current = paths.Where(path => path != "a\uffff/leaf").Concat(added).ToArray();
+        var filter = new PathFilter { PathPrefix = prefix };
+
+        foreach (var pattern in new[] { "", "needle" })
+        {
+            var query = new SearchQuery(pattern, PatternMode.Literal, CaseMode.Sensitive);
+            AssertPaths(retained, query, filter, ExpectedPaths(paths, filter));
+            AssertPaths(overlay, query, filter, ExpectedPaths(current, filter));
+        }
+    }
+
     private static readonly string[] Paths = ["😀.txt", "�.txt", "prefix/😀.txt", "prefix/�.txt",
         "plain.txt", "café.txt", "😀/leaf.txt", "�/leaf.txt", "prefix/😀/leaf.txt", "prefix/�/leaf.txt"];
 
