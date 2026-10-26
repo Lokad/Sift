@@ -13,6 +13,8 @@ public sealed class CandidateGenerationTests
     [InlineData(50, true)]
     [InlineData(51, false)]
     [InlineData(51, true)]
+    [InlineData(200, false)]
+    [InlineData(200, true)]
     public async Task MultipleGramCandidatesRespectScopesAcrossTheDensityBoundary(int count, bool explicitOrdinals)
     {
         using var index = SiftIndex.CreateInMemory();
@@ -225,6 +227,24 @@ public sealed class CandidateGenerationTests
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(9), 2);
 
         Assert.Throws<InvalidDataException>(() => PostingsCodec.Parse(payload));
+    }
+
+    [Theory]
+    [InlineData(64)]
+    [InlineData(4096)]
+    public void BufferedPostingsDecodingRequiresExactCountAndCompletePayload(int count)
+    {
+        var ordinals = CreateRange(0, count, 3);
+        var payload = PostingsCodec.Encode(ordinals);
+        var decoded = new uint[count];
+
+        PostingsCodec.Decode(payload, decoded);
+
+        Assert.Equal(ordinals, decoded);
+        Assert.Throws<InvalidDataException>(() => PostingsCodec.Decode(payload, new uint[count - 1]));
+        Assert.Throws<InvalidDataException>(() => PostingsCodec.Decode(payload, new uint[count + 1]));
+        // Even a suffix beyond every requested candidate must not be ignored.
+        Assert.Throws<InvalidDataException>(() => PostingsCodec.Decode([.. payload, 0x80], new uint[count]));
     }
 
     private static uint[] CreateRange(uint start, int count, uint step)

@@ -127,6 +127,9 @@ internal static class PostingsCodec
         }
     }
 
+    internal static void Decode(ReadOnlySpan<byte> payload, Span<uint> destination) =>
+        DecodeOrdinals(Parse(payload), destination);
+
     internal static void DecodeIntoBitSet(ReadOnlySpan<byte> payload, PooledBitSet bitSet)
     {
         var view = Parse(payload);

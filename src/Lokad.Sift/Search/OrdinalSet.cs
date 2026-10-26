@@ -104,6 +104,39 @@ internal sealed class OrdinalSet
         return true;
     }
 
+    // Restrict a sorted posting list without enumerating every ordinal in the range.
+    public int FilterSortedRange(Span<uint> ordinals)
+    {
+        if (!_isRange)
+        {
+            throw new InvalidOperationException("A range is required to filter postings by bounds.");
+        }
+
+        var count = 0;
+        var excludedIndex = _excludedStart;
+        foreach (var ordinal in ordinals)
+        {
+            if (ordinal >= _endExclusive)
+            {
+                break;
+            }
+            if (ordinal < _startInclusive)
+            {
+                continue;
+            }
+            while (excludedIndex < _excludedEnd && _excludedOrdinals[excludedIndex] < ordinal)
+            {
+                excludedIndex++;
+            }
+            if (excludedIndex == _excludedEnd || _excludedOrdinals[excludedIndex] != ordinal)
+            {
+                ordinals[count++] = ordinal;
+            }
+        }
+
+        return count;
+    }
+
     public void CopyTo(PooledBitSet destination)
     {
         // Filling runs touches at most the range's words plus two boundary words

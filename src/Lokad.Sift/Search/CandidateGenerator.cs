@@ -149,7 +149,6 @@ internal static class CandidateGenerator
 
     public static CandidateResult Generate(MappedSegment segment, OrdinalSet scopeOrdinals, IndexRegionPair pair, ReadOnlySpan<int> grams)
     {
-        var postingsBytesRead = 0L;
         if (grams.Length == 0)
         {
             return new CandidateResult(scopeOrdinals, 0);
@@ -157,6 +156,7 @@ internal static class CandidateGenerator
 
         if (scopeOrdinals.Count * 4 >= segment.DocumentCount)
         {
+            var postingsBytesRead = 0L;
             using var candidateBits = new PooledBitSet(segment.DocumentCount);
             using var postingsBits = new PooledBitSet(segment.DocumentCount);
             scopeOrdinals.CopyTo(candidateBits);
@@ -177,31 +177,62 @@ internal static class CandidateGenerator
             return new CandidateResult(OrdinalSet.FromSorted(candidateBits.ToOrdinals()), postingsBytesRead);
         }
 
-        var hasExplicitOrdinals = scopeOrdinals.TryGetSpan(out var explicitOrdinals);
-        var bufferLength = Math.Max(scopeOrdinals.Count, 1);
+        return GenerateSparseIntersection(segment, scopeOrdinals, pair, grams);
+    }
+
+    private static CandidateResult GenerateSparseIntersection(
+        MappedSegment segment,
+        OrdinalSet scopeOrdinals,
+        IndexRegionPair pair,
+        ReadOnlySpan<int> grams)
+    {
+        if (!segment.TryGetPostings(pair, grams[0], out var firstPostings, out var firstFrequency))
+        {
+            return new CandidateResult(OrdinalSet.Empty, 0);
+        }
+        if (firstFrequency < 0)
+        {
+            throw new InvalidDataException("Sift postings contain a negative document frequency.");
+        }
+
+        var postingsBytesRead = (long)firstPostings.Length;
+        var bufferLength = Math.Max(Math.Min(scopeOrdinals.Count, firstFrequency), 1);
         var firstBuffer = ArrayPool<uint>.Shared.Rent(bufferLength);
         uint[]? secondBuffer = null;
-        ReadOnlySpan<uint> current;
-        var writeToFirstBuffer = true;
-        if (hasExplicitOrdinals)
+        try
         {
-            current = explicitOrdinals;
-            if (grams.Length > 1)
+            ReadOnlySpan<uint> current;
+            var hasExplicitOrdinals = scopeOrdinals.TryGetSpan(out var explicitOrdinals);
+            if (!hasExplicitOrdinals && firstFrequency < scopeOrdinals.Count)
+            {
+                // Decode the shorter posting list once, then restrict it by range.
+                var decoded = firstBuffer.AsSpan(0, firstFrequency);
+                PostingsCodec.Decode(firstPostings, decoded);
+                current = decoded[..scopeOrdinals.FilterSortedRange(decoded)];
+            }
+            else
+            {
+                if (!hasExplicitOrdinals)
+                {
+                    secondBuffer = ArrayPool<uint>.Shared.Rent(Math.Max(scopeOrdinals.Count, 1));
+                    scopeOrdinals.CopyTo(secondBuffer);
+                    explicitOrdinals = secondBuffer.AsSpan(0, scopeOrdinals.Count);
+                }
+                var count = PostingsCodec.IntersectSorted(explicitOrdinals, firstPostings, firstFrequency, firstBuffer);
+                current = firstBuffer.AsSpan(0, count);
+            }
+
+            if (current.Length == 0)
+            {
+                return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
+            }
+            if (grams.Length > 1 && secondBuffer is null)
             {
                 secondBuffer = ArrayPool<uint>.Shared.Rent(bufferLength);
             }
-        }
-        else
-        {
-            scopeOrdinals.CopyTo(firstBuffer);
-            current = firstBuffer.AsSpan(0, scopeOrdinals.Count);
-            secondBuffer = ArrayPool<uint>.Shared.Rent(bufferLength);
-            writeToFirstBuffer = false;
-        }
 
-        try
-        {
-            for (var i = 0; i < grams.Length; i++)
+            var writeToFirstBuffer = false;
+            for (var i = 1; i < grams.Length; i++)
             {
                 if (!segment.TryGetPostings(pair, grams[i], out var postings, out var docFreq))
                 {
@@ -217,12 +248,9 @@ internal static class CandidateGenerator
                 {
                     return new CandidateResult(OrdinalSet.Empty, postingsBytesRead);
                 }
-
             }
 
-            return new CandidateResult(
-                OrdinalSet.FromSorted(current.ToArray()),
-                postingsBytesRead);
+            return new CandidateResult(OrdinalSet.FromSorted(current.ToArray()), postingsBytesRead);
         }
         finally
         {

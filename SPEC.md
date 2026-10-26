@@ -621,6 +621,15 @@ Guidelines:
 * path prefix filters use binary search over sorted path rows
 * path substring/regex should use path trigram index if literal extraction succeeds; otherwise verify paths directly over current scope
 
+Scope execution can retain contiguous ordinal ranges. Bitmap masks fill live runs
+by word when that takes fewer writes than setting each live ordinal. Sparse
+intersections can decode a smaller first posting list and filter its ordinals by
+range and deletion membership without materializing the whole scope. Decoded seeds
+still require complete payload consumption and the declared document frequency;
+segment validation retains ownership of structural checks. These are internal
+execution choices: filters constrain final verified results and natural hit order
+continues to follow the snapshot's segment order.
+
 If a query has no content term, the backend returns document-level path matches without touching `ContentBlob`.
 
 ### 8.2.1 Path-first narrowing

@@ -57,6 +57,11 @@ public sealed class OrdinalMaskTests
             var expected = Enumerable.Range((int)start, (int)(end - start)).Select(n => (uint)n)
                 .Where(n => !excluded.Contains(n)).Concat([0u, 32u, 160u]).Distinct().Order();
             Assert.Equal(expected, bits.ToOrdinals());
+
+            var candidates = Enumerable.Range(0, 161).Where(n => n % 3 == 0).Select(n => (uint)n).ToArray();
+            var expectedCandidates = candidates.Where(n => n >= start && n < end && !excluded.Contains(n)).ToArray();
+            var count = scope.FilterSortedRange(candidates);
+            Assert.Equal(expectedCandidates, candidates[..count]);
         }
     }
 }

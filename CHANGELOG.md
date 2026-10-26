@@ -15,6 +15,11 @@
 
 ### Changed
 
+- Sparse posting intersections can decode a smaller first list once and restrict
+  it directly by range and deletion membership. Contiguous scopes avoid an ordinal
+  copy, while full payload consumption, frequency checks and final verification
+  are preserved. Temporary intersection buffers follow the smaller input.
+
 - Contiguous ordinal scopes fill bitmap words in runs, retaining point writes
   when excluded-document holes make them cheaper. Existing destination bits,
   snapshot visibility and index compatibility are preserved.
