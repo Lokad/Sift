@@ -34,9 +34,9 @@
   segments. Ordinal UTF-16 semantics are unchanged.
 - Snapshot generation lease handles avoid an unnecessary managed file buffer.
   Lease validation, file sharing and lock lifetimes are unchanged.
-- Disk storage computes its segment and metadata paths once per instance, avoiding
-  repeated string construction during segment opens and snapshot checks. Filesystem
-  behavior is unchanged.
+- Disk storage computes its segment and metadata paths once per instance and
+  formats segment IDs without temporary strings when opening, validating or sizing
+  segment packs. Filesystem behavior is unchanged.
 - Plan candidate lists reserve only the capacity needed for literal or regex
   planning. Candidate choices, costs and diagnostic alternatives are unchanged.
 - Segment opening formats region-bounds diagnostics only when validation fails,

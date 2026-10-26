@@ -237,7 +237,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
 #if SIFT_INTERNAL_VERIFICATION
         Interlocked.Increment(ref _segmentOpenCount);
 #endif
-        var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
+        var path = GetSegmentPackPath(segmentId);
         return OpenAndValidateIdentity(
             path,
             segmentId,
@@ -251,7 +251,7 @@ internal sealed partial class CorpusStorage : ISiftStorage
         Interlocked.Increment(ref _segmentOpenCount);
 #endif
         var segmentId = entry.SegmentId;
-        var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
+        var path = GetSegmentPackPath(segmentId);
         var validationGate = _segmentValidationGates.GetOrAdd(segmentId, static _ => new object());
         while (!Monitor.TryEnter(validationGate, millisecondsTimeout: 50))
         {
@@ -279,8 +279,15 @@ internal sealed partial class CorpusStorage : ISiftStorage
 
     public long GetSegmentBytes(SegmentId segmentId)
     {
-        var path = Path.Combine(SegmentsPath, segmentId.Value.ToString("X16"), "segment.pack");
+        var path = GetSegmentPackPath(segmentId);
         return new FileInfo(path).Length;
+    }
+
+    private string GetSegmentPackPath(SegmentId segmentId)
+    {
+        Span<char> directoryName = stackalloc char[16];
+        segmentId.Value.TryFormat(directoryName, out _, "X16");
+        return Path.Join(SegmentsPath.AsSpan(), directoryName, "segment.pack");
     }
 
     public long? GetAvailableBytes()
