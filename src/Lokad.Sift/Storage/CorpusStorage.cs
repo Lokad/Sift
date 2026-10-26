@@ -43,22 +43,26 @@ internal sealed partial class CorpusStorage : ISiftStorage
     internal CorpusStorage(string rootPath, long maximumPhysicalBytes)
     {
         _rootPath = rootPath;
+        ManifestPath = Path.Combine(rootPath, "manifest.bin");
         SegmentsPath = Path.Combine(rootPath, "segments");
+        LockPath = Path.Combine(rootPath, "lock");
+        GenerationLeasesPath = Path.Combine(LockPath, "generations");
+        ReclamationStatePath = Path.Combine(LockPath, "reclamation.state");
         _maximumPhysicalBytes = maximumPhysicalBytes;
     }
 
-    public string ManifestPath => Path.Combine(_rootPath, "manifest.bin");
+    public string ManifestPath { get; }
     public string SegmentsPath { get; }
     public string TempPath => Path.Combine(_rootPath, "temp");
-    public string LockPath => Path.Combine(_rootPath, "lock");
-    internal string GenerationLeasesPath => Path.Combine(LockPath, "generations");
+    public string LockPath { get; }
+    internal string GenerationLeasesPath { get; }
 #if SIFT_INTERNAL_VERIFICATION
     internal long ChecksumValidationCount => Interlocked.Read(ref _checksumValidationCount);
     internal long SegmentOpenCount => Interlocked.Read(ref _segmentOpenCount);
     internal long CorpusPhysicalScanCount => Interlocked.Read(ref _corpusPhysicalScanCount);
     internal long ManifestParseCount => _manifestCache.ParseCount;
 #endif
-    private string ReclamationStatePath => Path.Combine(LockPath, "reclamation.state");
+    private string ReclamationStatePath { get; }
     private string RebuildRequiredPath => Path.Combine(LockPath, "rebuild.required");
 #if SIFT_INTERNAL_VERIFICATION
     internal PublicationFaultInjector? FaultInjector { get; set; }
