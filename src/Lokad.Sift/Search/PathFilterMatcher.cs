@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Lokad.Sift;
 using Lokad.Sift.LowLevel;
+using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Search;
 
@@ -53,13 +54,18 @@ internal sealed class PathFilterMatcher
         _pathPrefixUtf8 = _pathPrefix is null ? [] : UnicodeText.IsWellFormedUtf16(_pathPrefix)
             ? Encoding.UTF8.GetBytes(_pathPrefix) : null;
         _includes = CompileGlobs(filter.IncludeGlobs);
-        ExactIncludePaths = _includes.Length > 0 && _includes.All(static glob => glob.Kind == GlobMatcherKind.Exact)
-            ? _includes.Select(static glob => glob.ExactPath).Distinct(StringComparer.Ordinal).ToArray()
-            : null;
+        if (_includes.Length > 0 && _includes.All(static glob => glob.Kind == GlobMatcherKind.Exact))
+        {
+            _includes = _includes.DistinctBy(static glob => glob.ExactPath, StringComparer.Ordinal).ToArray();
+            Array.Sort(_includes, static (left, right) => string.CompareOrdinal(left.ExactPath, right.ExactPath));
+            ExactIncludePaths = _includes.Select(static glob => glob.ExactPath).ToArray();
+        }
         _excludes = CompileGlobs(filter.ExcludeGlobs);
         _pathRegex = string.IsNullOrWhiteSpace(filter.PathRegex)
             ? null
             : CreateRegex(filter.PathRegex);
+        RequiresStringPathVerification = _pathPrefixUtf8 is null || _pathRegex is not null ||
+            HasRegexGlob(_includes) || HasRegexGlob(_excludes);
         _accelerationFragments = BuildAccelerationFragments(filter);
         _pathTrigrams = BuildPathTrigrams(_accelerationFragments);
 
@@ -95,17 +101,23 @@ internal sealed class PathFilterMatcher
     public string? PathPrefixUpperBound { get; }
     public bool UsesPathIndex => _accelerationFragments.Length > 0;
     public bool RequiresPathVerification => _includes.Length > 0 || _excludes.Length > 0 || _pathRegex is not null;
-    public bool RequiresStringPathVerification => _pathPrefixUtf8 is null || _pathRegex is not null ||
-        HasRegexGlob(_includes) || HasRegexGlob(_excludes);
+    public bool RequiresStringPathVerification { get; }
 
-    public bool IsMatch(string path)
+    public bool IsMatch(string path, bool includesVerified)
     {
         if (_pathPrefix is not null && !path.StartsWith(_pathPrefix, StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (_includes.Length > 0)
+        if (!includesVerified && ExactIncludePaths is { } exactPaths)
+        {
+            if (Array.BinarySearch(exactPaths, path, StringComparer.Ordinal) < 0)
+            {
+                return false;
+            }
+        }
+        else if (!includesVerified && _includes.Length > 0)
         {
             var included = false;
             for (var i = 0; i < _includes.Length; i++)
@@ -134,7 +146,7 @@ internal sealed class PathFilterMatcher
         return _pathRegex is null || _pathRegex.IsMatch(path);
     }
 
-    public bool IsMatch(ReadOnlySpan<byte> pathUtf8)
+    public bool IsMatch(ReadOnlySpan<byte> pathUtf8, bool includesVerified)
     {
         if (_pathPrefixUtf8 is not { } prefixUtf8 ||
             prefixUtf8.Length > 0 && !pathUtf8.StartsWith(prefixUtf8))
@@ -142,7 +154,35 @@ internal sealed class PathFilterMatcher
             return false;
         }
 
-        if (_includes.Length > 0)
+        if (!includesVerified && ExactIncludePaths is not null)
+        {
+            var low = 0;
+            var high = _includes.Length - 1;
+            var found = false;
+            while (low <= high)
+            {
+                var middle = low + ((high - low) >> 1);
+                var comparison = _includes[middle].CompareExactPath(pathUtf8);
+                if (comparison == 0)
+                {
+                    found = true;
+                    break;
+                }
+                if (comparison < 0)
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle - 1;
+                }
+            }
+            if (!found)
+            {
+                return false;
+            }
+        }
+        else if (!includesVerified && _includes.Length > 0)
         {
             var included = false;
             for (var i = 0; i < _includes.Length; i++)
@@ -387,6 +427,7 @@ internal sealed class GlobMatcher
 
     public GlobMatcherKind Kind => _kind;
     public string ExactPath => _value;
+    public int CompareExactPath(ReadOnlySpan<byte> path) => MappedSegment.ComparePathOrdinal(_valueUtf8, path);
 
     public static GlobMatcher Create(string glob)
     {

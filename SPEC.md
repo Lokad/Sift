@@ -136,11 +136,14 @@ A path filter consists of `PathPrefix`, `IncludeGlobs[]`, `ExcludeGlobs[]`, and
 * Generated glob regexes use strict whole-input anchors; user path regexes retain
   .NET regex anchor and newline semantics
 
-Literal include-glob alternatives may use exact lookups in the existing sorted
-path dictionary before content verification. A comparison bound selects lookups
-only when their binary-search work is smaller than walking the prefix range;
-dense scopes retain the existing scan. Accepted ordinals stay in segment order
-and still pass exclusions, path regexes, deletion and overlay visibility checks.
+Literal include-glob alternatives use exact lookups in the existing sorted path
+dictionary or a prefix-range walk with binary include membership. A comparison
+bound selects between those strategies. Include membership proven by exact lookup
+is reused; prefixes, exclusions, path regexes and deletion/overlay visibility still
+apply. Both membership routes preserve ordinal UTF-16 semantics for Unicode paths.
+The prepared immutable filter determines whether path decoding is needed once,
+avoiding a repeated scan of its glob kinds for every document. Accepted ordinals
+stay in segment order. Mixed and wildcard include sets retain glob verification.
 
 ### 4.3 Case semantics
 

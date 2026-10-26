@@ -15,9 +15,10 @@
 
 ### Changed
 
-- Literal include-glob alternatives can resolve paths through the segment's
-  existing dictionary before content verification. Dense scopes retain the scan
-  path; filtering, natural result order and index compatibility are preserved.
+- Literal include-glob sets choose exact dictionary lookup or sorted membership
+  before content verification. Proven include membership is reused, and the
+  prepared filter determines its verification mode once. Filtering, Unicode path
+  semantics, natural result order and index compatibility are preserved.
 - Insensitive byte scanning filters candidate positions by folded endpoint bytes.
   A comparison budget bounds verification work and falls back to linear KMP;
   ordering, overlaps, cancellation and scalar-platform behavior are preserved.

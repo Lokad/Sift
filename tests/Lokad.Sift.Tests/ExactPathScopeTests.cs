@@ -31,6 +31,8 @@ public sealed class ExactPathScopeTests
             new(),
             new() { PathPrefix = "src/a" },
             new() { PathPrefix = "absent/" },
+            new() { ExcludeGlobs = ["src/😀.txt"] },
+            new() { PathPrefix = "src/\ud83d" },
             new() { PathPrefix = "src/", ExcludeGlobs = ["src/😀.txt"], PathRegex = "[.]txt\\z" }
         })
         {

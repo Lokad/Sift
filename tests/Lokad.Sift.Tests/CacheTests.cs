@@ -326,8 +326,8 @@ public sealed class CacheTests
 
         includes[0] = "tests/**";
 
-        Assert.True(matcher.IsMatch("src/a.txt"));
-        Assert.False(matcher.IsMatch("tests/a.txt"));
+        Assert.True(matcher.IsMatch("src/a.txt", includesVerified: false));
+        Assert.False(matcher.IsMatch("tests/a.txt", includesVerified: false));
         Assert.Same(
             matcher,
             PathFilterMatcher.Prepare(new PathFilter { IncludeGlobs = ["src/**"] }));

@@ -1,3 +1,4 @@
+using System.Numerics;
 using Lokad.Sift.Storage;
 
 namespace Lokad.Sift.Search;
@@ -46,11 +47,12 @@ internal ref struct SegmentScopeBuilder(
         }
 
         OrdinalSet scopedOrdinals;
-        // Include the final equality check after the lower-bound search.
-        // Bound dictionary probes by the work of walking the prefix range.
-        // Dense alternatives in small segments retain the existing scan path.
+        var includesVerified = false;
+        // Compare dictionary probes (including the final equality check) with
+        // walking the prefix range and testing sorted include membership.
         if (matcher.ExactIncludePaths is { } paths &&
-            (long)paths.Length * (2 + System.Numerics.BitOperations.Log2((uint)Math.Max(1, cache.Segment.DocumentCount))) < prefixDocuments)
+            (long)paths.Length * (2 + BitOperations.Log2((uint)Math.Max(1, cache.Segment.DocumentCount))) <
+            (long)prefixDocuments * (1 + BitOperations.Log2((uint)paths.Length)))
         {
             var found = new uint[paths.Length];
             var count = 0;
@@ -66,6 +68,8 @@ internal ref struct SegmentScopeBuilder(
             // Document ordinals preserve this segment's natural search order.
             Array.Sort(found, 0, count);
             scopedOrdinals = OrdinalSet.FromSorted(found, count);
+            // The remaining path checks must still apply prefix, excludes and regex.
+            includesVerified = true;
         }
         else if (matcher.UsesPathIndex)
         {
@@ -124,8 +128,8 @@ internal ref struct SegmentScopeBuilder(
             if (matcher.RequiresPathVerification)
             {
                 var isMatch = matcher.RequiresStringPathVerification
-                    ? matcher.IsMatch(cache.Segment.GetPath(document))
-                    : matcher.IsMatch(cache.Segment.GetPathBytes(document));
+                    ? matcher.IsMatch(cache.Segment.GetPath(document), includesVerified)
+                    : matcher.IsMatch(cache.Segment.GetPathBytes(document), includesVerified);
                 if (!isMatch)
                 {
                     continue;
