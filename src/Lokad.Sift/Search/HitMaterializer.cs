@@ -223,10 +223,12 @@ internal static class HitMaterializer
 
     private static ReadOnlySpan<byte> TrimLineEnd(ReadOnlySpan<byte> bytes)
     {
-        while (bytes.Length > 0 && bytes[^1] is (byte)'\r' or (byte)'\n')
-        {
+        if (bytes.Length > 0 && bytes[^1] == (byte)'\n')
             bytes = bytes[..^1];
-        }
+        // Match the LF/EOF convention used by literal WholeLine: at most one
+        // trailing CR is a terminator; any earlier CR belongs to the line.
+        if (bytes.Length > 0 && bytes[^1] == (byte)'\r')
+            bytes = bytes[..^1];
 
         return bytes;
     }

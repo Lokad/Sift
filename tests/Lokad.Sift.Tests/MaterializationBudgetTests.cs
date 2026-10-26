@@ -13,7 +13,11 @@ public sealed class MaterializationBudgetTests
     [InlineData("before\r\n", 6, "before", true)]
     [InlineData("before\r\n", 7, "before", true)]
     [InlineData("before\r\n", 8, "before", false)]
-    [InlineData("before\r\r\n", 9, "before", false)]
+    [InlineData("before\r\r\n", 7, "before\r", true)]
+    [InlineData("before\r\r\n", 8, "before\r", true)]
+    [InlineData("before\r\r\n", 9, "before\r", false)]
+    [InlineData("é\r\r\n", 3, "é\r", true)]
+    [InlineData("é\r\r\n", 5, "é\r", false)]
     public async Task ContextTrimmingUsesTheCompleteLine(
         string context, int budget, string expected, bool truncated)
     {
@@ -38,6 +42,57 @@ public sealed class MaterializationBudgetTests
             Assert.Equal(truncated, withLine.Hit.IsContextTruncated);
             Assert.Equal("needle", withLine.MatchingLine);
             Assert.Equal("needle", hit.MatchText);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MatchingLinesAndContextPreserveLiteralCarriageReturns(bool disk)
+    {
+        (string Ending, string LiteralSuffix)[] cases =
+        [
+            ("", ""), ("\n", ""), ("\r", ""), ("\r\n", ""),
+            ("\r\r", "\r"), ("\r\r\n", "\r"),
+            ("\r\r\r", "\r\r"), ("\r\r\r\n", "\r\r")
+        ];
+        foreach (var stem in new[] { "needle", "café", "😀" })
+        foreach (var route in new[] { "snapshot", "overlay-base", "overlay-delta" })
+        {
+            using var fixture = new CorpusFixture();
+            var options = new SiftOptions { TargetSegmentDocumentCount = 1, MinimumFreeBytesAfterMutation = 0 };
+            using var index = disk ? new SiftIndex(fixture.CorpusPath, options) : SiftIndex.CreateInMemory(options);
+            var documents = cases.Select((item, i) => ($"doc-{i}.txt", "before\r\r\n" + stem + item.Ending +
+                (item.Ending.EndsWith('\n') ? "after\r\r\n" : ""))).ToArray();
+            await index.Build(new InMemoryDocumentSource(route == "overlay-delta"
+                ? documents.Select(document => (document.Item1, "stale")).ToArray() : documents));
+            using IIndexSnapshot snapshot = route == "snapshot"
+                ? index.OpenSnapshot(new SearchOptions(2)) : index.OpenOverlaySnapshot(new SearchOptions(2));
+            if (route == "overlay-delta")
+                await ((IOverlaySnapshot)snapshot).Update(new InMemoryDocumentSource(documents), []);
+
+            for (var i = 0; i < cases.Length; i++)
+            {
+                var expected = stem + cases[i].LiteralSuffix;
+                var hits = new HitBuffer();
+                snapshot.Search(new SearchQuery(expected, PatternMode.Literal, CaseMode.Sensitive) { WholeLine = true },
+                    new PathFilter { PathPrefix = documents[i].Item1 }, hits);
+                var raw = Assert.Single(hits.Hits);
+                var hit = snapshot.Materialize(raw, 1, 1);
+                var withLine = snapshot.MaterializeWithMatchingLine(raw, 1, 1);
+
+                Assert.Equal(expected, hit.MatchText);
+                Assert.Equal(expected, withLine.MatchingLine);
+                Assert.Equal(expected, withLine.MatchingLine[(hit.StartColumn - 1)..(hit.EndColumn - 1)]);
+                Assert.Equal((2, 1, 2, expected.Length + 1), (hit.StartLine, hit.StartColumn, hit.EndLine, hit.EndColumn));
+                Assert.Equal(new[] { "before\r" }, hit.BeforeContext);
+                Assert.Equal(cases[i].Ending.EndsWith('\n') ? new[] { "after\r" } : [], hit.AfterContext);
+                Assert.Equal(hit.MatchText, withLine.Hit.MatchText);
+                Assert.Equal(hit.BeforeContext, withLine.Hit.BeforeContext);
+                Assert.Equal(hit.AfterContext, withLine.Hit.AfterContext);
+                Assert.False(hit.IsMatchTruncated);
+                Assert.False(hit.IsContextTruncated);
+            }
         }
     }
 

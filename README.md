@@ -473,7 +473,9 @@ For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of
   disposal, including across overlay updates. `TryGetDocumentBytes(key, ...)`
   remains available for lookup by a document key.
 - Context budgets count source bytes, including line endings. Display trimming
-  uses the complete line so clipping preserves embedded carriage returns.
+  removes one LF and at most one trailing CR from the complete line, including
+  the trailing-CR convention at EOF. Additional CRs remain in matching lines and
+  context; clipping preserves embedded carriage returns.
 - `Explain(...).NeedsUnicodeDecode` describes possible content-verifier decoding
   in the physical path scope before candidate/overlay visibility filtering and
   search limits. Empty queries/scopes return false. It excludes display/context

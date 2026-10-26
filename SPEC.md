@@ -945,6 +945,8 @@ across before/after context. Display terminators are identified from the complet
 line before clipping its display prefix, so an embedded CR at the clipping
 boundary is preserved. UTF-8 scalar boundaries and truncation flags are retained.
 Matching-line materialization still returns the complete display line.
+Display trimming removes one terminating LF and at most one trailing CR, also
+at EOF, preserving additional CRs as line content and keeping match columns valid.
 
 ---
 

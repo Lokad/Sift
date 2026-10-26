@@ -124,6 +124,9 @@
 
 ### Fixed
 
+- Matching-line and context materialization preserve literal carriage returns
+  beyond the single trailing CR allowed before LF/EOF, keeping displayed content
+  consistent with match text and columns. Source-byte budgets are unchanged.
 - Completed reentrancy guards release their owner references so inherited child
   execution contexts do not retain disposed indexes, snapshots or managed document
   packs. Active nested and inherited callback protections remain in force.
