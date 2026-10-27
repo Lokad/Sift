@@ -430,6 +430,13 @@ Typical usage:
 
 For transient or embedded scenarios, use `SiftIndex.CreateInMemory()` instead of a filesystem-backed corpus root.
 
+Windows file-backed publication requires OS and filesystem support for POSIX file
+rename (`FileRenameInfoEx`). It keeps the manifest continuously visible while
+existing readers retain their captured file handles. Unsupported configurations
+raise `PlatformNotSupportedException` on publication; existing corpora can still
+be read. The manifest's access rules and DACL protection are retained. This Windows
+write requirement is intended for 0.4.0, rather than a 0.3.x patch.
+
 ## Notes for consumers
 
 - Paths must be relative and canonicalizable to `/`-separated logical paths.

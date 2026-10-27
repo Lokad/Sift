@@ -865,7 +865,9 @@ internal sealed partial class CorpusStorage : ISiftStorage
         // Temporary files must fit the absolute quota. The previous manifest is
         // released by the swap, so its bytes can satisfy the final reserve.
         EnsureCapacity(size, Math.Max(0, minimumFreeBytesAfterPublication - previousManifestBytes));
-        using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var stream = OperatingSystem.IsWindows()
+            ? WindowsManifestPublication.CreateTemporary(tempPath, ManifestPath)
+            : new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             stream.SetLength(size);
             RandomAccess.Write(stream.SafeFileHandle, bytes, 0);
@@ -876,9 +878,11 @@ internal sealed partial class CorpusStorage : ISiftStorage
         FaultInjector?.ThrowIfRequested(PublicationStage.AfterManifestFlushBeforeSwap);
 #endif
 
-        if (File.Exists(ManifestPath) && OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
         {
-            File.Replace(tempPath, ManifestPath, null, ignoreMetadataErrors: true);
+            // ReplaceFile has a name/sharing gap for concurrent readers. Rename
+            // with POSIX semantics keeps both the name and existing handles valid.
+            WindowsManifestPublication.Publish(tempPath, ManifestPath);
         }
         else
         {

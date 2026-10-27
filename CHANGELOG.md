@@ -20,6 +20,12 @@
 
 ### Changed
 
+- Windows manifest publication uses POSIX rename to avoid missing-file and sharing
+  failures during concurrent snapshot opening. Existing reader handles and manifest
+  access rules remain valid. File-backed writes require OS/filesystem support for
+  `FileRenameInfoEx`; unsupported configurations fail explicitly without replacing
+  the committed generation. This platform requirement targets 0.4.0, not 0.3.x.
+
 - Sparse posting intersections can decode a smaller first list once and restrict
   it directly by range and deletion membership. Contiguous scopes avoid an ordinal
   copy, while full payload consumption, frequency checks and final verification

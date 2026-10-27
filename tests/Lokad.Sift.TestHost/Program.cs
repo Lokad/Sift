@@ -1,5 +1,11 @@
 using Lokad.Sift;
 
+if (args.Length == 4 && args[0] == "manifest-observer")
+{
+    await ManifestPublicationChecks.Observe(args[1], args[2], args[3]);
+    return 0;
+}
+
 if (args.Length == 3 && args[0] == "lifetime-checks")
 {
     return await LifetimeChecks.Run(args[1], args[2]);

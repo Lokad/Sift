@@ -13,6 +13,9 @@ public sealed class LifetimeProbeTests
     [InlineData("active-drain")]
     [InlineData("scope-retention")]
     [InlineData("guard-protection")]
+    [InlineData("manifest-threads")]
+    [InlineData("manifest-process")]
+    [InlineData("manifest-windows")]
     public async Task ProductLifetimesRemainSafeAcrossQueuedAndInheritedWork(string scenario)
     {
         using var fixture = new CorpusFixture();

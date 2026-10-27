@@ -12,6 +12,9 @@ internal static class LifetimeChecks
             else if (scenario == "queued-reclamation") await CheckReclamation(root);
             else if (scenario == "scope-retention") await CheckScopeRetention();
             else if (scenario == "guard-protection") await CheckGuardProtection();
+            else if (scenario == "manifest-threads") await ManifestPublicationChecks.Run(root, separateProcess: false);
+            else if (scenario == "manifest-process") await ManifestPublicationChecks.Run(root, separateProcess: true);
+            else if (scenario == "manifest-windows") await ManifestPublicationChecks.CheckWindowsProperties(root);
             else await CheckQueued(scenario);
             Console.WriteLine("Lifetime check passed: " + scenario);
             return 0;

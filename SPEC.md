@@ -523,6 +523,14 @@ Publication must be crash-safe:
 8. atomic manifest swap
 9. delete packs unreachable from both the new manifest and live generation leases
 
+On Windows the swap uses `FileRenameInfoEx` with replace-existing and POSIX
+semantics. The backing OS/filesystem must support that operation; publication
+fails explicitly otherwise. Prepared manifest bytes inherit the previous
+manifest's DACL before they are written. Atomic rename preserves continuous
+name visibility and existing open handles. Linux retains its rename and directory
+flush sequence. The Windows capability requirement belongs to the 0.4.0 release
+boundary; the manifest and segment formats remain unchanged.
+
 Startup performs the same unreachable-pack sweep so a crash after segment
 publication but before manifest publication cannot leak a complete orphan pack.
 If the manifest or an active lease cannot be validated, reclamation fails closed.
