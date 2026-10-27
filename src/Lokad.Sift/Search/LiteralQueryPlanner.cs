@@ -84,7 +84,7 @@ internal static class LiteralQueryPlanner
         grams.Sort(static (left, right) => left.DocFreq.CompareTo(right.DocFreq));
         var selected = selectAllGrams
             ? grams.ToArray()
-            : TrimSelectedGrams(grams, scopeDocuments, options);
+            : TrimSelectedGrams(grams, scopeDocuments, scopeBytes);
         return LiteralPlan.Intersection(
             scopeDocuments,
             scopeBytes,
@@ -93,29 +93,28 @@ internal static class LiteralQueryPlanner
             pair,
             gramLength);
 
-        static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, SiftOptions options)
+        static SelectedGram[] TrimSelectedGrams(List<SelectedGram> grams, int scopeDocuments, long scopeBytes)
         {
-            var targetCandidates = SearchPlanner.GetTargetCandidateDocuments(scopeDocuments, options);
-            if (targetCandidates == int.MaxValue)
-            {
-                return grams.ToArray();
-            }
-
-            var selectedCount = 0;
-            // Match the planner's independence heuristic when choosing how many
-            // grams to retain; this estimate is not a bound on actual candidates.
+            // Price each frequency-ordered prefix against the content it would
+            // leave to scan. The independence estimate is only a work heuristic:
+            // correlated grams still require exact candidate intersection.
             var estimatedCandidates = (double)scopeDocuments;
-            foreach (var gram in grams)
+            var averageBytes = (double)scopeBytes / Math.Max(1, scopeDocuments);
+            var bestCost = double.PositiveInfinity;
+            var selectedCount = 1;
+            long postingsBytes = 0;
+            for (var i = 0; i < grams.Count; i++)
             {
-                selectedCount++;
-                var ratio = Math.Clamp((double)gram.DocFreq / scopeDocuments, 0d, 1d);
-                estimatedCandidates *= ratio;
-                if (estimatedCandidates <= targetCandidates)
+                var gram = grams[i];
+                postingsBytes += gram.PostingsBytes;
+                estimatedCandidates *= Math.Clamp((double)gram.DocFreq / scopeDocuments, 0d, 1d);
+                var cost = postingsBytes + estimatedCandidates * averageBytes;
+                if (cost < bestCost)
                 {
-                    break;
+                    bestCost = cost;
+                    selectedCount = i + 1;
                 }
             }
-
             var selected = new SelectedGram[selectedCount];
             grams.CopyTo(0, selected, 0, selectedCount);
             return selected;

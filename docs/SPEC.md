@@ -766,10 +766,16 @@ N-gram selection rule:
   conjunctive constraint only broadens candidates
 * for unions, cover every alternative, including in a union of intersections;
   if the budget cannot cover them all, decline that candidate and use a safe plan
-* then add additional n-grams by increasing `DocFreq` until:
+* ordinary literal selection prices frequency-ordered prefixes by posting bytes
+  plus estimated surviving documents times mean scoped content bytes, and retains
+  the least-cost nonempty prefix within `MaxSelectedNgrams`
+* mandatory-fragment intersections retain all required planning constraints;
+  structural combinations may stop once their estimated candidate target is met
 
-  * estimated candidate set is small enough, or
-  * `MaxSelectedNgrams` is reached
+The literal cost estimate models full content scanning. Correlated grams can add
+postings work without reducing candidates, and very early collector stops can make
+that preparation a larger share of latency. These remain benchmark controls;
+neither selectivity estimates nor cost estimates justify skipping verification.
 
 Planning budgets must not change the match set. Advisory seeds are lossy
 diagnostics, not exhaustive branch coverage, and must not exclude candidates.

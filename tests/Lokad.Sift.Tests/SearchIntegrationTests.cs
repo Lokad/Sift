@@ -1884,7 +1884,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task ExplainStopsSelectingLiteralNgramsOnceEstimateIsSelectiveEnough()
+    public async Task ExplainLiteralNgramsRespectTheBudgetAndPreserveMatches()
     {
         var documents = Enumerable.Range(0, 9000)
             .Select(static i => ($"src/{i:D5}.txt", i % 1000 == 0 ? $"alpha needle gamma {i}\n" : $"alpha beta gamma {i}\n"))
@@ -1898,8 +1898,13 @@ public sealed class SearchIntegrationTests
         var plan = snapshot.Explain(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new PathFilter());
 
         Assert.True(plan.UsesIndex);
-        Assert.Single(plan.SelectedNgrams);
+        Assert.InRange(plan.SelectedNgrams.Count, 1, new SiftOptions().MaxSelectedNgrams);
+        Assert.Equal(plan.SelectedNgrams.OrderBy(gram => gram.DocumentFrequency), plan.SelectedNgrams);
         Assert.Equal(SearchCandidateKind.TrigramIndex, plan.CandidateKind);
+        var hits = new HitBuffer();
+        snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new(), hits);
+        Assert.Equal(documents.Where((_, i) => i % 1000 == 0).Select(document => document.Item1),
+            hits.Hits.Select(hit => snapshot.GetDocumentKey(hit).Path));
     }
 
     [Fact]

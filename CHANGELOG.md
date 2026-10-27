@@ -33,6 +33,11 @@
 
 ### Changed
 
+- Literal n-gram selection compares posting-list work with estimated remaining
+  content scanning, selecting the least-cost frequency-ordered prefix. Exact
+  intersections and verification still determine results; selectivity estimates
+  remain heuristics rather than ranking or correctness bounds.
+
 - Windows manifest publication uses POSIX rename to avoid missing-file and sharing
   failures during concurrent snapshot opening. Existing reader handles and manifest
   access rules remain valid. File-backed writes require OS/filesystem support for
