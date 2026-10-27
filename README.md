@@ -515,6 +515,6 @@ write requirement is intended for 0.4.0, rather than a 0.3.x patch.
 ## Related docs
 
 - [CHANGELOG.md](CHANGELOG.md)
-- [SPEC.md](SPEC.md)
-- [BENCH.md](BENCH.md)
-- [DEPENDENCIES.md](DEPENDENCIES.md)
+- [SPEC.md](docs/SPEC.md)
+- [BENCH.md](docs/BENCH.md)
+- [DEPENDENCIES.md](docs/DEPENDENCIES.md)

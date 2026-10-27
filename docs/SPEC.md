@@ -995,15 +995,15 @@ formats, mapped segments, manifests, and codecs are implementation details.
 
 The canonical public declarations are maintained in source:
 
-* [document submission and sources](src/Lokad.Sift/DocumentContracts.cs)
-* [queries, filters, hits and search statistics](src/Lokad.Sift/SearchContracts.cs)
-* [document candidates, traversal limits and completion statistics](src/Lokad.Sift/CandidateContracts.cs)
-* [index/snapshot interfaces, options and mutation statistics](src/Lokad.Sift/IndexContracts.cs)
-* [regex engine integration](src/Lokad.Sift/RegexContracts.cs)
-* [identifiers](src/Lokad.Sift/Identifiers.cs)
-* [convenience overloads](src/Lokad.Sift/SiftIndexExtensions.cs)
+* [document submission and sources](../src/Lokad.Sift/DocumentContracts.cs)
+* [queries, filters, hits and search statistics](../src/Lokad.Sift/SearchContracts.cs)
+* [document candidates, traversal limits and completion statistics](../src/Lokad.Sift/CandidateContracts.cs)
+* [index/snapshot interfaces, options and mutation statistics](../src/Lokad.Sift/IndexContracts.cs)
+* [regex engine integration](../src/Lokad.Sift/RegexContracts.cs)
+* [identifiers](../src/Lokad.Sift/Identifiers.cs)
+* [convenience overloads](../src/Lokad.Sift/SiftIndexExtensions.cs)
 
-The [README](README.md) contains a fuller build/search/update example. A minimal
+The [README](../README.md) contains a fuller build/search/update example. A minimal
 in-memory search uses the same interfaces as a disk index:
 
 ```csharp
@@ -1363,7 +1363,7 @@ Build a **snapshot-based, immutable-segment, memory-mapped local code-search eng
 The original storage, literal/indexed search, regex planning and incremental
 update/compaction phases are implemented. This specification describes their
 behavioral contracts; it is not an outstanding implementation checklist.
-[CHANGELOG.md](CHANGELOG.md) records release changes, and the tests exercise the
+[CHANGELOG.md](../CHANGELOG.md) records release changes, and the tests exercise the
 storage, search, adapter and lifecycle contracts. Further performance work requires
 measurements and must preserve those contracts.
 

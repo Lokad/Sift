@@ -15,6 +15,6 @@
     </ItemGroup>
     <Error
       Condition="'@(DisallowedPackageReference)' != ''"
-      Text="PackageReference(s) not in Sift allowlist: @(DisallowedPackageReference). Update DEPENDENCIES.md and Directory.Packages.props." />
+      Text="PackageReference(s) not in Sift allowlist: @(DisallowedPackageReference). Update docs/DEPENDENCIES.md and Directory.Packages.props." />
   </Target>
 </Project>
