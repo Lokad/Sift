@@ -30,7 +30,8 @@ the corpus, with a diagnostic on stderr and exit code 1.
 
 Applications that match isolated ranges can call `snapshot.VisitCandidates(query,
 filter, collector, options, cancellationToken)`. Each `CandidateDocument` supplies
-its key and complete borrowed UTF-8 content. The caller selects a range and verifies
+its key and complete borrowed UTF-8 content. Soundness applies to unchanged slices
+at Unicode scalar boundaries, using the query's matching semantics. The caller selects a range and verifies
 the original pattern exactly against that range, including field-relative anchors.
 Candidate membership is a sound superset and can include the whole path scope.
 It is independent of a particular index plan or candidate count.

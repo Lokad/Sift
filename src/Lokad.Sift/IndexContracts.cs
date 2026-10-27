@@ -634,7 +634,9 @@ public interface IIndexSnapshot : IDisposable
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
     /// <summary>Visits a sound superset of documents that may match the query within a content range.</summary>
     /// <remarks>
-    /// No content matching is performed. The caller must verify the selected range exactly,
+    /// Soundness applies to an unchanged UTF-8 slice at Unicode scalar boundaries,
+    /// using the query's matching semantics. No content matching is performed.
+    /// The caller must verify the selected range exactly,
     /// including its anchors. Candidates may include every document in the path scope.
     /// Order is the same as an unlimited empty-query Search with this filter, omitting
     /// non-candidates. Particular false positives and selected index plans may change.
