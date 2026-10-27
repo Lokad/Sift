@@ -15,7 +15,7 @@ public sealed class CandidateVisitTests
         var documents = Enumerable.Range(0, 300).ToDictionary(n => $"src/noise-{n:D3}.txt", _ => "header\nordinary periodic aaaaaa");
         documents.Add("src/a.txt", "header\namber");
         documents.Add("src/b.txt", "amber header\nxamber\ncobalt\n");
-        documents.Add("src/漢😀.txt", "é😀\nCAFÉ ſ ı İ K word amber");
+        documents.Add("src/漢😀.txt", "é😀\nCAFÉ ſ ı İ K word amber 😀");
         documents.Add("src/empty.txt", "header\n");
         documents.Add("src/drop.txt", "header\namber");
         documents.Add("docs/a.txt", "header\ncobalt");
