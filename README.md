@@ -158,6 +158,9 @@ dotnet restore --locked-mode --tl:off -v minimal
 Run benchmarks sequentially in Release. See the [benchmark guide](docs/BENCH.md)
 for corpus setup and workload selection.
 
+Pack a release with `dotnet pack src/Lokad.Sift/Lokad.Sift.csproj -c Release --tl:off`.
+Packages and symbols are written directly to `artifacts/nuget/`.
+
 ## Reference
 
 - [Specification and API contracts](docs/SPEC.md)

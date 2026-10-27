@@ -35,6 +35,13 @@ Important benchmark rule:
 Treat NuGet artifacts as release outputs only when produced by an explicit
 Release pack. Debug build/test outputs are not release artifacts.
 
+Release packages and symbols go directly in `artifacts/nuget/`; their filenames
+include the version. Use the library project's default output path:
+
+```powershell
+dotnet pack src/Lokad.Sift/Lokad.Sift.csproj -c Release --tl:off --nologo -v minimal
+```
+
 ## Conditional compilation
 
 `SIFT_INTERNAL_VERIFICATION` is the repository's only conditional-compilation
