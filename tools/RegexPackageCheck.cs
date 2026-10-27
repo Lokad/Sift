@@ -119,9 +119,43 @@ internal static class RegexPackageCheck
         await VerifyDeletionCollectionFailures(engine);
         await VerifyPersistedMetadataValidation(engine);
         await VerifyMutationProbeReentrancy(engine);
+        await VerifyCandidateTraversal(engine);
         await VerifyOverlayExportReentrancy(engine);
         VerifyRegexValidation(snapshot);
         Console.WriteLine($"Package consumer passed: {expectedReason}; core={typeof(SiftIndex).Assembly.Location}");
+    }
+
+    private static async Task VerifyCandidateTraversal(ISiftRegexEngine? engine)
+    {
+        using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine });
+        await index.Build(new Documents([("src/a", "header\namber"), ("src/b", "header\ncobalt"), ("other/c", "header\namber")]));
+        using var snapshot = index.OpenSnapshot();
+        using var overlay = index.OpenOverlaySnapshot();
+        await overlay.Update(new Documents([("src/a", "changed\nnone"), ("src/d", "header\namber")]), []);
+        foreach (var (view, expected) in new[]
+        {
+            (snapshot, "src/a"), ((IIndexSnapshot)overlay, "src/d"), ((IIndexSnapshot)new PublishedSnapshot(snapshot), "src/a")
+        })
+        {
+            var accepted = new List<string>();
+            var stats = view.VisitCandidates(new SearchQuery(@"\Aamber") { MaxHits = 1 }, new PathFilter { PathPrefix = "src/" },
+                new CandidateCollector(document =>
+                {
+                    var text = Encoding.UTF8.GetString(document.Content.Span);
+                    var field = text[(text.IndexOf('\n') + 1)..];
+                    if (Regex.IsMatch(field, @"\Aamber", RegexOptions.CultureInvariant)) accepted.Add(document.Key.Path);
+                    return true;
+                }));
+            Require(stats.Completed && accepted.SequenceEqual([expected]), "Candidate traversal lost an exact field-relative match.");
+            var limit = view.VisitCandidates(new SearchQuery(""), new(), new CandidateCollector(_ => true), new CandidateVisitOptions { MaxDocuments = 1 });
+            Require(!limit.Completed && limit.VisitedDocuments == 1 && limit.StopReason == CandidateVisitStopReason.MaxDocuments,
+                "Candidate limits were confused with exact hit limits.");
+        }
+    }
+
+    private sealed class CandidateCollector(Func<CandidateDocument, bool> accept) : IDocumentCandidateCollector
+    {
+        public bool OnCandidate(in CandidateDocument document) => accept(document);
     }
 
     private static async Task VerifyPersistedMetadataValidation(ISiftRegexEngine? engine)

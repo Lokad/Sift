@@ -91,12 +91,31 @@ $projectTemplate = @'
 </Project>
 '@
 
+# A separately compiled old implementation must load and inherit new default
+# members. Restore the immutable published version from its public source, never
+# the verification feed (which can carry the same development version number).
+$legacyRoot = Join-Path $checkRoot 'published-contract'
+New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+$legacyProject = Join-Path $legacyRoot 'PublishedContract.csproj'
+$legacySource = [System.Security.SecurityElement]::Escape((Join-Path $PSScriptRoot 'PublishedSnapshot.cs'))
+$legacyProjectText = @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup>
+  <ItemGroup><PackageReference Include="Lokad.Sift" Version="[0.3.0]" /><Compile Include="$legacySource" Link="PublishedSnapshot.cs" /></ItemGroup>
+</Project>
+"@
+[System.IO.File]::WriteAllText($legacyProject, $legacyProjectText)
+Invoke-DotNet @('restore', $legacyProject, '--packages', (Join-Path $legacyRoot 'packages'),
+    '--source', 'https://api.nuget.org/v3/index.json', '--tl:off', '-v', 'minimal')
+Invoke-DotNet @('build', $legacyProject, '-c', 'Release', '--no-restore', '--tl:off', '--nologo', '-v', 'minimal')
+$legacyAssembly = [System.Security.SecurityElement]::Escape((Join-Path $legacyRoot 'bin/Release/net10.0/PublishedContract.dll'))
+
 foreach ($consumerKind in @('core', 'producer')) {
     $consumerRoot = Join-Path $checkRoot $consumerKind
     $packageCache = Join-Path $consumerRoot 'packages'
     New-Item -ItemType Directory -Path $consumerRoot -Force | Out-Null
     $projectPath = Join-Path $consumerRoot 'Consumer.csproj'
-    $extraItems = ''
+    $extraItems = '<Reference Include="PublishedContract"><HintPath>' + $legacyAssembly + '</HintPath></Reference>'
     $program = 'await RegexPackageCheck.Run(null); await RegexPackageCheck.Run(new PackageAsciiEngine());'
     if ($consumerKind -eq 'producer') {
         # The normal test restore supplies this immutable pinned package. Copy
@@ -104,7 +123,7 @@ foreach ($consumerKind in @('core', 'producer')) {
         $producerArchive = Join-Path $globalPackagesRoot ('lokad.utf8regex\' + $producerVersion + '\lokad.utf8regex.' + $producerVersion + '.nupkg')
         if (-not (Test-Path -LiteralPath $producerArchive)) { throw 'Restore the test project before running producer package checks.' }
         Copy-Item -LiteralPath $producerArchive -Destination $packageFeed -Force
-        $extraItems = '<PackageReference Include="Lokad.Utf8Regex" Version="' + $producerVersion + '" />' +
+        $extraItems += '<PackageReference Include="Lokad.Utf8Regex" Version="' + $producerVersion + '" />' +
             '<Compile Include="' + $adapterSource + '" Link="Utf8RegexAdapter.cs" />'
         $program = 'await RegexPackageCheck.Run(new Lokad.Sift.Examples.Utf8RegexAdapter());'
     }
