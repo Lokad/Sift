@@ -11,7 +11,7 @@ dotnet add package Lokad.Sift
 
 **Upgrading to 0.4.0:** `SearchOptions` and `SiftOptions.MaxSegmentParallelism`
 have been removed. Use parameterless snapshot factories and recompile consumers.
-See the [migration notes](CHANGELOG.md#unreleased-040).
+See the [migration notes](CHANGELOG.md#040---2026-10-27).
 
 ## Quick start
 
