@@ -632,6 +632,22 @@ public interface IIndexSnapshot : IDisposable
     ReadOnlyMemory<byte> CommitMetadata { get; }
 
     DocumentVisitStats VisitDocuments(IDocumentKeyCollector collector, CancellationToken cancellationToken);
+    /// <summary>Visits a sound superset of documents that may match the query within a content range.</summary>
+    /// <remarks>
+    /// No content matching is performed. The caller must verify the selected range exactly,
+    /// including its anchors. Candidates may include every document in the path scope.
+    /// Order is the same as an unlimited empty-query Search with this filter, omitting
+    /// non-candidates. Particular false positives and selected index plans may change.
+    /// Query matching flags guide planning; query hit/byte/time limits and timeout policy
+    /// are replaced by the visit options. Regex preparation errors, including timeouts, throw.
+    /// The default implementation validates the query and lists the complete path scope,
+    /// preserving existing snapshot implementations. Built-in snapshots use their indexes.
+    /// Custom fallback preparation uses Explain; cancellation and elapsed time are
+    /// observed before and after that existing operation, rather than interrupting it.
+    /// </remarks>
+    CandidateVisitStats VisitCandidates(SearchQuery query, PathFilter pathFilter,
+        IDocumentCandidateCollector collector, CandidateVisitOptions options, CancellationToken cancellationToken) =>
+        global::Lokad.Sift.Search.CandidateVisit.Run(this, query, pathFilter, collector, options, cancellationToken, useIndex: false);
     SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
     SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
 

@@ -403,6 +403,10 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
         return Search(query, pathFilter, collector, CancellationToken.None);
     }
 
+    public CandidateVisitStats VisitCandidates(SearchQuery query, PathFilter pathFilter,
+        IDocumentCandidateCollector collector, CandidateVisitOptions options, CancellationToken cancellationToken) =>
+        CandidateVisit.Run(this, query, pathFilter, collector, options, cancellationToken, useIndex: true);
+
     public SearchStats Search(
         SearchQuery query,
         PathFilter pathFilter,

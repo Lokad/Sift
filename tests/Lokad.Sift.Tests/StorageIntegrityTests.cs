@@ -496,7 +496,11 @@ public sealed class StorageIntegrityTests
         using var fixture = new CorpusFixture(
             ("src/a.txt", "alpha\n"),
             ("src/b.txt", "beta\n"));
-        using var index = new SiftIndex(fixture.CorpusPath);
+        using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions
+        {
+            DirectScanScopeDocumentsThreshold = 0,
+            DirectScanScopeBytesThreshold = 0
+        });
         await index.Build(fixture.CreateSource());
 
         var segmentPath = Directory.EnumerateFiles(Path.Combine(fixture.CorpusPath, "segments"), "segment.pack", SearchOption.AllDirectories).Single();
@@ -541,6 +545,11 @@ public sealed class StorageIntegrityTests
         Assert.Throws<InvalidDataException>(() => segment.TryGetPostings(new IndexRegionPair(SegmentRegionId.ContentTriCsLex, SegmentRegionId.ContentTriCsPost), corruptedGram, out _, out _));
         Assert.Throws<InvalidDataException>(() =>
             storage.ValidateSegment(manifest.Segments[0], CancellationToken.None));
+        var needle = Encoding.UTF8.GetString([(byte)(corruptedGram >> 16), (byte)(corruptedGram >> 8), (byte)corruptedGram]);
+        using var snapshot = index.OpenSnapshot();
+        Assert.Throws<InvalidDataException>(() => snapshot.VisitCandidates(
+            new SearchQuery(needle, PatternMode.Literal, CaseMode.Sensitive), new(), new CandidateCollector()));
+        Assert.True(index.RequiresRebuild);
     }
 
     [Theory]
@@ -1615,6 +1624,11 @@ public sealed class StorageIntegrityTests
         var omega = new HitBuffer();
         snapshot.Search(new SearchQuery("omega", PatternMode.Literal, CaseMode.Sensitive), new PathFilter(), omega);
         Assert.Empty(omega.Hits);
+    }
+
+    private sealed class CandidateCollector : IDocumentCandidateCollector
+    {
+        public bool OnCandidate(in CandidateDocument document) => true;
     }
 
     private static uint[] Decode(ReadOnlySpan<byte> postings)

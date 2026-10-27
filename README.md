@@ -26,6 +26,25 @@ Overlapping context may repeat across hits; truncated context is labelled.
 Search/explain reject unknown arguments and invalid numeric limits before opening
 the corpus, with a diagnostic on stderr and exit code 1.
 
+## Document candidates
+
+Applications that match isolated ranges can call `snapshot.VisitCandidates(query,
+filter, collector, options, cancellationToken)`. Each `CandidateDocument` supplies
+its key and complete borrowed UTF-8 content. The caller selects a range and verifies
+the original pattern exactly against that range, including field-relative anchors.
+Candidate membership is a sound superset and can include the whole path scope.
+It is independent of a particular index plan or candidate count.
+
+`CandidateVisitOptions` bounds offered document count, total complete-content bytes
+and elapsed time; these replace the query's search limits. Check `Completed` and
+`StopReason` before treating a visit as exhaustive. Candidates follow empty-query
+search order and callbacks may stop early. Content remains valid until snapshot
+disposal, including across overlay updates; copy it if it must outlive that owner.
+The default interface method validates the query and lists the path scope for
+existing custom implementations. Built-in snapshots use indexed candidate plans.
+Regex preparation can compile an engine handle and can throw; it never matches
+document content during a candidate visit. Field schemas remain in the application.
+
 ## Regex engines
 
 The core package has no runtime NuGet dependencies. Regex search uses invariant

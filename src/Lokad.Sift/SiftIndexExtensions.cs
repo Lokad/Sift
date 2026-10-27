@@ -102,6 +102,18 @@ public static class SiftIndexExtensions
         return snapshot.Search(query, pathFilter, collector, CancellationToken.None);
     }
 
+    public static CandidateVisitStats VisitCandidates(this IIndexSnapshot snapshot,
+        SearchQuery query, PathFilter pathFilter, IDocumentCandidateCollector collector) =>
+        snapshot.VisitCandidates(query, pathFilter, collector, new CandidateVisitOptions(), CancellationToken.None);
+
+    public static CandidateVisitStats VisitCandidates(this IIndexSnapshot snapshot,
+        SearchQuery query, PathFilter pathFilter, IDocumentCandidateCollector collector, CancellationToken cancellationToken) =>
+        snapshot.VisitCandidates(query, pathFilter, collector, new CandidateVisitOptions(), cancellationToken);
+
+    public static CandidateVisitStats VisitCandidates(this IIndexSnapshot snapshot,
+        SearchQuery query, PathFilter pathFilter, IDocumentCandidateCollector collector, CandidateVisitOptions options) =>
+        snapshot.VisitCandidates(query, pathFilter, collector, options, CancellationToken.None);
+
     public static Task<OverlayUpdateStats> Update(
         this IOverlaySnapshot snapshot,
         IDocumentSource upserts,

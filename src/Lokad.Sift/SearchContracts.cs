@@ -92,6 +92,9 @@ public sealed record SearchQuery
     }
 
     public string Pattern { get; }
+    // Internal execution mode used only by document-candidate traversal. Exact
+    // Search never exposes its placeholder hits through the candidate contract.
+    internal bool CandidatesOnly { get; init; }
     public PatternMode PatternMode { get; init; }
     public CaseMode CaseMode { get; init; }
     public bool WholeWord { get; init; }

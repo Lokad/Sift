@@ -180,6 +180,10 @@ internal sealed class SearchSnapshot : IIndexSnapshot
         return Search(query, pathFilter, collector, CancellationToken.None);
     }
 
+    public CandidateVisitStats VisitCandidates(SearchQuery query, PathFilter pathFilter,
+        IDocumentCandidateCollector collector, CandidateVisitOptions options, CancellationToken cancellationToken) =>
+        CandidateVisit.Run(this, query, pathFilter, collector, options, cancellationToken, useIndex: true);
+
     public SearchStats Search(
         SearchQuery query,
         PathFilter pathFilter,
@@ -1206,7 +1210,7 @@ internal sealed class SearchSnapshot : IIndexSnapshot
                     continue;
                 }
 
-                if (query.Pattern.Length == 0)
+                if (query.Pattern.Length == 0 || query.CandidatesOnly)
                 {
                     var shouldContinue = collector.OnHit(
                         new RawHit(

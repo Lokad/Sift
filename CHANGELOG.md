@@ -4,6 +4,11 @@
 
 ### Added
 
+- `IIndexSnapshot.VisitCandidates` enumerates possible matching documents using
+  the complete query plan, without content verification. Callers can verify their
+  own content ranges while preserving field-relative anchors. Candidates have
+  explicit traversal limits, completion statistics and snapshot-owned content;
+  a default full-scope fallback preserves published snapshot implementations.
 - `IIndexSnapshot.GetDocumentBytes(in RawHit)` reads a hit's complete document
   directly in built-in snapshots. Returned memory belongs to the snapshot and
   remains valid across overlay updates until snapshot disposal. Hit ownership,

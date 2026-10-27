@@ -989,6 +989,7 @@ The canonical public declarations are maintained in source:
 
 * [document submission and sources](src/Lokad.Sift/DocumentContracts.cs)
 * [queries, filters, hits and search statistics](src/Lokad.Sift/SearchContracts.cs)
+* [document candidates, traversal limits and completion statistics](src/Lokad.Sift/CandidateContracts.cs)
 * [index/snapshot interfaces, options and mutation statistics](src/Lokad.Sift/IndexContracts.cs)
 * [regex engine integration](src/Lokad.Sift/RegexContracts.cs)
 * [identifiers](src/Lokad.Sift/Identifiers.cs)
