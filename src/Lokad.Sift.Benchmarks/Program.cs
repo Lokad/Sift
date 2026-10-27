@@ -19,7 +19,6 @@ using Lokad.Sift;
 using Lokad.Sift.LowLevel;
 using Lokad.Sift.Storage;
 
-const int BenchmarkSearchParallelism = 1;
 
 try
 {
@@ -73,8 +72,8 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
             OverlayCompactionSegmentThreshold = 4
         });
         index.Build(new BenchmarkSource(options.DocumentCount)).GetAwaiter().GetResult();
-        using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
-        using var overlay = index.OpenOverlaySnapshot(new SearchOptions(BenchmarkSearchParallelism));
+        using var snapshot = index.OpenSnapshot();
+        using var overlay = index.OpenOverlaySnapshot();
         var overlayChurnIteration = 0;
         var overlayBodies = new[]
         {
@@ -93,7 +92,7 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
             }),
             Run("snapshot-open-search-dispose", options, () =>
             {
-                using var operationSnapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
+                using var operationSnapshot = index.OpenSnapshot();
                 operationSnapshot.Search(
                     new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
                     new PathFilter(),
@@ -159,7 +158,7 @@ static void RunSyntheticBenchmarks(BenchmarkOptions options)
                 var collector = new NullCollector();
                 snapshot.Search(new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive), new PathFilter { PathPrefix = "src/00" }, collector);
             }),
-            Run("parallel-literal", options, () =>
+            Run("unlimited-literal", options, () =>
             {
                 var collector = new NullCollector();
                 snapshot.Search(
@@ -1430,7 +1429,7 @@ static RealCorpusBenchmarkResult RunRealCorpus(DiscoveredCorpus corpus, RealQuer
         var mappedBytesBefore = SiftProcessMetrics.MappedSegmentBytes;
         var openStart = Stopwatch.GetTimestamp();
         using var index = new SiftIndex(benchmarkRoot, new SiftOptions());
-        using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
+        using var snapshot = index.OpenSnapshot();
         var openElapsed = Stopwatch.GetElapsedTime(openStart);
         var mappedBytesDelta = SiftProcessMetrics.MappedSegmentBytes - mappedBytesBefore;
 
@@ -1464,7 +1463,7 @@ static RealCorpusBenchmarkResult RunRealCorpusWithCachedIndex(DiscoveredCorpus c
     var mappedBytesBefore = SiftProcessMetrics.MappedSegmentBytes;
     var openStart = Stopwatch.GetTimestamp();
     using var index = new SiftIndex(cachePath, new SiftOptions());
-    using var snapshot = index.OpenSnapshot(new SearchOptions(BenchmarkSearchParallelism));
+    using var snapshot = index.OpenSnapshot();
     var openElapsed = Stopwatch.GetElapsedTime(openStart);
     var mappedBytesDelta = SiftProcessMetrics.MappedSegmentBytes - mappedBytesBefore;
 

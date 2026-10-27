@@ -119,7 +119,6 @@ public sealed class StorageIntegrityTests
         Assert.Throws<ObjectDisposedException>(() => new SearchSnapshot(
             storage,
             new SiftOptions(),
-            new SearchOptions(),
             onDisposed: null,
             onIndexFailure: null,
             regexContext: regexContext));

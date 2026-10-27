@@ -108,7 +108,7 @@ public sealed class SiftIndex : ISiftIndex
         return new SiftIndex(new InMemorySiftStorage(), options);
     }
 
-    public IIndexSnapshot OpenSnapshot(SearchOptions options)
+    public IIndexSnapshot OpenSnapshot()
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -117,7 +117,6 @@ public sealed class SiftIndex : ISiftIndex
             return new SearchSnapshot(
                 _storage,
                 _options,
-                options,
                 ScheduleReclamationIfPending,
                 MarkRequiresRebuild,
                 _regexContext);
@@ -129,7 +128,7 @@ public sealed class SiftIndex : ISiftIndex
         }
     }
 
-    public IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options)
+    public IOverlaySnapshot OpenOverlaySnapshot()
     {
         ThrowIfDisposed();
         ThrowIfRebuildRequired();
@@ -139,12 +138,10 @@ public sealed class SiftIndex : ISiftIndex
                 new SearchSnapshot(
                     _storage,
                     _options,
-                    options,
                     ScheduleReclamationIfPending,
                     MarkRequiresRebuild,
                     _regexContext),
-                _options,
-                options);
+                _options);
         }
         catch (Exception exception) when (IsIndexCorruption(exception))
         {

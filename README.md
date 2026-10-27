@@ -53,9 +53,15 @@ The core package has no runtime NuGet dependencies. Regex search uses invariant
 pattern supports it. Classic backtracking has a one-second match timeout;
 `RegexTimeoutPolicy` controls whether a timeout stops the search or throws.
 
-Parallel searches preserve manifest hit order and invoke collectors on the search
-caller. The caller executes pending segments when pool workers are unavailable;
-bounded result-queue waits check the absolute deadline independently of timer callbacks.
+Searches execute synchronously on the caller thread in manifest segment order
+and document ordinal order. Collectors receive hits directly; returning `false`
+stops verification immediately. Separate searches can run concurrently on a snapshot.
+Overlays search their own segments first, then the visible base documents.
+
+The upcoming 0.4.0 release removes `SearchOptions` and
+`SiftOptions.MaxSegmentParallelism`. Use `index.OpenSnapshot()` and
+`index.OpenOverlaySnapshot()` and recompile consumers, including custom
+`ISiftIndex` implementations. See [CHANGELOG.md](CHANGELOG.md) for API migration.
 
 Search observes caller cancellation and `MaxElapsedMilliseconds` between matches
 within a document. ASCII-insensitive scans also check elapsed time while scanning,

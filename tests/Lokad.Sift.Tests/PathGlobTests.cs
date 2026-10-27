@@ -5,8 +5,6 @@ public sealed class PathGlobTests
     [Theory]
     [InlineData("snapshot", false)]
     [InlineData("snapshot", true)]
-    [InlineData("parallel", false)]
-    [InlineData("parallel", true)]
     [InlineData("overlay", false)]
     [InlineData("overlay", true)]
     public async Task RecursiveGlobsRespectLiteralBoundariesAndWildcardPrefixes(string route, bool stringVerification)
@@ -29,8 +27,8 @@ public sealed class PathGlobTests
         ];
         using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(new InMemoryDocumentSource(paths.Select(path => (path, route == "overlay" ? "stale" : "needle")).ToArray()));
-        using IIndexSnapshot snapshot = route == "overlay" ? index.OpenOverlaySnapshot(new SearchOptions(2)) :
-            index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+        using IIndexSnapshot snapshot = route == "overlay" ? index.OpenOverlaySnapshot() :
+            index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot overlay)
             await overlay.Update(new InMemoryDocumentSource(paths.Select(path => (path, "needle")).ToArray()), []);
 
@@ -101,7 +99,7 @@ public sealed class PathGlobTests
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(new InMemoryDocumentSource([("src/stale.txt", "needle")]));
-        using var overlay = index.OpenOverlaySnapshot(new SearchOptions(2));
+        using var overlay = index.OpenOverlaySnapshot();
         await overlay.Update(new InMemoryDocumentSource([(path, "needle")]), [new DocumentKey("src/stale.txt")]);
         var hits = new HitBuffer();
 

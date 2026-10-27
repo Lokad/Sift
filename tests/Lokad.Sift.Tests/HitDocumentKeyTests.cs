@@ -52,7 +52,7 @@ public sealed class HitDocumentKeyTests
             ? new SiftIndex(fixture.CorpusPath, options)
             : SiftIndex.CreateInMemory(options);
         await index.Build(fixture.CreateSource());
-        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 2));
+        using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive);
         var collectors = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
         {

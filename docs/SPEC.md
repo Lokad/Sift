@@ -240,7 +240,7 @@ Segment size target:
 * **64–128 MiB normalized text**, or
 * **~50k documents**, whichever comes first
 
-Reason: bounded mmap footprint, bounded posting-list sizes, parallel query execution, cheap compaction.
+Reason: bounded mmap footprint, bounded posting-list sizes, cheap compaction.
 
 ---
 
@@ -891,7 +891,7 @@ partial hit publication. Preparation observes the query deadline and timeout pol
 Collector exceptions propagate unchanged, preserving identity and throw-site
 stack information. Preparation failure handling covers preparation only; it must
 not reclassify a collector's `RegexMatchTimeoutException` as a verifier timeout.
-This applies to literal/regex, sequential/parallel and overlay searches. Genuine
+This applies to literal/regex and base/overlay searches. Genuine
 regex compilation/matching timeouts retain the query's stop-or-throw policy.
 
 Literal and managed regex document scans check the effective cancellation token
@@ -1152,22 +1152,22 @@ and similarly named sibling directories retain their existing behaviour.
 * unreachable segment packs are reclaimed automatically on publication,
   snapshot release, and corpus startup
 
-### 12.3 Query parallelism
+### 12.3 Query execution
 
-Segment search preserves manifest hit order and invokes collectors on the calling
-thread. The caller can claim segments whose workers have not started, so progress
-does not require a spare thread-pool worker. Bounded queue waits observe the absolute
-deadline directly; cancellation stops pending tasks, and started tasks are joined
-before their buffers and query/snapshot leases are released.
+A search executes synchronously on its caller thread. It visits segments in
+manifest order, candidates in document ordinal order and matches in verifier
+order. Collectors run directly on that thread; returning false stops further
+verification. Global hit, matched-document and byte budgets apply across segments.
+Cancellation and absolute deadline checks remain cooperative within scans and
+between matches; timer callbacks are not required for those deadline checks.
 
-Parallelize in this order:
-
-1. across segments
-2. within a segment across candidate-document partitions, only when candidate count justifies it
-
-Do **not** spawn a task per document.
-
-Use static partitioning over candidate ordinal arrays / bitsets.
+Snapshot factories are parameterless. The 0.4.0 API removes SearchOptions and
+SiftOptions.MaxSegmentParallelism, requiring consumer recompilation and updated
+ISiftIndex implementations. Index formats are unaffected. Independent searches
+can run concurrently on one snapshot, with separate collectors and query state;
+snapshot disposal waits for active operations.
+Overlays search their own segments first and then visible base segments, retaining
+the natural order within each snapshot.
 
 ### 12.4 Allocation rules
 

@@ -26,7 +26,7 @@ public sealed class InsensitiveByteSearchTests
         }
         using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource(documents));
-        using var snapshot = index.OpenSnapshot(new SearchOptions(2));
+        using var snapshot = index.OpenSnapshot();
         var hits = new HitBuffer();
 
         snapshot.Search(new SearchQuery(pattern, PatternMode.Literal, CaseMode.Insensitive), new(), hits);

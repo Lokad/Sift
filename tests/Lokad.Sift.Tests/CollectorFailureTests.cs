@@ -6,8 +6,8 @@ public sealed class CollectorFailureTests
 {
     public static IEnumerable<object[]> RoutesAndPolicies()
     {
-        foreach (var mode in new[] { "snapshot", "parallel", "overlay", "overlay-base",
-            "native", "native-parallel", "native-overlay" })
+        foreach (var mode in new[] { "snapshot", "overlay", "overlay-base",
+            "native", "native-overlay" })
         foreach (var policy in new[] { RegexTimeoutPolicy.StopSearch, RegexTimeoutPolicy.Throw })
             yield return [mode, policy];
     }
@@ -25,7 +25,7 @@ public sealed class CollectorFailureTests
         await index.Build(new InMemoryDocumentSource([("a.txt", "alpha"), ("b.txt", "alpha"), ("unicode.txt", "CAFÉ")]));
         using IIndexSnapshot snapshot = mode.Contains("overlay", StringComparison.Ordinal)
             ? index.OpenOverlaySnapshot()
-            : index.OpenSnapshot(new SearchOptions(mode.Contains("parallel", StringComparison.Ordinal) ? 2 : 1));
+            : index.OpenSnapshot();
         var ownOverlayRows = snapshot is IOverlaySnapshot && mode != "overlay-base";
         if (snapshot is IOverlaySnapshot overlay && ownOverlayRows)
             await overlay.Update(new InMemoryDocumentSource([("c.txt", "alpha"), ("overlay-unicode.txt", "CAFÉ")]), []);
@@ -52,7 +52,6 @@ public sealed class CollectorFailureTests
 
     [Theory]
     [InlineData("snapshot")]
-    [InlineData("parallel")]
     [InlineData("overlay")]
     public async Task ActualRegexPreparationAndMatchingTimeoutsKeepTheirPolicy(string mode)
     {
@@ -63,7 +62,7 @@ public sealed class CollectorFailureTests
             using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1, RegexEngine = engine });
             await index.Build(new InMemoryDocumentSource([("a.txt", "alpha"), ("b.txt", "alpha")]));
             using IIndexSnapshot snapshot = mode == "overlay" ? index.OpenOverlaySnapshot() :
-                index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+                index.OpenSnapshot();
             if (snapshot is IOverlaySnapshot overlay)
                 await overlay.Update(new InMemoryDocumentSource([("c.txt", "alpha")]), []);
             var query = new SearchQuery("alp.a", PatternMode.Regex, CaseMode.Sensitive) { RegexTimeoutPolicy = policy };

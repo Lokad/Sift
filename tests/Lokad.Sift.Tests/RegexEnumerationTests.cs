@@ -113,17 +113,15 @@ public sealed class RegexEnumerationTests
     }
 
     [Theory]
-    [InlineData(false, 1)]
-    [InlineData(false, 2)]
-    [InlineData(true, 1)]
-    [InlineData(true, 2)]
-    public async Task TrulyEmptyQueriesPreserveOverlayVisibilityLimitsAndCancellation(bool overlay, int parallelism)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrulyEmptyQueriesPreserveOverlayVisibilityLimitsAndCancellation(bool overlay)
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(new InMemoryDocumentSource([("a.txt", "😀"), ("b.txt", "abc")]));
         using IIndexSnapshot snapshot = overlay
-            ? index.OpenOverlaySnapshot(new SearchOptions(parallelism))
-            : index.OpenSnapshot(new SearchOptions(parallelism));
+            ? index.OpenOverlaySnapshot()
+            : index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot editable)
             await editable.Update(new InMemoryDocumentSource([("c.txt", "def")]), [new DocumentKey("a.txt")]);
         var query = new SearchQuery("", PatternMode.Regex, CaseMode.Sensitive)
@@ -151,10 +149,8 @@ public sealed class RegexEnumerationTests
     [Theory]
     [InlineData("aa", "aaaaa", "snapshot")]
     [InlineData("aa", "aaaaa", "overlay")]
-    [InlineData("aa", "aaaaa", "parallel")]
     [InlineData("(?:)", "é😀", "snapshot")]
     [InlineData("(?:)", "é😀", "overlay")]
-    [InlineData("(?:)", "é😀", "parallel")]
     public async Task EnumerationAndPerDocumentLimitsWorkAcrossSnapshots(
         string pattern, string text, string mode)
     {
@@ -162,7 +158,7 @@ public sealed class RegexEnumerationTests
         await index.Build(new InMemoryDocumentSource([("a.txt", text), ("b.txt", text)]));
         using IIndexSnapshot snapshot = mode == "overlay"
             ? index.OpenOverlaySnapshot()
-            : index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+            : index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot overlay)
             await overlay.Update(new InMemoryDocumentSource([("a.txt", text), ("c.txt", text)]),
                 [new DocumentKey("b.txt")]);

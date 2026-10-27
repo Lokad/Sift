@@ -7,7 +7,7 @@ public sealed class SearchControlRegressionTests
 {
     public static IEnumerable<object[]> CancellationCases()
     {
-        foreach (var mode in new[] { "snapshot", "overlay", "parallel" })
+        foreach (var mode in new[] { "snapshot", "overlay" })
         {
             yield return [mode, "alpha", PatternMode.Literal, CaseMode.Sensitive];
             yield return [mode, "alpha", PatternMode.Literal, CaseMode.Insensitive];
@@ -27,7 +27,7 @@ public sealed class SearchControlRegressionTests
         await index.Build(new InMemoryDocumentSource([("a.txt", content), ("b.txt", content)]));
         using IIndexSnapshot snapshot = mode == "overlay"
             ? index.OpenOverlaySnapshot()
-            : index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+            : index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot overlay)
             await overlay.Update(new InMemoryDocumentSource([("c.txt", content)]), []);
         using var cancellation = new CancellationTokenSource();
@@ -42,7 +42,7 @@ public sealed class SearchControlRegressionTests
 
     public static IEnumerable<object[]> DeadlineCases()
     {
-        foreach (var mode in new[] { "snapshot", "overlay", "parallel", "native" })
+        foreach (var mode in new[] { "snapshot", "overlay", "native" })
         {
             yield return [mode, "alpha", PatternMode.Literal, CaseMode.Sensitive];
             yield return [mode, "alpha", PatternMode.Literal, CaseMode.Insensitive];
@@ -73,7 +73,7 @@ public sealed class SearchControlRegressionTests
         await index.Build(new InMemoryDocumentSource([("a.txt", content), ("b.txt", content)]));
         using IIndexSnapshot snapshot = mode == "overlay"
             ? index.OpenOverlaySnapshot()
-            : index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+            : index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot overlay)
             await overlay.Update(new InMemoryDocumentSource([("c.txt", content)]), []);
         var query = new SearchQuery(pattern, patternMode, caseMode);

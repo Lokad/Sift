@@ -7,7 +7,6 @@ public sealed class CandidateVisitTests
 {
     [Theory]
     [InlineData("snapshot")]
-    [InlineData("parallel")]
     [InlineData("overlay")]
     [InlineData("existing")]
     public async Task CandidatesPreserveExactFieldMatchesAndTraversalOrder(string route)
@@ -27,7 +26,7 @@ public sealed class CandidateVisitTests
         });
         await index.Build(new InMemoryDocumentSource(documents.Select(x => (x.Key, x.Value)).ToArray()));
         using var owner = route == "overlay" ? (IIndexSnapshot)index.OpenOverlaySnapshot() :
-            index.OpenSnapshot(new SearchOptions(route == "parallel" ? 3 : 1));
+            index.OpenSnapshot();
         IIndexSnapshot snapshot = route == "existing" ? new ExistingSnapshot(owner) : owner;
         foreach (var (pattern, mode, casing) in new[]
         {
@@ -82,7 +81,6 @@ public sealed class CandidateVisitTests
 
     [Theory]
     [InlineData("snapshot")]
-    [InlineData("parallel")]
     [InlineData("overlay")]
     [InlineData("existing")]
     public async Task LimitsCancellationAndCallbackFailuresRemainExplicit(string route)
@@ -90,7 +88,7 @@ public sealed class CandidateVisitTests
         using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(new InMemoryDocumentSource([("a", "alpha"), ("b", "alpha"), ("c", "alpha")]));
         using var owner = route == "overlay" ? (IIndexSnapshot)index.OpenOverlaySnapshot() :
-            index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+            index.OpenSnapshot();
         IIndexSnapshot snapshot = route == "existing" ? new ExistingSnapshot(owner) : owner;
         var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = 1, MaxMatchedDocuments = 1, MaxBytesScanned = 1 };
         var all = snapshot.VisitCandidates(query, new(), new Collector(_ => true));

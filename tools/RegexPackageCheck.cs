@@ -478,13 +478,13 @@ internal static class RegexPackageCheck
     private static async Task VerifyUnicodePathFilters(ISiftRegexEngine? engine)
     {
         var paths = new[] { "😀.txt", "�.txt", "prefix/😀.txt", "prefix/�.txt" };
-        foreach (var route in new[] { "snapshot", "parallel", "overlay-base", "overlay-own" })
+        foreach (var route in new[] { "snapshot", "overlay-base", "overlay-own" })
         {
             using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
             await index.Build(new Documents(paths.Select(path => (path, "needle")).ToArray()));
             using IIndexSnapshot snapshot = route.StartsWith("overlay", StringComparison.Ordinal)
-                ? index.OpenOverlaySnapshot(new SearchOptions(2))
-                : index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+                ? index.OpenOverlaySnapshot()
+                : index.OpenSnapshot();
             if (route == "overlay-own")
                 await ((IOverlaySnapshot)snapshot).Update(new Documents(paths.Select(path => (path, "updated needle")).ToArray()), []);
 
@@ -620,10 +620,10 @@ internal static class RegexPackageCheck
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
         await index.Build(new Documents([("a.txt", "alpha"), ("b.txt", "alpha")]));
-        foreach (var mode in new[] { "snapshot", "parallel", "overlay", "overlay-base" })
+        foreach (var mode in new[] { "snapshot", "overlay", "overlay-base" })
         {
             using IIndexSnapshot snapshot = mode.StartsWith("overlay", StringComparison.Ordinal) ? index.OpenOverlaySnapshot() :
-                index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+                index.OpenSnapshot();
             if (snapshot is IOverlaySnapshot overlay && mode == "overlay")
                 await overlay.Update(new Documents([("c.txt", "alpha")]), []);
             foreach (var (pattern, patternMode) in new[] { ("alpha", PatternMode.Literal), ("alp.a", PatternMode.Regex) })

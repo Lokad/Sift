@@ -67,7 +67,7 @@ public sealed class MaterializationBudgetTests
             await index.Build(new InMemoryDocumentSource(route == "overlay-delta"
                 ? documents.Select(document => (document.Item1, "stale")).ToArray() : documents));
             using IIndexSnapshot snapshot = route == "snapshot"
-                ? index.OpenSnapshot(new SearchOptions(2)) : index.OpenOverlaySnapshot(new SearchOptions(2));
+                ? index.OpenSnapshot() : index.OpenOverlaySnapshot();
             if (route == "overlay-delta")
                 await ((IOverlaySnapshot)snapshot).Update(new InMemoryDocumentSource(documents), []);
 

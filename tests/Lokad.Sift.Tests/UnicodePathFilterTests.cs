@@ -77,7 +77,7 @@ public sealed class UnicodePathFilterTests
 
     public static IEnumerable<object[]> RoutesAndFilters()
     {
-        foreach (var route in new[] { "snapshot", "parallel", "overlay-base", "overlay-own" })
+        foreach (var route in new[] { "snapshot", "overlay-base", "overlay-own" })
         foreach (var (name, _, _) in Filters)
             yield return [route, name];
     }
@@ -89,8 +89,8 @@ public sealed class UnicodePathFilterTests
         using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(Source(Paths));
         using IIndexSnapshot snapshot = route.StartsWith("overlay", StringComparison.Ordinal)
-            ? index.OpenOverlaySnapshot(new SearchOptions(2))
-            : index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+            ? index.OpenOverlaySnapshot()
+            : index.OpenSnapshot();
         if (route == "overlay-own") await ((IOverlaySnapshot)snapshot).Update(Source(Paths, "updated needle"), []);
         var (_, original, usesPathIndex) = Filters.Single(filter => filter.Name == name);
 

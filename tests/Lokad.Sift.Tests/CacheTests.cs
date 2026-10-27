@@ -109,11 +109,9 @@ public sealed class CacheTests
     }
 
     [Theory]
-    [InlineData(false, 1)]
-    [InlineData(false, 2)]
-    [InlineData(true, 1)]
-    [InlineData(true, 2)]
-    public async Task NativeCacheAccessIsCountedOncePerSearch(bool overlay, int parallelism)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeCacheAccessIsCountedOncePerSearch(bool overlay)
     {
         var engine = new RegexContractTestEngine();
         using var index = SiftIndex.CreateInMemory(new SiftOptions
@@ -123,8 +121,8 @@ public sealed class CacheTests
         });
         await index.Build(new InMemoryDocumentSource([("a.txt", "alpha1"), ("b.txt", "alpha2")]));
         using IIndexSnapshot snapshot = overlay
-            ? index.OpenOverlaySnapshot(new SearchOptions(parallelism))
-            : index.OpenSnapshot(new SearchOptions(parallelism));
+            ? index.OpenOverlaySnapshot()
+            : index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot editable)
             await editable.Update(new InMemoryDocumentSource([("c.txt", "alpha3"), ("d.txt", "alpha4")]), []);
         var query = new SearchQuery("alpha[0-9]", PatternMode.Regex, CaseMode.Sensitive);

@@ -1,30 +1,6 @@
-using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 
 namespace Lokad.Sift.Search;
-
-internal sealed class OrderedHitCollector(Func<RawHit, bool> consume) : IHitCollector
-{
-    public bool OnHit(in RawHit hit) => consume(hit);
-}
-
-internal sealed class BoundedHitCollector(
-    BlockingCollection<RawHit> hits,
-    CancellationToken cancellationToken) : IHitCollector
-{
-    public bool OnHit(in RawHit hit)
-    {
-        try
-        {
-            hits.Add(hit, cancellationToken);
-            return true;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return false;
-        }
-    }
-}
 
 internal sealed class GuardedOwnedHitCollector(
     object owner, IHitCollector inner, ValueStopwatch watch, long maxElapsedMilliseconds) : IHitCollector

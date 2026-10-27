@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Unreleased (0.4.0)
 
 ### Added
 
@@ -17,6 +17,19 @@
   materializing its match or context text in built-in snapshots. Hit ownership and
   snapshot/overlay lifetime checks are preserved. A default implementation keeps
   existing custom snapshot implementations compatible.
+
+### Removed
+
+- Optional segment-parallel search, producer queues and worker scheduling. Searches
+  execute synchronously in manifest order on the caller thread, delivering hits
+  directly to collectors.
+- `SearchOptions`, including its integer constructor and `SegmentParallelism`, and
+  `SiftOptions.MaxSegmentParallelism`. `ISiftIndex` and `SiftIndex` snapshot factories
+  are now parameterless instance methods; their former parameterless extension
+  methods are removed. Replace `OpenSnapshot(new SearchOptions(...))` with
+  `OpenSnapshot()` (and likewise for `OpenOverlaySnapshot()`). This is a source
+  and binary breaking change: recompile consumers and update custom `ISiftIndex`
+  implementations for 0.4.0. Existing index formats remain readable.
 
 ### Changed
 
@@ -199,9 +212,6 @@
 - CLI context flags now print bounded, labelled context per hit and mark truncation.
   CLI output is UTF-8; search/explain reject unknown arguments and invalid numeric
   options before opening the corpus, with a diagnostic and exit code 1.
-- Parallel search can execute pending segments on its caller when pool workers are
-  unavailable. Ordered result-queue waits observe elapsed deadlines independently
-  of timer callbacks; collectors, bounded buffering and worker cleanup are preserved.
 - Failures accessing caller-owned document memory no longer mark healthy indexes
   as corrupt. Build, update and overlay paths preserve the original exception and
   committed state, including later reads of borrowed content.
@@ -246,7 +256,7 @@
   committed state and snapshots are preserved, including async enumeration failures;
   genuine corruption detection and failed-recovery handling remain in place.
 - Collector `RegexMatchTimeoutException` failures now propagate unchanged from
-  ordinary and parallel searches, including literal queries. Preparation timeout
+  base and overlay searches, including literal queries. Preparation timeout
   handling no longer swallows callback failures; genuine regex timeout policies
   and overlay behavior are preserved.
 - Literal queries containing lone UTF-16 surrogates no longer produce partial

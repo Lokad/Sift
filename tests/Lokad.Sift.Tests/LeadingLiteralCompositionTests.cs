@@ -9,9 +9,9 @@ public sealed class LeadingLiteralCompositionTests
     [InlineData("snapshot", "direct")]
     [InlineData("snapshot", "indexed")]
     [InlineData("snapshot", "default")]
-    [InlineData("parallel", "direct")]
-    [InlineData("parallel", "indexed")]
-    [InlineData("parallel", "default")]
+    [InlineData("multi-segment", "direct")]
+    [InlineData("multi-segment", "indexed")]
+    [InlineData("multi-segment", "default")]
     [InlineData("overlay", "direct")]
     [InlineData("overlay", "indexed")]
     [InlineData("overlay", "default")]
@@ -26,15 +26,15 @@ public sealed class LeadingLiteralCompositionTests
         var defaults = new SiftOptions();
         using var index = SiftIndex.CreateInMemory(new SiftOptions
         {
-            TargetSegmentDocumentCount = route == "parallel" ? batch.Length : defaults.TargetSegmentDocumentCount,
+            TargetSegmentDocumentCount = route == "multi-segment" ? batch.Length : defaults.TargetSegmentDocumentCount,
             DirectScanScopeDocumentsThreshold = planning == "indexed" ? 0 : planning == "default" ? defaults.DirectScanScopeDocumentsThreshold : 1000,
             DirectScanScopeBytesThreshold = planning == "indexed" ? 0 : planning == "default" ? defaults.DirectScanScopeBytesThreshold : 10 * 1024 * 1024,
             DirectScanCandidateDensityThreshold = planning == "default" ? defaults.DirectScanCandidateDensityThreshold : 1.1
         });
         await index.Build(new InMemoryDocumentSource(documents.Select(doc =>
             (doc.Item1, route == "overlay" ? "stale" : doc.Text)).ToArray()));
-        using IIndexSnapshot snapshot = route == "overlay" ? index.OpenOverlaySnapshot(new SearchOptions(2)) :
-            index.OpenSnapshot(new SearchOptions(route == "parallel" ? 2 : 1));
+        using IIndexSnapshot snapshot = route == "overlay" ? index.OpenOverlaySnapshot() :
+            index.OpenSnapshot();
         if (snapshot is IOverlaySnapshot overlay) await overlay.Update(new InMemoryDocumentSource(documents), []);
 
         foreach (var pattern in new[] { "(?:foo.*bar|baz)qux", "(?:(?:foo.*bar)qux|bazzy)",
@@ -66,10 +66,8 @@ public sealed class LeadingLiteralCompositionTests
         }
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task NestedGroupSearchHonorsLimitsAndCancellation(int parallelism)
+    [Fact]
+    public async Task NestedGroupSearchHonorsLimitsAndCancellation()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions
         {
@@ -80,7 +78,7 @@ public sealed class LeadingLiteralCompositionTests
         });
         var content = new string('z', 512) + " fooXbarqux bazzy fooYbarqux fooqux";
         await index.Build(new InMemoryDocumentSource([("a.txt", content), ("b.txt", content)]));
-        using var snapshot = index.OpenSnapshot(new SearchOptions(parallelism));
+        using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("(?:(?:foo.bar)qux|bazzy)", PatternMode.Regex, CaseMode.Sensitive);
         Assert.Equal(3, snapshot.Search(query with { MaxHits = 3 }, new(), new HitBuffer()).HitsReturned);
         Assert.Equal(2, snapshot.Search(query with { MaxHitsPerDocument = 1 }, new(), new HitBuffer()).HitsReturned);

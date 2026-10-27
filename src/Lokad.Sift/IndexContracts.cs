@@ -36,8 +36,6 @@ public sealed class SiftOptions
     // Compacts an overlay once it retains this many segments beyond the minimum
     // needed for its current live document and byte counts.
     public int OverlayCompactionSegmentThreshold { get; init; } = 8;
-    // Prevents one search from creating an excessive number of segment workers.
-    public int MaxSegmentParallelism { get; init; } = 64;
     // Retains the native indexing workspace between mutations for latency-sensitive writers.
     public bool RetainIndexingWorkspace { get; init; }
 }
@@ -651,6 +649,11 @@ public interface IIndexSnapshot : IDisposable
         IDocumentCandidateCollector collector, CandidateVisitOptions options, CancellationToken cancellationToken) =>
         global::Lokad.Sift.Search.CandidateVisit.Run(this, query, pathFilter, collector, options, cancellationToken, useIndex: false);
     SearchPlan Explain(SearchQuery query, PathFilter pathFilter);
+    /// <summary>Searches in natural snapshot order, invoking the collector synchronously on the caller thread.</summary>
+    /// <remarks>
+    /// Base snapshots visit manifest segments and document ordinals in order; overlays search their own segments first.
+    /// Returning false from the collector stops verification. Independent searches may run concurrently.
+    /// </remarks>
     SearchStats Search(SearchQuery query, PathFilter pathFilter, IHitCollector collector, CancellationToken cancellationToken);
 
     /// <summary>Materializes a raw hit produced by this snapshot.</summary>
@@ -733,8 +736,10 @@ public interface ISiftIndex : IDisposable
     bool RequiresRebuild { get; }
     IndexIdentity GetIndexIdentity();
     IndexState GetIndexState();
-    IIndexSnapshot OpenSnapshot(SearchOptions options);
-    IOverlaySnapshot OpenOverlaySnapshot(SearchOptions options);
+    /// <summary>Opens a generation-pinned snapshot for synchronous caller-thread searches.</summary>
+    IIndexSnapshot OpenSnapshot();
+    /// <summary>Opens an editable snapshot for synchronous caller-thread searches.</summary>
+    IOverlaySnapshot OpenOverlaySnapshot();
     WriteActivityStats GetWriteActivityStats();
     IndexValidationStats GetValidationStats();
     MaintenanceStats GetMaintenanceStats();

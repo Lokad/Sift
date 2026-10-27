@@ -27,7 +27,7 @@ public sealed class RegexCandidateCorrectnessTests
     [InlineData("aa.*aa", "AAAAA")]
     public async Task CandidateFilteringPreservesManagedRegexResults(string pattern, string text)
     {
-        foreach (var mode in new[] { "snapshot", "parallel", "overlay" })
+        foreach (var mode in new[] { "snapshot", "overlay" })
         foreach (var favorIndex in new[] { false, true })
         foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive, CaseMode.Smart })
         {
@@ -44,8 +44,8 @@ public sealed class RegexCandidateCorrectnessTests
             await index.Build(new InMemoryDocumentSource(documents
                 .Select(doc => (doc.Path, mode == "overlay" ? "stale" : doc.Text)).ToArray()));
             using IIndexSnapshot snapshot = mode == "overlay"
-                ? index.OpenOverlaySnapshot(new SearchOptions(2))
-                : index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+                ? index.OpenOverlaySnapshot()
+                : index.OpenSnapshot();
             if (snapshot is IOverlaySnapshot overlay)
                 await overlay.Update(new InMemoryDocumentSource(documents), []);
             var query = new SearchQuery(pattern, PatternMode.Regex, caseMode);
@@ -71,14 +71,12 @@ public sealed class RegexCandidateCorrectnessTests
         }
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task RegexWithOverlappingLiteralOccurrencesHonorsLimitsAndCancellation(int parallelism)
+    [Fact]
+    public async Task RegexWithOverlappingLiteralOccurrencesHonorsLimitsAndCancellation()
     {
         using var index = SiftIndex.CreateInMemory(new SiftOptions { TargetSegmentDocumentCount = 1 });
         await index.Build(new InMemoryDocumentSource([("a.txt", "aaaaaaaaaa"), ("b.txt", "aaaaaaaaaa")]));
-        using var snapshot = index.OpenSnapshot(new SearchOptions(parallelism));
+        using var snapshot = index.OpenSnapshot();
         var query = new SearchQuery("aa.{0,1}aa", PatternMode.Regex, CaseMode.Sensitive);
         Assert.Equal(3, snapshot.Search(query with { MaxHits = 3 }, new(), new HitBuffer()).HitsReturned);
         Assert.Equal(2, snapshot.Search(query with { MaxHitsPerDocument = 1 }, new(), new HitBuffer()).HitsReturned);

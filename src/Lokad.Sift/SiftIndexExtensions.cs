@@ -2,16 +2,6 @@ namespace Lokad.Sift;
 
 public static class SiftIndexExtensions
 {
-    public static IIndexSnapshot OpenSnapshot(this ISiftIndex index)
-    {
-        return index.OpenSnapshot(new SearchOptions());
-    }
-
-    public static IOverlaySnapshot OpenOverlaySnapshot(this ISiftIndex index)
-    {
-        return index.OpenOverlaySnapshot(new SearchOptions());
-    }
-
     public static Task<IndexValidationStats> Validate(this ISiftIndex index)
     {
         return index.Validate(CancellationToken.None);

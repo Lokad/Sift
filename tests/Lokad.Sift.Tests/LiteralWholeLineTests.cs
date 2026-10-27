@@ -25,7 +25,7 @@ public sealed class LiteralWholeLineTests
             ("prefix.txt", "π\nx" + stem + "\n"),
             ("suffix.txt", "π\n" + stem + "x\n")
         };
-        foreach (var mode in new[] { "snapshot", "parallel", "overlay" })
+        foreach (var mode in new[] { "snapshot", "overlay" })
         foreach (var favorIndex in new[] { false, true })
         foreach (var caseMode in new[] { CaseMode.Sensitive, CaseMode.Insensitive, CaseMode.Smart })
         {
@@ -40,8 +40,8 @@ public sealed class LiteralWholeLineTests
                 .Select(doc => (doc.Path, mode == "overlay" ? "stale\n" : doc.Text))
                 .Concat(Enumerable.Range(0, 64).Select(i => ($"noise/{i}.txt", ""))).ToArray()));
             using IIndexSnapshot snapshot = mode == "overlay"
-                ? index.OpenOverlaySnapshot(new SearchOptions(2))
-                : index.OpenSnapshot(new SearchOptions(mode == "parallel" ? 2 : 1));
+                ? index.OpenOverlaySnapshot()
+                : index.OpenSnapshot();
             if (snapshot is IOverlaySnapshot overlay)
                 await overlay.Update(new InMemoryDocumentSource(documents), []);
 

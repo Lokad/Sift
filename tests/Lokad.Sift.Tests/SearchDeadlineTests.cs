@@ -6,8 +6,6 @@ public sealed class SearchDeadlineTests
 {
     [Theory]
     [InlineData("deadline-probes")]
-    [InlineData("parallel-progress")]
-    [InlineData("parallel-queue-deadline")]
     public async Task SearchesProgressWhenTimerCallbacksCannotRun(string mode)
     {
         // Thread-pool saturation belongs in a separate process, so it cannot

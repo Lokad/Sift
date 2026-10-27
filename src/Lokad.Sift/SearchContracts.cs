@@ -115,27 +115,6 @@ public sealed record SearchQuery
     public long MaxElapsedMilliseconds { get; init; }
 }
 
-public readonly record struct SearchOptions
-{
-    public SearchOptions()
-        : this(segmentParallelism: 1)
-    {
-    }
-
-    public SearchOptions(int segmentParallelism)
-    {
-        SegmentParallelism = segmentParallelism;
-    }
-
-    /// <summary>Gets the number of segments searched concurrently. Zero uses the default of one.</summary>
-    /// <remarks>
-    ///     A finite <see cref="SearchQuery.MaxBytesScanned"/> uses one segment lane
-    ///     so the byte budget remains exact. Hit and matched-document limits are
-    ///     enforced globally while parallel workers preserve manifest hit order.
-    /// </remarks>
-    public int SegmentParallelism { get; init; }
-}
-
 /// <summary>Restricts a search to matching logical paths.</summary>
 /// <remarks>
 ///     Prefixes and globs retain UTF-16 string semantics, including lone surrogate

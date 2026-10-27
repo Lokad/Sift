@@ -26,3 +26,7 @@ their direct producer dependency, and compare real producer results with .NET.
 `tools/verify-regex-package.ps1` additionally checks injection against the actual
 Release package and a clean core-only consumer, avoiding source-linked/binary
 contract type confusion.
+
+Open snapshots with `index.OpenSnapshot()` or `index.OpenOverlaySnapshot()`.
+Search and candidate callbacks execute synchronously on the calling thread.
+Return `false` to stop traversal; snapshot lifetime owns borrowed content.

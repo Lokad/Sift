@@ -9,62 +9,31 @@ namespace Lokad.Sift.Tests;
 public sealed class SearchIntegrationTests
 {
     [Fact]
-    public async Task ParallelSegmentsStillExecuteConcurrentlyWithCallerThreadCollectors()
+    public async Task SegmentsExecuteOnCallerThreadWithCallerThreadCollectors()
     {
-        using var entered = new CountdownEvent(2);
+        var callerThread = 0;
+        var invocations = 0;
         using var engine = new RegexContractTestEngine();
         engine.BeforeMatch = () =>
         {
-            entered.Signal();
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "Segments did not execute concurrently.");
+            Assert.Equal(callerThread, Environment.CurrentManagedThreadId);
+            invocations++;
         };
         using var index = SiftIndex.CreateInMemory(new SiftOptions { RegexEngine = engine, TargetSegmentDocumentCount = 1 });
         await index.Build(new InMemoryDocumentSource([("a.txt", "needle"), ("b.txt", "needle")]));
-        using var snapshot = index.OpenSnapshot(new SearchOptions(2));
-        var callerThread = Environment.CurrentManagedThreadId;
+        using var snapshot = index.OpenSnapshot();
+        callerThread = Environment.CurrentManagedThreadId;
         var collector = new ThreadCheckingCollector(callerThread);
         var stats = snapshot.Search(new SearchQuery("n.edle", PatternMode.Regex, CaseMode.Sensitive), new(), collector);
         Assert.Equal(SearchStopReason.None, stats.StopReason);
         Assert.Equal(2, stats.HitsReturned);
         Assert.Equal(2, stats.Utf8RegexInvocations);
+        Assert.Equal(2, invocations);
     }
 
     private sealed class ThreadCheckingCollector(int callerThread) : IHitCollector
     {
         public bool OnHit(in RawHit hit) { Assert.Equal(callerThread, Environment.CurrentManagedThreadId); return true; }
-    }
-
-    [Fact]
-    public async Task ParallelSearchCleansUpStartedWorkersWhenBatchSetupFails()
-    {
-        var repeatedHits = string.Concat(Enumerable.Repeat("alpha ", 1000));
-        using var index = SiftIndex.CreateInMemory(new SiftOptions
-        {
-            MaxSegmentParallelism = 2,
-            TargetSegmentDocumentCount = 1
-        });
-        await index.Build(new InMemoryDocumentSource([
-            ("src/a.txt", repeatedHits),
-            ("src/b.txt", repeatedHits)
-        ]));
-        using var snapshot = Assert.IsType<SearchSnapshot>(
-            index.OpenSnapshot(new SearchOptions(segmentParallelism: 2)));
-        var injectedFailure = new IOException("Injected worker setup failure.");
-        snapshot.BeforeParallelWorkerStart = workerIndex =>
-        {
-            if (workerIndex == 1)
-            {
-                throw injectedFailure;
-            }
-        };
-
-        var failure = await Assert.ThrowsAsync<IOException>(() => Task.Run(() =>
-            snapshot.Search(
-                new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive),
-                new PathFilter(),
-                new HitBuffer()))).WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.Same(injectedFailure, failure);
     }
 
     [Fact]
@@ -85,12 +54,10 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task SearchRejectsInvalidModesAndExcessiveParallelism()
+    public async Task SearchRejectsInvalidModes()
     {
-        using var index = SiftIndex.CreateInMemory(new SiftOptions { MaxSegmentParallelism = 4 });
+        using var index = SiftIndex.CreateInMemory();
         await index.Build(new InMemoryDocumentSource([("src/a.txt", "alpha")]));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            index.OpenSnapshot(new SearchOptions(segmentParallelism: 5)));
         using var snapshot = index.OpenSnapshot();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => snapshot.Explain(
@@ -2117,54 +2084,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task SegmentParallelSearchMatchesSequentialHitsAndStats()
-    {
-        var documents = Enumerable.Range(0, 240)
-            .Select(static i => ($"src/{i:D5}.txt", i % 5 == 0 ? $"alpha needle gamma {i}\n" : $"alpha beta gamma {i}\n"))
-            .ToArray();
-
-        using var fixture = new CorpusFixture(documents);
-        using var sequentialIndex = new SiftIndex(fixture.CorpusPath, new SiftOptions
-        {
-            TargetSegmentDocumentCount = 32
-        });
-        await sequentialIndex.Build(fixture.CreateSource());
-
-        using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive) { MaxHits = int.MaxValue, MaxMatchedDocuments = int.MaxValue, MaxBytesScanned = long.MaxValue };
-        var sequentialCollector = new HitBuffer();
-        var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
-        var expected = sequentialCollector.Hits
-            .Select(hit => sequentialSnapshot.Materialize(hit, 0, 0))
-            .Select(static hit => (hit.Path, hit.StartLine, hit.StartColumn, hit.MatchText))
-            .ToArray();
-
-        using var parallelIndex = new SiftIndex(fixture.CorpusPath, new SiftOptions
-        {
-            TargetSegmentDocumentCount = 32
-        });
-        using var parallelSnapshot = parallelIndex.OpenSnapshot(new SearchOptions(4));
-        var parallelCollector = new HitBuffer();
-        var parallelStats = parallelSnapshot.Search(query, new PathFilter(), parallelCollector);
-        var actual = parallelCollector.Hits
-            .Select(hit => parallelSnapshot.Materialize(hit, 0, 0))
-            .Select(static hit => (hit.Path, hit.StartLine, hit.StartColumn, hit.MatchText))
-            .ToArray();
-
-        Assert.Equal(expected, actual);
-        Assert.Equal(sequentialStats.ScopeDocuments, parallelStats.ScopeDocuments);
-        Assert.Equal(sequentialStats.ScopeBytes, parallelStats.ScopeBytes);
-        Assert.Equal(sequentialStats.CandidateDocumentsAfterIndex, parallelStats.CandidateDocumentsAfterIndex);
-        Assert.Equal(sequentialStats.CandidateDocumentsAfterPrecheck, parallelStats.CandidateDocumentsAfterPrecheck);
-        Assert.Equal(sequentialStats.VerifiedDocuments, parallelStats.VerifiedDocuments);
-        Assert.Equal(sequentialStats.BytesScanned, parallelStats.BytesScanned);
-        Assert.Equal(sequentialStats.DecodedChars, parallelStats.DecodedChars);
-        Assert.Equal(sequentialStats.HitsReturned, parallelStats.HitsReturned);
-        Assert.Equal(sequentialStats.StopReason, parallelStats.StopReason);
-    }
-
-    [Fact]
-    public async Task SegmentParallelSearchPreservesManifestOrderAcrossSegments()
+    public async Task SearchPreservesManifestOrderAcrossSegments()
     {
         var documents = Enumerable.Range(0, 96)
             .Select(static i => ($"src/{i:D5}.txt", $"alpha needle {i:D5}\n"))
@@ -2178,7 +2098,7 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
 
         using var snapshot = Assert.IsType<SearchSnapshot>(
-            index.OpenSnapshot(new SearchOptions(4)));
+            index.OpenSnapshot());
         var collector = new HitBuffer();
         snapshot.Search(
             new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive),
@@ -2190,11 +2110,10 @@ public sealed class SearchIntegrationTests
             .ToArray();
         var expectedPaths = documents.Select(static doc => doc.Item1).ToArray();
         Assert.Equal(expectedPaths, actualPaths);
-        Assert.Equal(1, snapshot.ParallelSearchCount);
     }
 
     [Fact]
-    public async Task SingleLaneSearchDeliversHitsWithoutBufferingTheSegment()
+    public async Task SearchDeliversHitsWithoutBufferingTheSegment()
     {
         var documents = Enumerable.Range(0, 100)
             .Select(static i => ($"src/{i:D5}.txt", "needle\n"))
@@ -2203,7 +2122,7 @@ public sealed class SearchIntegrationTests
         using var index = new SiftIndex(fixture.CorpusPath, new SiftOptions());
         await index.Build(fixture.CreateSource());
 
-        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 1));
+        using var snapshot = index.OpenSnapshot();
         var collector = new StopAfterFirstHitCollector();
         var stats = snapshot.Search(
             new SearchQuery("needle", PatternMode.Literal, CaseMode.Sensitive)
@@ -2223,7 +2142,7 @@ public sealed class SearchIntegrationTests
     [Theory]
     [InlineData(CaseMode.Sensitive)]
     [InlineData(CaseMode.Insensitive)]
-    public async Task SegmentParallelSearchHonorsCollectorStop(CaseMode caseMode)
+    public async Task SearchHonorsCollectorStopAcrossSegments(CaseMode caseMode)
     {
         var repeatedMatches = string.Join(' ', Enumerable.Repeat("needle", 2_000));
         var documents = Enumerable.Range(0, 8)
@@ -2235,7 +2154,7 @@ public sealed class SearchIntegrationTests
             TargetSegmentDocumentCount = 1
         });
         await index.Build(fixture.CreateSource());
-        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 4));
+        using var snapshot = index.OpenSnapshot();
 
         var stats = snapshot.Search(
             new SearchQuery("needle", PatternMode.Literal, caseMode)
@@ -2248,7 +2167,7 @@ public sealed class SearchIntegrationTests
             new StopAfterFirstHitCollector());
 
         Assert.Equal(SearchStopReason.CollectorStopped, stats.StopReason);
-        Assert.InRange(stats.VerifiedDocuments, 1, 4);
+        Assert.Equal(1, stats.VerifiedDocuments);
         Assert.Equal(1, stats.HitsReturned);
     }
 
@@ -2281,56 +2200,7 @@ public sealed class SearchIntegrationTests
     }
 
     [Fact]
-    public async Task SegmentParallelSearchHonorsGlobalSearchLimits()
-    {
-        var documents = Enumerable.Range(0, 96)
-            .Select(static i => ($"src/{i:D5}.txt", i % 2 == 0 ? "alpha needle\n" : "alpha beta\n"))
-            .ToArray();
-
-        using var fixture = new CorpusFixture(documents);
-        using var sequentialIndex = new SiftIndex(fixture.CorpusPath, new SiftOptions
-        {
-            TargetSegmentDocumentCount = 16
-        });
-        await sequentialIndex.Build(fixture.CreateSource());
-
-        using var sequentialSnapshot = sequentialIndex.OpenSnapshot();
-        var query = new SearchQuery("alpha", PatternMode.Literal, CaseMode.Sensitive)
-        {
-            MaxHits = 10,
-            MaxMatchedDocuments = 6,
-            MaxBytesScanned = long.MaxValue
-        };
-        var sequentialCollector = new HitBuffer();
-        var sequentialStats = sequentialSnapshot.Search(query, new PathFilter(), sequentialCollector);
-        var expected = sequentialCollector.Hits
-            .Select(hit => sequentialSnapshot.Materialize(hit, 0, 0))
-            .Select(static hit => (hit.Path, hit.StartLine, hit.StartColumn, hit.MatchText))
-            .ToArray();
-
-        using var parallelIndex = new SiftIndex(fixture.CorpusPath, new SiftOptions
-        {
-            TargetSegmentDocumentCount = 16
-        });
-        using var parallelSnapshot = Assert.IsType<SearchSnapshot>(
-            parallelIndex.OpenSnapshot(new SearchOptions(4)));
-        var parallelCollector = new HitBuffer();
-        var parallelStats = parallelSnapshot.Search(query, new PathFilter(), parallelCollector);
-        var actual = parallelCollector.Hits
-            .Select(hit => parallelSnapshot.Materialize(hit, 0, 0))
-            .Select(static hit => (hit.Path, hit.StartLine, hit.StartColumn, hit.MatchText))
-            .ToArray();
-
-        Assert.Equal(expected, actual);
-        Assert.True(parallelStats.VerifiedDocuments >= sequentialStats.VerifiedDocuments);
-        Assert.True(parallelStats.BytesScanned >= sequentialStats.BytesScanned);
-        Assert.Equal(sequentialStats.HitsReturned, parallelStats.HitsReturned);
-        Assert.Equal(sequentialStats.StopReason, parallelStats.StopReason);
-        Assert.Equal(1, parallelSnapshot.ParallelSearchCount);
-    }
-
-    [Fact]
-    public async Task FiniteByteLimitAvoidsParallelSegmentPrework()
+    public async Task FiniteByteLimitStopsBeforeScanningAnExcessDocument()
     {
         var documents = Enumerable.Range(0, 8)
             .Select(static i => ($"src/{i:D2}.txt", "needle"))
@@ -2343,7 +2213,7 @@ public sealed class SearchIntegrationTests
         await index.Build(fixture.CreateSource());
         var storage = Assert.IsType<Lokad.Sift.Storage.CorpusStorage>(index.Storage);
         var opensBeforeSearch = storage.SegmentOpenCount;
-        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism: 4));
+        using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(
@@ -2414,10 +2284,8 @@ public sealed class SearchIntegrationTests
         Assert.Equal(SearchStopReason.MaxHits, stats.StopReason);
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public async Task PerDocumentHitLimitContinuesWithLaterDocuments(int segmentParallelism)
+    [Fact]
+    public async Task PerDocumentHitLimitContinuesWithLaterDocuments()
     {
         using var fixture = new CorpusFixture(
             ("src/a.txt", "needle needle needle"),
@@ -2427,7 +2295,7 @@ public sealed class SearchIntegrationTests
             TargetSegmentDocumentCount = 1
         });
         await index.Build(fixture.CreateSource());
-        using var snapshot = index.OpenSnapshot(new SearchOptions(segmentParallelism));
+        using var snapshot = index.OpenSnapshot();
         var collector = new HitBuffer();
 
         var stats = snapshot.Search(

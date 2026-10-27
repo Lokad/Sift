@@ -13,7 +13,6 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private readonly IndexIdentity _baseIdentity;
     private readonly SiftIndex _overlayIndex;
     private readonly SiftOptions _options;
-    private readonly SearchOptions _searchOptions;
     private SortedDictionary<string, long> _overlayDocuments = new(StringComparer.Ordinal);
     private HashSet<string> _baseTombstones = new(StringComparer.Ordinal);
     private readonly BoundedLruCache<string, bool> _baseDocumentExistence = new(
@@ -35,17 +34,16 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
     private Exception? _failure;
     private int _disposed;
 
-    internal OverlaySnapshot(SearchSnapshot baseSnapshot, SiftOptions options, SearchOptions searchOptions)
+    internal OverlaySnapshot(SearchSnapshot baseSnapshot, SiftOptions options)
     {
         _baseSnapshot = baseSnapshot;
         _baseIdentity = baseSnapshot.Identity;
         _options = options;
-        _searchOptions = searchOptions;
         var overlayIndex = new SiftIndex(new InMemorySiftStorage(), options, baseSnapshot.RegexContext);
         SearchSnapshot? overlaySnapshot = null;
         try
         {
-            overlaySnapshot = (SearchSnapshot)overlayIndex.OpenSnapshot(searchOptions);
+            overlaySnapshot = (SearchSnapshot)overlayIndex.OpenSnapshot();
             var baseSegmentIds = new HashSet<SegmentId>(_baseSnapshot.GetSegmentIds());
             _overlayIndex = overlayIndex;
             _overlaySnapshot = overlaySnapshot;
@@ -269,7 +267,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 #if SIFT_INTERNAL_VERIFICATION
                 BeforeOpeningCommittedSnapshot?.Invoke();
 #endif
-                nextSnapshot = (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions);
+                nextSnapshot = (SearchSnapshot)_overlayIndex.OpenSnapshot();
             }
             catch (Exception exception)
             {
@@ -680,7 +678,7 @@ internal sealed class OverlaySnapshot : IOverlaySnapshot
 
     private void RefreshOverlaySnapshot()
     {
-        var next = (SearchSnapshot)_overlayIndex.OpenSnapshot(_searchOptions);
+        var next = (SearchSnapshot)_overlayIndex.OpenSnapshot();
         var previous = _overlaySnapshot;
         InvalidateOverlayHits();
         _overlaySnapshot = next;

@@ -404,3 +404,7 @@ Managed-heap peaks for builds and compactions are sampled by this harness around
 those operations. The core library has no managed-memory profiling option or
 peak-memory statistics; benchmark report `PeakManagedBytes` fields remain harness
 measurements, with the limits of sampling and process-wide heap accounting.
+
+The `unlimited-literal` workload exercises synchronous ordered search with hit,
+matched-document and byte limits lifted. It replaces the obsolete
+`parallel-literal` benchmark name; snapshot factories have no execution options.

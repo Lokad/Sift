@@ -33,7 +33,7 @@ public sealed class BenchmarkSmokeTests
         Assert.True(process.ExitCode is 0 or 1, $"Unexpected benchmark exit code {process.ExitCode}. stderr: {standardError}");
         Assert.Contains("literal-indexed:", standardOutput);
         Assert.Contains("ascii-insensitive-literal:", standardOutput);
-        Assert.Contains("parallel-literal:", standardOutput);
+        Assert.Contains("unlimited-literal:", standardOutput);
         Assert.Contains("regex:", standardOutput);
         Assert.Contains("mandatory-fragment-precheck:", standardOutput);
         Assert.Contains("regex-verifier-path:", standardOutput);

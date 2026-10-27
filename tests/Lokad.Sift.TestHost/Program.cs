@@ -11,16 +11,6 @@ if (args.Length == 3 && args[0] == "lifetime-checks")
     return await LifetimeChecks.Run(args[1], args[2]);
 }
 
-if (args.Length == 1 && args[0] == "parallel-queue-deadline")
-{
-    return await ParallelQueueDeadlineChecks.Run();
-}
-
-if (args.Length == 1 && args[0] == "parallel-progress")
-{
-    return await ParallelProgressChecks.Run();
-}
-
 if (args.Length == 1 && args[0] == "deadline-probes")
 {
     return await SearchDeadlineChecks.Run();
